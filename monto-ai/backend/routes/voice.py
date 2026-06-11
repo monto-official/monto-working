@@ -48,7 +48,7 @@ async def voice_query(
     if not audio_bytes or len(audio_bytes) < 100:
         raise HTTPException(status_code=400, detail="Audio file too small")
 
-    logger.info(f"[{session_id}] Audio: {len(audio_bytes)} bytes")
+    logger.info(f"[{session_id}] Audio: {len(audio_bytes):,} bytes | type: {audio.content_type} | file: {audio.filename}")
 
     try:
         transcript = await stt.transcribe(audio_bytes, audio.filename or "audio.webm")
@@ -57,7 +57,16 @@ async def voice_query(
         raise HTTPException(status_code=502, detail=f"Speech recognition failed: {str(e)}")
 
     if not transcript.strip():
-        raise HTTPException(status_code=422, detail="Could not understand the audio.")
+        # Return a friendly response instead of an error — better UX for children
+        from models.schemas import LLMResponse
+        return VoiceQueryResponse(
+            transcript="",
+            intent="UNKNOWN",
+            emotion="neutral",
+            animation="blink",
+            response="Hmm, I didn't quite catch that! Could you say it again a little louder? 😊",
+            confidence=0.0,
+        )
 
     history      = memory.get_history(session_id)
     facts_prompt = memory.get_facts_prompt(session_id)
@@ -97,7 +106,7 @@ async def voice_process(
     if not audio_bytes or len(audio_bytes) < 100:
         raise HTTPException(status_code=400, detail="Audio too short or empty")
 
-    logger.info(f"[Pi/{session_id}] Audio: {len(audio_bytes)} bytes")
+    logger.info(f"[Pi/{session_id}] Audio: {len(audio_bytes):,} bytes | type: {audio.content_type}")
 
     try:
         transcript = await stt.transcribe(audio_bytes, audio.filename or "audio.wav")
@@ -111,8 +120,8 @@ async def voice_process(
             "intent":     "UNKNOWN",
             "emotion":    "neutral",
             "animation":  "blink",
-            "response":   "I didn't catch that! Could you say it again? 😊",
-            "confidence": 0.1,
+            "response":   "Hmm, I didn't catch that! Could you say it again? 😊",
+            "confidence": 0.0,
         }
 
     history      = memory.get_history(session_id)

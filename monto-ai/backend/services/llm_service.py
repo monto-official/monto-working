@@ -142,9 +142,7 @@ class LLMService:
                 resp.raise_for_status()
 
             raw  = resp.json()["message"]["content"]
-            data = json.loads(raw)
-            logger.info(f"Ollama [{data.get('emotion')}]: '{data.get('response','')[:80]}'")
-            return LLMResponse(**data)
+            return self._parse_llm_output(raw)
 
         except httpx.ConnectError:
             raise RuntimeError(
@@ -163,48 +161,86 @@ class LLMService:
     async def _call_groq(self, messages: list):
         from models.schemas import LLMResponse
 
-        # Append a strong reminder as the last user turn to force JSON output
-        enforced = messages + [{
-            "role": "user",
-            "content": (
-                "IMPORTANT: You MUST reply with ONLY a valid JSON object. "
-                "No explanation, no markdown, no text before or after. "
-                "Start your reply with { and end with }."
-            )
-        }] if messages[-1]["role"] != "user" else messages
-
         try:
             completion = await self._groq.chat.completions.create(
                 model=self._model,
                 messages=messages,
                 temperature=0.4,
                 max_tokens=512,
-                # Note: response_format omitted — not all Groq models support it
             )
             raw = completion.choices[0].message.content.strip()
-            logger.debug(f"Groq raw: {raw[:200]}")
+            logger.debug(f"Groq raw: {raw[:300]}")
 
-            # Try to parse as JSON directly
-            try:
-                # Strip markdown code fences if present
-                if raw.startswith("```"):
-                    raw = raw.split("```")[1]
-                    if raw.startswith("json"):
-                        raw = raw[4:]
-                    raw = raw.strip()
-
-                data = json.loads(raw)
-                logger.info(f"Groq [{data.get('emotion')}]: '{data.get('response','')[:80]}'")
-                return LLMResponse(**data)
-
-            except (json.JSONDecodeError, KeyError):
-                # Model returned plain text — wrap it into a valid response
-                logger.warning(f"Groq returned non-JSON, wrapping: '{raw[:80]}'")
-                return self._wrap_plain_text(raw)
+            return self._parse_llm_output(raw)
 
         except Exception as e:
             logger.error(f"Groq error: {e}")
             raise
+
+    # ── SHARED PARSER ─────────────────────────────────────────────────────────
+
+    def _parse_llm_output(self, raw: str):
+        """
+        Robustly parse LLM output into LLMResponse.
+        Handles:
+          - Clean JSON
+          - Markdown fenced JSON (```json ... ```)
+          - JSON embedded inside a larger text
+          - Plain text (fallback)
+          - JSON where 'response' field itself contains JSON (recursive contamination)
+        """
+        from models.schemas import LLMResponse
+
+        # 1. Strip markdown fences
+        text = raw.strip()
+        if text.startswith("```"):
+            parts = text.split("```")
+            # parts[1] is the content between first pair of ```
+            inner = parts[1].strip()
+            if inner.lower().startswith("json"):
+                inner = inner[4:].strip()
+            text = inner
+
+        # 2. Extract first JSON object if there's surrounding text
+        start = text.find("{")
+        end   = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            text = text[start:end + 1]
+
+        # 3. Parse JSON
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            logger.warning(f"LLM returned non-JSON, wrapping as plain text: '{raw[:80]}'")
+            return self._wrap_plain_text(raw)
+
+        # 4. Validate required fields exist
+        response_text = data.get("response", "")
+
+        # 5. Check if 'response' field itself contains JSON (recursive contamination)
+        #    This happens when history stores raw JSON instead of plain text
+        if response_text and response_text.strip().startswith("{"):
+            try:
+                inner = json.loads(response_text)
+                # If it parses as JSON, extract the nested response text
+                if isinstance(inner, dict) and "response" in inner:
+                    logger.warning("response field contained nested JSON — extracting text")
+                    data["response"]   = inner.get("response", response_text)
+                    data["emotion"]    = data.get("emotion")    or inner.get("emotion",    "neutral")
+                    data["animation"]  = data.get("animation")  or inner.get("animation",  "talking")
+                    data["intent"]     = data.get("intent")     or inner.get("intent",     "UNKNOWN")
+                    data["confidence"] = data.get("confidence") or inner.get("confidence", 0.5)
+            except json.JSONDecodeError:
+                pass  # response just happened to start with { — keep as-is
+
+        # 6. Build LLMResponse with defaults for any missing fields
+        try:
+            result = LLMResponse(**data)
+            logger.info(f"LLM [{result.emotion.value}]: '{result.response[:80]}'")
+            return result
+        except Exception as e:
+            logger.warning(f"LLMResponse validation failed ({e}), using fallback")
+            return self._wrap_plain_text(data.get("response", raw))
 
     def _wrap_plain_text(self, text: str):
         """When model returns plain text instead of JSON, wrap it gracefully."""

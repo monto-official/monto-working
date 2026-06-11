@@ -84,9 +84,10 @@ export default function Home() {
     // If currently recording, stop and process
     if (recorder.recordingState === "recording") {
       const blob = await recorder.stopRecording();
-      if (!blob) {
-        setApiError("No audio captured. Please try again.");
+      if (!blob || blob.size < 1000) {
+        setApiError("Recording too short — please hold the button and speak.");
         setRecordingState("error");
+        setTimeout(() => setRecordingState("idle"), 3000);
         return;
       }
 
@@ -106,11 +107,18 @@ export default function Home() {
 
         if (settings.autoSpeak && result.response) {
           setRecordingState("speaking");
-          setEmotion("talking");
           setIsSpeaking(true);
-          speak(result.response, settings,
-            () => { setIsSpeaking(true); setEmotion("talking"); },
-            () => { setIsSpeaking(false); setEmotion(result.emotion as Emotion); setRecordingState("idle"); }
+          // Keep the LLM emotion on face during speaking — don't override with "talking"
+          speak(
+            result.response,
+            result.emotion,   // ← pass emotion so voice tone matches
+            settings,
+            () => { setIsSpeaking(true); },
+            () => {
+              setIsSpeaking(false);
+              setEmotion(result.emotion as Emotion);
+              setRecordingState("idle");
+            }
           );
         } else {
           setRecordingState("idle");

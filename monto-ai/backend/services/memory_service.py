@@ -87,15 +87,20 @@ class PersistentMemory:
         return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
 
     def add_turn(self, session_id: str, user_text: str, assistant_text: str):
-        """Save one user + assistant exchange to the database."""
+        """Save one user + assistant exchange to the database.
+        assistant_text must be plain readable text — never raw JSON.
+        """
+        # Guard: if assistant_text is JSON, extract the response field
+        clean_text = self._ensure_plain_text(assistant_text)
+
         now = time.time()
         with self._lock:
             with self._get_conn() as conn:
                 conn.executemany(
                     "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?,?,?,?)",
                     [
-                        (session_id, "user",      user_text,      now),
-                        (session_id, "assistant",  assistant_text, now + 0.001),
+                        (session_id, "user",      user_text,   now),
+                        (session_id, "assistant",  clean_text,  now + 0.001),
                     ]
                 )
                 # Prune oldest messages if session is too long
@@ -198,6 +203,22 @@ class PersistentMemory:
         }
 
     # ── FACT EXTRACTION ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _ensure_plain_text(text: str) -> str:
+        """
+        If text is JSON (old bug where raw JSON was stored), extract response field.
+        Otherwise return as-is.
+        """
+        stripped = text.strip() if text else ""
+        if stripped.startswith("{"):
+            try:
+                data = json.loads(stripped)
+                if isinstance(data, dict) and "response" in data:
+                    return data["response"]
+            except (json.JSONDecodeError, ValueError):
+                pass
+        return text
 
     def _extract_facts(self, session_id: str, user_text: str, assistant_text: str):
         """
