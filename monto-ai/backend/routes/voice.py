@@ -1,16 +1,22 @@
 """
 Voice Routes
-POST /voice/query — receives audio, returns AI structured response
+POST /voice/query   — receives audio, returns AI structured response (JSON)
+POST /voice/process — used by Raspberry Pi: returns JSON + triggers TTS internally
 """
 import logging
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Header
+from fastapi.responses import Response
 from models.schemas import VoiceQueryResponse
 from services.stt_service import STTService
-from services.groq_service import GroqService
+from services.llm_service import LLMService
+from services.tts_service import TTSService
 from services.emotion_service import resolve_animation
+from services.memory_service import memory
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/voice", tags=["voice"])
+
+DEFAULT_SESSION = "pi-default"
 
 
 def get_stt_service() -> STTService:
@@ -18,34 +24,32 @@ def get_stt_service() -> STTService:
     return stt_service
 
 
-def get_groq_service() -> GroqService:
-    from main import groq_service
-    return groq_service
+def get_llm_service() -> LLMService:
+    from main import llm_service
+    return llm_service
+
+
+def get_tts_service() -> TTSService:
+    from main import tts_service
+    return tts_service
 
 
 @router.post("/query", response_model=VoiceQueryResponse)
 async def voice_query(
-    audio: UploadFile = File(...),
-    stt: STTService = Depends(get_stt_service),
-    groq: GroqService = Depends(get_groq_service),
+    audio:      UploadFile = File(...),
+    session_id: str        = Header(default="web-default", alias="X-Session-Id"),
+    stt:        STTService  = Depends(get_stt_service),
+    llm:        LLMService  = Depends(get_llm_service),
 ):
-    """
-    Accepts an audio file, transcribes it, sends to LLM, returns structured JSON.
-    """
-    # Validate file
     if not audio.filename:
         raise HTTPException(status_code=400, detail="No audio file provided")
 
     audio_bytes = await audio.read()
-    if not audio_bytes:
-        raise HTTPException(status_code=400, detail="Empty audio file")
+    if not audio_bytes or len(audio_bytes) < 100:
+        raise HTTPException(status_code=400, detail="Audio file too small")
 
-    if len(audio_bytes) < 100:
-        raise HTTPException(status_code=400, detail="Audio file too small — please speak longer")
+    logger.info(f"[{session_id}] Audio: {len(audio_bytes)} bytes")
 
-    logger.info(f"Received audio: {audio.filename}, size: {len(audio_bytes)} bytes")
-
-    # Step 1: Speech to Text
     try:
         transcript = await stt.transcribe(audio_bytes, audio.filename or "audio.webm")
     except Exception as e:
@@ -53,16 +57,18 @@ async def voice_query(
         raise HTTPException(status_code=502, detail=f"Speech recognition failed: {str(e)}")
 
     if not transcript.strip():
-        raise HTTPException(status_code=422, detail="Could not understand the audio. Please speak clearly.")
+        raise HTTPException(status_code=422, detail="Could not understand the audio.")
 
-    # Step 2: LLM Response
+    history      = memory.get_history(session_id)
+    facts_prompt = memory.get_facts_prompt(session_id)
+
     try:
-        llm_result = await groq.get_response(transcript)
+        llm_result = await llm.get_response(transcript, history, facts_prompt)
     except Exception as e:
         logger.error(f"LLM failed: {e}")
         raise HTTPException(status_code=502, detail=f"AI response failed: {str(e)}")
 
-    # Step 3: Resolve animation
+    memory.add_turn(session_id, transcript, llm_result.response)
     animation = resolve_animation(llm_result.emotion.value, llm_result.animation.value)
 
     return VoiceQueryResponse(
@@ -73,3 +79,84 @@ async def voice_query(
         response=llm_result.response,
         confidence=llm_result.confidence,
     )
+
+
+@router.post("/process")
+async def voice_process(
+    audio:      UploadFile = File(...),
+    session_id: str        = Header(default=DEFAULT_SESSION, alias="X-Session-Id"),
+    stt:        STTService  = Depends(get_stt_service),
+    llm:        LLMService  = Depends(get_llm_service),
+    tts:        TTSService  = Depends(get_tts_service),
+):
+    """Used by Raspberry Pi — STT + LLM + memory, returns JSON for face + TTS."""
+    if not audio.filename:
+        raise HTTPException(status_code=400, detail="No audio file provided")
+
+    audio_bytes = await audio.read()
+    if not audio_bytes or len(audio_bytes) < 100:
+        raise HTTPException(status_code=400, detail="Audio too short or empty")
+
+    logger.info(f"[Pi/{session_id}] Audio: {len(audio_bytes)} bytes")
+
+    try:
+        transcript = await stt.transcribe(audio_bytes, audio.filename or "audio.wav")
+    except Exception as e:
+        logger.error(f"[Pi] STT failed: {e}")
+        raise HTTPException(status_code=502, detail=f"STT failed: {str(e)}")
+
+    if not transcript.strip():
+        return {
+            "transcript": "",
+            "intent":     "UNKNOWN",
+            "emotion":    "neutral",
+            "animation":  "blink",
+            "response":   "I didn't catch that! Could you say it again? 😊",
+            "confidence": 0.1,
+        }
+
+    history      = memory.get_history(session_id)
+    facts_prompt = memory.get_facts_prompt(session_id)
+
+    try:
+        llm_result = await llm.get_response(transcript, history, facts_prompt)
+    except Exception as e:
+        logger.error(f"[Pi] LLM failed: {e}")
+        raise HTTPException(status_code=502, detail=f"LLM failed: {str(e)}")
+
+    memory.add_turn(session_id, transcript, llm_result.response)
+    animation = resolve_animation(llm_result.emotion.value, llm_result.animation.value)
+
+    logger.info(f"[Pi/{session_id}] [{llm_result.emotion.value}] {llm_result.response[:80]}")
+
+    return {
+        "transcript": transcript,
+        "intent":     llm_result.intent.value,
+        "emotion":    llm_result.emotion.value,
+        "animation":  animation,
+        "response":   llm_result.response,
+        "confidence": llm_result.confidence,
+    }
+
+
+@router.delete("/memory/{session_id}")
+async def clear_memory(session_id: str):
+    """Clear conversation memory for a session (fresh start)."""
+    memory.clear(session_id)
+    return {"status": "cleared", "session_id": session_id}
+
+
+@router.get("/memory/{session_id}")
+async def get_memory_summary(session_id: str):
+    """Get memory stats and known facts for a session."""
+    return memory.get_session_summary(session_id)
+
+
+@router.get("/memory")
+async def list_sessions():
+    """List all sessions that have stored memory."""
+    sessions = memory.get_all_sessions()
+    return {
+        "sessions": sessions,
+        "total": len(sessions),
+    }

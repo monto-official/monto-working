@@ -5,11 +5,13 @@ from enum import Enum
 
 class Intent(str, Enum):
     GENERAL_QUESTION = "GENERAL_QUESTION"
-    HOMEWORK = "HOMEWORK"
-    STORY = "STORY"
-    JOKE = "JOKE"
-    GREETING = "GREETING"
-    UNKNOWN = "UNKNOWN"
+    HOMEWORK         = "HOMEWORK"
+    STORY            = "STORY"
+    JOKE             = "JOKE"
+    GREETING         = "GREETING"
+    COMFORT          = "COMFORT"
+    PRAISE           = "PRAISE"
+    UNKNOWN          = "UNKNOWN"
 
 
 class Emotion(str, Enum):

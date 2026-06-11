@@ -1,0 +1,20 @@
+[Unit]
+Description=Monto AI Wake Word Listener
+After=network.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/monto-ai/raspberry_pi
+EnvironmentFile=/home/pi/monto-ai/raspberry_pi/.env
+ExecStart=/home/pi/monto-ai/raspberry_pi/venv/bin/python monto_listener.py
+Restart=always
+RestartSec=5
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

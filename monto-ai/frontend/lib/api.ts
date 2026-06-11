@@ -12,11 +12,33 @@ export class APIError extends Error {
   }
 }
 
+// ── SESSION ID ────────────────────────────────────────────────────────────────
+// Each browser gets a unique persistent session ID stored in localStorage.
+// This ties web conversations to the same memory as the Pi (if SESSION_ID matches).
+const SESSION_ID_KEY = "monto_session_id";
+
+export function getSessionId(): string {
+  if (typeof window === "undefined") return "web-ssr";
+  let id = localStorage.getItem(SESSION_ID_KEY);
+  if (!id) {
+    // Generate a stable ID for this browser — includes timestamp so it's unique
+    id = `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    localStorage.setItem(SESSION_ID_KEY, id);
+  }
+  return id;
+}
+
+export function resetSessionId(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(SESSION_ID_KEY);
+}
+
+// ── API CALLS ─────────────────────────────────────────────────────────────────
+
 export async function sendVoiceQuery(
   audioBlob: Blob
 ): Promise<VoiceQueryResponse> {
   const formData = new FormData();
-  // Determine extension based on MIME type
   const ext = audioBlob.type.includes("ogg")
     ? "ogg"
     : audioBlob.type.includes("mp4")
@@ -26,6 +48,10 @@ export async function sendVoiceQuery(
 
   const res = await fetch(`${API_URL}/voice/query`, {
     method: "POST",
+    headers: {
+      // Send session ID so backend memory is tied to this browser session
+      "X-Session-Id": getSessionId(),
+    },
     body: formData,
   });
 
@@ -49,5 +75,14 @@ export async function checkHealth(): Promise<boolean> {
     return res.ok;
   } catch {
     return false;
+  }
+}
+
+export async function clearMemory(): Promise<void> {
+  const sessionId = getSessionId();
+  try {
+    await fetch(`${API_URL}/voice/memory/${sessionId}`, { method: "DELETE" });
+  } catch {
+    // ignore
   }
 }

@@ -1,6 +1,10 @@
 """
-MONTO AI — FastAPI Backend
-Child-safe voice AI companion backend service.
+Monto AI — FastAPI Backend
+Child-safe voice AI companion.
+
+Modes (set in .env):
+  USE_LOCAL_GPU=false  → uses Groq (STT+LLM) + ElevenLabs (TTS)  ← testing
+  USE_LOCAL_GPU=true   → uses GPU server: Whisper + Ollama + Piper ← production
 """
 import logging
 import os
@@ -9,65 +13,66 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-from models.schemas import HealthResponse
-from routes.voice import router as voice_router
-from routes.tts import router as tts_router
-from services.stt_service import STTService
-from services.groq_service import GroqService
-from services.tts_service import TTSService
-
-# Load environment variables
 load_dotenv()
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# Global service instances
-stt_service: STTService = None
-groq_service: GroqService = None
-tts_service: TTSService = None
+from models.schemas import HealthResponse
+from routes.voice  import router as voice_router
+from routes.tts    import router as tts_router
+from services.stt_service import STTService
+from services.llm_service import LLMService
+from services.tts_service import TTSService
+
+# Global service singletons — accessed by route handlers
+stt_service:  STTService  = None
+llm_service:  LLMService  = None
+tts_service:  TTSService  = None
+
+USE_LOCAL = os.getenv("USE_LOCAL_GPU", "false").lower() == "true"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize services on startup."""
-    global stt_service, groq_service, tts_service
+    global stt_service, llm_service, tts_service
 
-    stt_key = os.getenv("GROQ_API_KEY")
-    llm_key = os.getenv("GROQ_API_KEY_LLM") or stt_key
-    elevenlabs_key = os.getenv("ELEVENLABS_API_KEY")
+    groq_key       = os.getenv("GROQ_API_KEY", "")
+    elevenlabs_key = os.getenv("ELEVENLABS_API_KEY", "")
 
-    if not stt_key or stt_key == "your_groq_api_key_here":
-        logger.error("❌ GROQ_API_KEY is not set! Add it to .env")
-        raise RuntimeError("GROQ_API_KEY is required.")
+    mode = "LOCAL GPU" if USE_LOCAL else "GROQ cloud (testing)"
+    logger.info(f"🚀 Starting Monto AI backend — mode: {mode}")
 
-    stt_service = STTService(api_key=stt_key)
-    groq_service = GroqService(api_key=llm_key)
+    # Validate keys for cloud mode
+    if not USE_LOCAL:
+        if not groq_key or groq_key == "your_groq_api_key_here":
+            raise RuntimeError(
+                "GROQ_API_KEY is required when USE_LOCAL_GPU=false. "
+                "Set it in backend/.env or switch to USE_LOCAL_GPU=true"
+            )
 
-    if elevenlabs_key and elevenlabs_key != "your_elevenlabs_api_key_here":
-        tts_service = TTSService(api_key=elevenlabs_key)
-        logger.info("✅ TTS Service (ElevenLabs) ready")
-    else:
-        logger.warning("⚠️  ELEVENLABS_API_KEY not set — TTS will fall back to browser")
+    # Initialise services
+    stt_service = STTService(api_key=groq_key)
+    llm_service = LLMService(api_key=groq_key)
+    tts_service = TTSService(api_key=elevenlabs_key)
 
-    logger.info("✅ MONTO AI Backend started successfully")
-    logger.info("✅ STT Service (Whisper Large V3) ready")
-    logger.info("✅ LLM Service (Qwen3-32B) ready")
+    logger.info(f"✅ STT  : {'GPU Whisper' if USE_LOCAL else 'Groq Whisper'}")
+    logger.info(f"✅ LLM  : {'GPU Ollama qwen3:8b' if USE_LOCAL else 'Groq qwen3-32b'}")
+    logger.info(f"✅ TTS  : {'GPU Piper' if USE_LOCAL else 'ElevenLabs' if tts_service.enabled else 'disabled'}")
+    logger.info("✅ Monto AI backend ready")
 
     yield
 
-    logger.info("🛑 MONTO AI Backend shutting down")
+    logger.info("🛑 Monto AI backend shutting down")
 
 
-# Create FastAPI app
 app = FastAPI(
-    title="MONTO AI API",
-    description="Child-safe voice AI companion backend",
-    version="1.0.0",
+    title="Monto AI API",
+    description="Child-safe voice AI companion",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -81,17 +86,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register routes
 app.include_router(voice_router)
 app.include_router(tts_router)
 
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
-    tts_status = "elevenlabs" if tts_service and tts_service.enabled else "browser"
-    return HealthResponse(status="ok", version="1.0.0")
+    return HealthResponse(status="ok", version="2.0.0")
 
 
 @app.get("/")
 async def root():
-    return {"message": "MONTO AI Backend is running 🤖", "docs": "/docs"}
+    mode = "local GPU" if USE_LOCAL else "Groq cloud"
+    return {
+        "message": "Monto AI Backend is running 🤖",
+        "mode":    mode,
+        "docs":    "/docs",
+    }

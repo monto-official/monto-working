@@ -1,6 +1,6 @@
 """
 TTS Route
-POST /tts/speak — receives text + voice settings, returns MP3 audio
+POST /tts/speak — text + emotion → audio bytes (WAV in local mode, MP3 in cloud)
 """
 import logging
 from fastapi import APIRouter, HTTPException, Depends
@@ -13,8 +13,9 @@ router = APIRouter(prefix="/tts", tags=["tts"])
 
 
 class TTSRequest(BaseModel):
-    text: str
-    voice: str = "female"   # "male" | "female"
+    text:     str
+    voice:    str = "monto"    # monto | male | female | piper-voice-name
+    emotion:  str = "neutral"  # drives voice expressiveness / speed
     language: str = "english"
 
 
@@ -29,8 +30,8 @@ async def speak(
     tts: TTSService = Depends(get_tts_service),
 ):
     """
-    Convert text to speech using ElevenLabs.
-    Returns raw MP3 audio with Content-Type: audio/mpeg.
+    Convert text → audio.
+    Returns WAV (local Piper) or MP3 (ElevenLabs cloud) depending on mode.
     """
     if not req.text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty")
@@ -39,19 +40,25 @@ async def speak(
         raise HTTPException(status_code=400, detail="Text too long (max 1000 chars)")
 
     if not tts or not tts.enabled:
-        raise HTTPException(status_code=503, detail="TTS service unavailable")
+        raise HTTPException(status_code=503, detail="TTS service not available")
 
     try:
         audio_bytes = await tts.synthesize(
             text=req.text,
             voice=req.voice,
+            emotion=req.emotion,
             language=req.language,
         )
+
+        # Return correct MIME type based on which backend is active
+        mime = getattr(tts, "audio_format", "audio/mpeg")
+        ext  = "wav" if mime == "audio/wav" else "mp3"
+
         return Response(
             content=audio_bytes,
-            media_type="audio/mpeg",
+            media_type=mime,
             headers={
-                "Content-Disposition": "inline; filename=monto_speech.mp3",
+                "Content-Disposition": f"inline; filename=monto_speech.{ext}",
                 "Cache-Control": "no-cache",
             },
         )

@@ -2,6 +2,7 @@
 import { useState, useCallback } from "react";
 import { ChatMessage, VoiceQueryResponse } from "@/types";
 import { generateId } from "@/lib/utils";
+import { clearMemory } from "@/lib/api";
 
 const STORAGE_KEY = "monto_chat_history";
 
@@ -69,6 +70,8 @@ export function useConversation() {
     if (typeof window !== "undefined") {
       localStorage.removeItem(STORAGE_KEY);
     }
+    // Also clear backend persistent memory for this session
+    clearMemory().catch(() => {});
   }, []);
 
   return { messages, addUserMessage, addAssistantMessage, clearHistory };
