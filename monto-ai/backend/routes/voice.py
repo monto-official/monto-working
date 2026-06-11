@@ -12,6 +12,7 @@ from services.llm_service import LLMService
 from services.tts_service import TTSService
 from services.emotion_service import resolve_animation
 from services.memory_service import memory
+from services.content_filter import check_content, sanitize_response
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/voice", tags=["voice"])
@@ -68,6 +69,20 @@ async def voice_query(
             confidence=0.0,
         )
 
+    # Layer 1: Filter child's input before sending to LLM
+    filter_result = check_content(transcript)
+    if not filter_result.is_safe:
+        logger.info(f"[{session_id}] Content blocked [{filter_result.category}]")
+        memory.add_turn(session_id, transcript, filter_result.redirect_response)
+        return VoiceQueryResponse(
+            transcript=transcript,
+            intent="UNKNOWN",
+            emotion=filter_result.emotion,
+            animation=resolve_animation(filter_result.emotion, filter_result.animation),
+            response=filter_result.redirect_response,
+            confidence=1.0,
+        )
+
     history      = memory.get_history(session_id)
     facts_prompt = memory.get_facts_prompt(session_id)
 
@@ -77,6 +92,8 @@ async def voice_query(
         logger.error(f"LLM failed: {e}")
         raise HTTPException(status_code=502, detail=f"AI response failed: {str(e)}")
 
+    # Layer 2: Filter LLM output too
+    llm_result.response = sanitize_response(llm_result.response)
     memory.add_turn(session_id, transcript, llm_result.response)
     animation = resolve_animation(llm_result.emotion.value, llm_result.animation.value)
 
@@ -124,6 +141,20 @@ async def voice_process(
             "confidence": 0.0,
         }
 
+    # Layer 1: Filter child's input
+    filter_result = check_content(transcript)
+    if not filter_result.is_safe:
+        logger.info(f"[Pi/{session_id}] Content blocked [{filter_result.category}]")
+        memory.add_turn(session_id, transcript, filter_result.redirect_response)
+        return {
+            "transcript": transcript,
+            "intent":     "UNKNOWN",
+            "emotion":    filter_result.emotion,
+            "animation":  resolve_animation(filter_result.emotion, filter_result.animation),
+            "response":   filter_result.redirect_response,
+            "confidence": 1.0,
+        }
+
     history      = memory.get_history(session_id)
     facts_prompt = memory.get_facts_prompt(session_id)
 
@@ -133,6 +164,8 @@ async def voice_process(
         logger.error(f"[Pi] LLM failed: {e}")
         raise HTTPException(status_code=502, detail=f"LLM failed: {str(e)}")
 
+    # Layer 2: Filter LLM output
+    llm_result.response = sanitize_response(llm_result.response)
     memory.add_turn(session_id, transcript, llm_result.response)
     animation = resolve_animation(llm_result.emotion.value, llm_result.animation.value)
 
