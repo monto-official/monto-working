@@ -1,10 +1,9 @@
 """
 Monto AI — Raspberry Pi Listener
-Listens for "Hey Monto" wake word, records audio,
-sends to backend, plays TTS response, and shows face animations.
+Wake word: "Hey Monto" using OpenWakeWord (open source, no API key needed)
+Records audio, sends to backend, plays TTS response, shows face animations.
 
-Requirements:
-    pip install -r requirements.txt
+Requirements: pip install -r requirements.txt
 """
 import os
 import io
@@ -15,10 +14,9 @@ import struct
 import tempfile
 import logging
 import threading
+import numpy as np
 import requests
 import pyaudio
-import pvporcupine
-from playsound import playsound
 from dotenv import dotenv_values
 
 # Load .env
@@ -31,19 +29,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
-BACKEND_URL    = env.get("BACKEND_URL",    "http://192.168.1.101:8000")
-PORCUPINE_KEY  = env.get("PORCUPINE_KEY",  "your_picovoice_access_key")
+BACKEND_URL    = env.get("BACKEND_URL",    "http://100.122.50.13:8000")
 RECORD_SECONDS = int(env.get("RECORD_SECONDS", "5"))
-FULLSCREEN     = env.get("FULLSCREEN", "false").lower() == "true"
-# Unique ID for this Pi device — keeps memory separate per device
+FULLSCREEN     = env.get("FULLSCREEN", "true").lower() == "true"
 SESSION_ID     = env.get("SESSION_ID", "pi-device-1")
+WAKE_THRESHOLD = float(env.get("WAKE_THRESHOLD", "0.5"))  # sensitivity 0-1
 SAMPLE_RATE    = 16000
 CHANNELS       = 1
+CHUNK          = 1280   # OpenWakeWord needs 80ms chunks at 16kHz
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def record_audio(pa: pyaudio.PyAudio, duration: int) -> bytes:
-    """Record from mic for `duration` seconds, return WAV bytes."""
+    """Record from mic for duration seconds, return WAV bytes."""
     logger.info(f"Recording for {duration}s...")
     stream = pa.open(
         format=pyaudio.paInt16,
@@ -54,8 +52,7 @@ def record_audio(pa: pyaudio.PyAudio, duration: int) -> bytes:
     )
     frames = []
     for _ in range(int(SAMPLE_RATE / 1024 * duration)):
-        data = stream.read(1024, exception_on_overflow=False)
-        frames.append(data)
+        frames.append(stream.read(1024, exception_on_overflow=False))
     stream.stop_stream()
     stream.close()
 
@@ -69,8 +66,7 @@ def record_audio(pa: pyaudio.PyAudio, duration: int) -> bytes:
 
 
 def wait_for_backend(max_tries: int = 20, delay: int = 3):
-    """Wait until the backend is reachable — useful on boot when backend starts slowly."""
-    import time
+    """Wait until the backend is reachable."""
     for attempt in range(1, max_tries + 1):
         try:
             r = requests.get(f"{BACKEND_URL}/health", timeout=3)
@@ -91,18 +87,21 @@ def send_to_backend(audio_bytes: bytes) -> dict:
         response = requests.post(
             f"{BACKEND_URL}/voice/process",
             files={"audio": ("audio.wav", audio_bytes, "audio/wav")},
-            headers={"X-Session-Id": SESSION_ID},   # ← sends session so backend remembers
+            headers={"X-Session-Id": SESSION_ID},
             timeout=30,
         )
         response.raise_for_status()
         return response.json()
+    except requests.exceptions.ConnectionError:
+        logger.error(f"Cannot connect to backend at {BACKEND_URL}")
+        return None
     except Exception as e:
         logger.error(f"Backend error: {e}")
         return None
 
 
 def play_tts(text: str, emotion: str = "neutral", face=None):
-    """Request TTS audio from backend and play it. Shows talking animation."""
+    """Request TTS audio from backend and play it."""
     try:
         response = requests.post(
             f"{BACKEND_URL}/tts/speak",
@@ -114,14 +113,17 @@ def play_tts(text: str, emotion: str = "neutral", face=None):
         content_type = response.headers.get("Content-Type", "audio/mpeg")
         suffix = ".wav" if "wav" in content_type else ".mp3"
 
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-            tmp.write(response.content)
-            tmp_path = tmp.name
-
+        fd, tmp_path = tempfile.mkstemp(suffix=suffix)
         try:
+            os.write(fd, response.content)
+            os.close(fd)
             if face:
                 face.set_talking(True)
-            playsound(tmp_path)
+            # Use aplay for WAV, mpg123 for MP3
+            if suffix == ".wav":
+                os.system(f"aplay -q {tmp_path}")
+            else:
+                os.system(f"mpg123 -q {tmp_path}")
         finally:
             if face:
                 face.set_talking(False)
@@ -139,40 +141,71 @@ def play_tts(text: str, emotion: str = "neutral", face=None):
 
 
 def listener_thread(face):
-    """Runs wake word detection + backend calls in a background thread."""
-    logger.info("Initialising Porcupine wake word engine...")
+    """Wake word detection + backend pipeline."""
+
+    # ── Load OpenWakeWord ─────────────────────────────────────────────────────
     try:
-        porcupine = pvporcupine.create(
-            access_key=PORCUPINE_KEY,
-            keywords=["hey google"],         # ← swap with custom "hey monto" .ppn file
-            # keyword_paths=["hey_monto_raspberry-pi.ppn"],
-            sensitivities=[0.7],
-        )
-    except Exception as e:
-        logger.error(f"Porcupine init failed: {e}")
-        logger.error("Get your free key at https://picovoice.ai/")
+        from openwakeword.model import Model
+    except ImportError:
+        logger.error("openwakeword not installed. Run: pip install openwakeword")
         face.stop()
         return
 
-    pa = pyaudio.PyAudio()
+    try:
+        # Use built-in "hey_jarvis" model as base — we rename the trigger
+        # For custom "hey monto" — download from:
+        # https://github.com/dscripka/openWakeWord/blob/main/docs/custom_models.md
+        # Then set: oww_model = Model(wakeword_models=["hey_monto.tflite"])
+
+        wake_model_path = env.get("WAKE_MODEL_PATH", "")
+        if wake_model_path and os.path.exists(wake_model_path):
+            oww_model = Model(wakeword_models=[wake_model_path], inference_framework="tflite")
+            wake_name = os.path.basename(wake_model_path).replace(".tflite", "")
+            logger.info(f"Wake word: custom model → {wake_model_path}")
+        else:
+            # Built-in pre-trained models available without any recording:
+            # "alexa", "hey_jarvis", "hey_mycroft", "timer", "weather"
+            wake_word  = env.get("WAKE_WORD", "alexa")
+            oww_model  = Model(wakeword_models=[wake_word], inference_framework="tflite")
+            wake_name  = wake_word
+            logger.info(f"Wake word: built-in '{wake_word}' — say '{wake_word.replace('_',' ').title()}' to trigger")
+
+    except Exception as e:
+        logger.error(f"OpenWakeWord init failed: {e}")
+        face.stop()
+        return
+
+    pa  = pyaudio.PyAudio()
     mic = pa.open(
-        rate=porcupine.sample_rate,
+        rate=SAMPLE_RATE,
         channels=1,
         format=pyaudio.paInt16,
         input=True,
-        frames_per_buffer=porcupine.frame_length,
+        frames_per_buffer=CHUNK,
     )
 
-    logger.info('Listening for "Hey Monto"...')
+    logger.info(f'Listening for wake word "{wake_name}"...')
     face.set_emotion("idle")
 
     try:
         while face.running:
-            pcm = mic.read(porcupine.frame_length, exception_on_overflow=False)
-            pcm = struct.unpack_from("h" * porcupine.frame_length, pcm)
+            # Read chunk
+            raw = mic.read(CHUNK, exception_on_overflow=False)
+            audio_int16 = np.frombuffer(raw, dtype=np.int16)
 
-            if porcupine.process(pcm) >= 0:
-                logger.info("Wake word detected!")
+            # Run wake word detection
+            prediction = oww_model.predict(audio_int16)
+
+            # Check if any model triggered
+            triggered = False
+            for name, score in prediction.items():
+                if score >= WAKE_THRESHOLD:
+                    logger.info(f"Wake word detected! [{name}] score={score:.2f}")
+                    triggered = True
+                    break
+
+            if triggered:
+                oww_model.reset()  # reset scores
                 face.set_emotion("excited", "")
                 mic.stop_stream()
 
@@ -185,27 +218,23 @@ def listener_thread(face):
                 result = send_to_backend(audio_bytes)
 
                 if result:
-                    emotion   = result.get("emotion", "neutral")
-                    animation = result.get("animation", "talking")
-                    response  = result.get("response", "")
+                    emotion  = result.get("emotion", "neutral")
+                    response = result.get("response", "")
                     logger.info(f"[{emotion}] {response}")
 
-                    # Show face + text
                     face.set_emotion(emotion, response)
 
-                    # Play TTS with matching emotion for voice tone
                     if response:
                         play_tts(response, emotion=emotion, face=face)
 
-                    # Short pause then back to idle
                     time.sleep(1.5)
                 else:
-                    face.set_emotion("sad", "Could not connect...")
+                    face.set_emotion("sad", "Could not connect to server 😢")
                     time.sleep(2)
 
                 face.set_emotion("idle")
                 mic.start_stream()
-                logger.info('Listening for "Hey Monto"...')
+                logger.info(f'Listening for wake word "{wake_name}"...')
 
     except Exception as e:
         logger.error(f"Listener error: {e}")
@@ -213,11 +242,9 @@ def listener_thread(face):
         mic.stop_stream()
         mic.close()
         pa.terminate()
-        porcupine.delete()
 
 
 def main():
-    # Import here so pygame only loads if display is available
     from display.face import MontoFace
 
     logger.info(f"Backend: {BACKEND_URL}")
@@ -225,24 +252,18 @@ def main():
     logger.info(f"Fullscreen: {FULLSCREEN}")
 
     face = MontoFace(fullscreen=FULLSCREEN)
-
-    # Show connecting screen while waiting for backend
     face.set_emotion("thinking", "Connecting to Monto...")
 
-    # Wait for backend in a thread so pygame can render the screen
     def startup():
         if not wait_for_backend():
             face.set_emotion("sad", "Cannot connect to server 😢")
             time.sleep(5)
             face.stop()
             return
-        # Start the main listener
         listener_thread(face)
 
     t = threading.Thread(target=startup, daemon=True)
     t.start()
-
-    # Pygame must run on main thread
     face.run()
 
 
