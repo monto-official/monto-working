@@ -95,7 +95,7 @@ class TTSService:
         except httpx.ConnectError:
             raise RuntimeError(
                 f"Cannot connect to Nepali TTS server at {self.nepali_url}"
-            )─
+            )
 
     async def _synthesize_piper(self, text: str, voice: str, emotion: str) -> bytes:
         # Use voice as Piper voice name if it looks like one, else use default
