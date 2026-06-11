@@ -15,6 +15,7 @@ GPU_SERVER_API_KEY=${GPU_SERVER_API_KEY:-"monto-secret-2024"}
 WHISPER_MODEL=${WHISPER_MODEL:-"large-v3"}
 WHISPER_PORT=${WHISPER_PORT:-5001}
 PIPER_PORT=${PIPER_PORT:-5002}
+NEPALI_TTS_PORT=${NEPALI_TTS_PORT:-5003}
 PIPER_DEFAULT_VOICE=${PIPER_DEFAULT_VOICE:-"en_US-amy-medium"}
 PIPER_VOICES_DIR=${PIPER_VOICES_DIR:-"./voices"}
 LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-"qwen3:8b"}
@@ -25,6 +26,7 @@ echo "================================================="
 echo "  LLM   : Ollama ($LOCAL_LLM_MODEL) on port 11434"
 echo "  STT   : Whisper ($WHISPER_MODEL)  on port $WHISPER_PORT"
 echo "  TTS   : Piper ($PIPER_DEFAULT_VOICE) on port $PIPER_PORT"
+echo "  TTS-NE: gTTS Nepali on port $NEPALI_TTS_PORT"
 echo "================================================="
 
 # ── 1. OLLAMA ─────────────────────────────────────────────────
@@ -81,6 +83,17 @@ python3 piper_server.py &
 PIPER_PID=$!
 sleep 2
 echo "  ✅ Piper ready (pid $PIPER_PID)"
+
+# ── 5. NEPALI TTS SERVER ──────────────────────────────────────
+echo ""
+echo "▶ Starting Nepali TTS server (gTTS) on port $NEPALI_TTS_PORT..."
+pip install gtts -q
+GPU_SERVER_API_KEY="$GPU_SERVER_API_KEY" \
+NEPALI_TTS_PORT="$NEPALI_TTS_PORT" \
+python3 nepali_tts_server.py &
+NEPALI_PID=$!
+sleep 2
+echo "  ✅ Nepali TTS ready (pid $NEPALI_PID)"
 
 echo ""
 echo "================================================="

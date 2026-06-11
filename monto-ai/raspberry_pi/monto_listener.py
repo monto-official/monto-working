@@ -101,8 +101,8 @@ def send_to_backend(audio_bytes: bytes) -> dict:
         return None
 
 
-def play_tts(text: str, emotion: str = "neutral"):
-    """Request TTS audio from backend and play it. Handles WAV (local) or MP3 (cloud)."""
+def play_tts(text: str, emotion: str = "neutral", face=None):
+    """Request TTS audio from backend and play it. Shows talking animation."""
     try:
         response = requests.post(
             f"{BACKEND_URL}/tts/speak",
@@ -111,7 +111,6 @@ def play_tts(text: str, emotion: str = "neutral"):
         )
         response.raise_for_status()
 
-        # Detect format from Content-Type header
         content_type = response.headers.get("Content-Type", "audio/mpeg")
         suffix = ".wav" if "wav" in content_type else ".mp3"
 
@@ -120,8 +119,12 @@ def play_tts(text: str, emotion: str = "neutral"):
             tmp_path = tmp.name
 
         try:
+            if face:
+                face.set_talking(True)
             playsound(tmp_path)
         finally:
+            if face:
+                face.set_talking(False)
             try:
                 os.unlink(tmp_path)
             except OSError:
@@ -192,7 +195,7 @@ def listener_thread(face):
 
                     # Play TTS with matching emotion for voice tone
                     if response:
-                        play_tts(response, emotion=emotion)
+                        play_tts(response, emotion=emotion, face=face)
 
                     # Short pause then back to idle
                     time.sleep(1.5)
@@ -221,7 +224,7 @@ def main():
     logger.info(f"Session: {SESSION_ID}")
     logger.info(f"Fullscreen: {FULLSCREEN}")
 
-    face = MontoFace(width=480, height=480, fullscreen=FULLSCREEN)
+    face = MontoFace(fullscreen=FULLSCREEN)
 
     # Show connecting screen while waiting for backend
     face.set_emotion("thinking", "Connecting to Monto...")

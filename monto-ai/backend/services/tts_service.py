@@ -19,11 +19,12 @@ class TTSService:
         self.enabled   = True
 
         if self.use_local:
-            self.piper_url    = os.getenv("GPU_PIPER_URL",      "http://192.168.1.100:5002")
-            self.api_key      = os.getenv("GPU_SERVER_API_KEY",  "monto-secret-2024")
-            self.default_voice = os.getenv("PIPER_DEFAULT_VOICE", "en_US-amy-medium")
+            self.piper_url     = os.getenv("GPU_PIPER_URL",       "http://192.168.1.100:5002")
+            self.nepali_url    = os.getenv("GPU_NEPALI_TTS_URL",  "http://192.168.1.100:5003")
+            self.api_key       = os.getenv("GPU_SERVER_API_KEY",   "monto-secret-2024")
+            self.default_voice = os.getenv("PIPER_DEFAULT_VOICE",  "en_US-amy-medium")
             self.audio_format  = "audio/wav"
-            logger.info(f"✅ TTS: LOCAL Piper → {self.piper_url}")
+            logger.info(f"✅ TTS: LOCAL Piper (EN) → {self.piper_url} | Nepali (gTTS) → {self.nepali_url}")
         else:
             if not api_key:
                 logger.warning("⚠️  No ElevenLabs key — TTS disabled")
@@ -65,11 +66,36 @@ class TTSService:
             text = f"... {text}"
 
         if self.use_local:
+            # Route Nepali to gTTS server, English to Piper
+            if language == "nepali" or self._detect_nepali(text):
+                return await self._synthesize_nepali(text)
             return await self._synthesize_piper(text, voice, emotion)
         else:
             return await self._synthesize_elevenlabs(text, voice, emotion)
 
     # ── LOCAL GPU (Piper) ─────────────────────────────────────────────────────
+
+    def _detect_nepali(self, text: str) -> bool:
+        """Detect if text contains Devanagari script (Nepali/Hindi)."""
+        return any('\u0900' <= ch <= '\u097F' for ch in text)
+
+    async def _synthesize_nepali(self, text: str) -> bytes:
+        """Send Nepali text to gTTS server, returns MP3 bytes."""
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(
+                    f"{self.nepali_url}/v1/tts/nepali",
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    json={"text": text, "slow": False},
+                )
+                resp.raise_for_status()
+                self.audio_format = "audio/mpeg"   # gTTS returns MP3
+                logger.info(f"Nepali TTS: {len(resp.content)} bytes")
+                return resp.content
+        except httpx.ConnectError:
+            raise RuntimeError(
+                f"Cannot connect to Nepali TTS server at {self.nepali_url}"
+            )─
 
     async def _synthesize_piper(self, text: str, voice: str, emotion: str) -> bytes:
         # Use voice as Piper voice name if it looks like one, else use default
