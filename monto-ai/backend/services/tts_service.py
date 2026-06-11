@@ -24,31 +24,42 @@ class TTSService:
             self.api_key       = os.getenv("GPU_SERVER_API_KEY",   "monto-secret-2024")
             self.default_voice = os.getenv("PIPER_DEFAULT_VOICE",  "en_US-amy-medium")
             self.audio_format  = "audio/wav"
-            logger.info(f"✅ TTS: LOCAL Piper (EN) → {self.piper_url} | Nepali (gTTS) → {self.nepali_url}")
+            # Also init ElevenLabs as fallback if key available
+            if api_key:
+                from elevenlabs.client import AsyncElevenLabs
+                from elevenlabs import VoiceSettings
+                self._init_elevenlabs(api_key)
+                logger.info(f"✅ TTS: GPU Piper + Nepali | ElevenLabs fallback: yes")
+            else:
+                logger.info(f"✅ TTS: GPU Piper + Nepali | ElevenLabs fallback: no")
         else:
             if not api_key:
                 logger.warning("⚠️  No ElevenLabs key — TTS disabled")
                 self.enabled = False
                 return
-            from elevenlabs.client import AsyncElevenLabs
-            from elevenlabs import VoiceSettings
-            self._el          = AsyncElevenLabs(api_key=api_key)
-            self._model_id    = "eleven_turbo_v2_5"
-            self._voice_map   = {
-                "female": os.getenv("TTS_VOICE_FEMALE", "EXAVITQu4vr4xnSDxMaL"),
-                "male":   os.getenv("TTS_VOICE_MALE",   "TxGEqnHWrfWFTfGW9XjX"),
-                "monto":  os.getenv("TTS_VOICE_MONTO",  "EXAVITQu4vr4xnSDxMaL"),
-            }
-            self._emotion_settings = {
-                "happy":     VoiceSettings(stability=0.45, similarity_boost=0.80, style=0.35, use_speaker_boost=True),
-                "excited":   VoiceSettings(stability=0.38, similarity_boost=0.78, style=0.50, use_speaker_boost=True),
-                "sad":       VoiceSettings(stability=0.70, similarity_boost=0.85, style=0.10, use_speaker_boost=True),
-                "thinking":  VoiceSettings(stability=0.60, similarity_boost=0.80, style=0.20, use_speaker_boost=True),
-                "surprised": VoiceSettings(stability=0.35, similarity_boost=0.78, style=0.55, use_speaker_boost=True),
-                "neutral":   VoiceSettings(stability=0.55, similarity_boost=0.80, style=0.20, use_speaker_boost=True),
-            }
+            self._init_elevenlabs(api_key)
             self.audio_format = "audio/mpeg"
-            logger.info("✅ TTS: ElevenLabs cloud (testing mode)")
+            logger.info("✅ TTS: ElevenLabs cloud")
+
+    def _init_elevenlabs(self, api_key: str):
+        from elevenlabs.client import AsyncElevenLabs
+        from elevenlabs import VoiceSettings
+        self._el       = AsyncElevenLabs(api_key=api_key)
+        self._model_id = "eleven_turbo_v2_5"
+        self._voice_map = {
+            "female": os.getenv("TTS_VOICE_FEMALE", "EXAVITQu4vr4xnSDxMaL"),
+            "male":   os.getenv("TTS_VOICE_MALE",   "TxGEqnHWrfWFTfGW9XjX"),
+            "monto":  os.getenv("TTS_VOICE_MONTO",  "EXAVITQu4vr4xnSDxMaL"),
+        }
+        self._emotion_settings = {
+            "happy":     VoiceSettings(stability=0.45, similarity_boost=0.80, style=0.35, use_speaker_boost=True),
+            "excited":   VoiceSettings(stability=0.38, similarity_boost=0.78, style=0.50, use_speaker_boost=True),
+            "sad":       VoiceSettings(stability=0.70, similarity_boost=0.85, style=0.10, use_speaker_boost=True),
+            "thinking":  VoiceSettings(stability=0.60, similarity_boost=0.80, style=0.20, use_speaker_boost=True),
+            "surprised": VoiceSettings(stability=0.35, similarity_boost=0.78, style=0.55, use_speaker_boost=True),
+            "neutral":   VoiceSettings(stability=0.55, similarity_boost=0.80, style=0.20, use_speaker_boost=True),
+        }
+        self._has_elevenlabs = True
 
     async def synthesize(
         self,
@@ -68,8 +79,20 @@ class TTSService:
         if self.use_local:
             # Route Nepali to gTTS server, English to Piper
             if language == "nepali" or self._detect_nepali(text):
-                return await self._synthesize_nepali(text)
-            return await self._synthesize_piper(text, voice, emotion)
+                try:
+                    return await self._synthesize_nepali(text)
+                except Exception as e:
+                    if self.enabled:
+                        logger.warning(f"Nepali TTS failed ({e}) — falling back to ElevenLabs")
+                        return await self._synthesize_elevenlabs(text, voice, emotion)
+                    raise
+            try:
+                return await self._synthesize_piper(text, voice, emotion)
+            except Exception as e:
+                if self.enabled:
+                    logger.warning(f"Piper TTS failed ({e}) — falling back to ElevenLabs")
+                    return await self._synthesize_elevenlabs(text, voice, emotion)
+                raise
         else:
             return await self._synthesize_elevenlabs(text, voice, emotion)
 

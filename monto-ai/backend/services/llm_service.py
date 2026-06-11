@@ -115,21 +115,26 @@ Allowed animations: smile, thinking, talking, excited, sad, blink"""
 
 
 class LLMService:
+class LLMService:
     def __init__(self, api_key: str = ""):
         self.use_local = os.getenv("USE_LOCAL_GPU", "false").lower() == "true"
+
+        # Always init Groq as fallback (used when GPU is offline)
+        groq_key = api_key or os.getenv("GROQ_API_KEY", "")
+        if groq_key:
+            from groq import AsyncGroq
+            self._groq       = AsyncGroq(api_key=groq_key)
+            self._groq_model = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
+            self._has_groq   = True
+        else:
+            self._has_groq   = False
 
         if self.use_local:
             self.ollama_url = os.getenv("GPU_OLLAMA_URL",  "http://192.168.1.100:11434")
             self.model      = os.getenv("LOCAL_LLM_MODEL", "qwen3:8b")
-            self.api_key    = os.getenv("GPU_SERVER_API_KEY", "monto-secret-2024")
-            logger.info(f"✅ LLM: LOCAL GPU → {self.ollama_url} | {self.model}")
+            logger.info(f"✅ LLM: GPU Ollama ({self.model}) | Groq fallback: {'yes' if self._has_groq else 'no'}")
         else:
-            from groq import AsyncGroq
-            self._groq  = AsyncGroq(api_key=api_key)
-            # llama-3.3-70b-versatile supports json_object reliably on Groq
-            # qwen3-32b does NOT support response_format on Groq (returns 400)
-            self._model = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
-            logger.info(f"✅ LLM: Groq cloud — {self._model} (testing mode)")
+            logger.info(f"✅ LLM: Groq cloud — {self._groq_model}")
 
     async def get_response(
         self,
@@ -154,7 +159,13 @@ class LLMService:
         messages.append({"role": "user", "content": transcript})
 
         if self.use_local:
-            return await self._call_ollama(messages)
+            try:
+                return await self._call_ollama(messages)
+            except Exception as e:
+                if self._has_groq:
+                    logger.warning(f"GPU LLM failed ({e}) — falling back to Groq")
+                    return await self._call_groq(messages)
+                raise
         else:
             return await self._call_groq(messages)
 
@@ -183,11 +194,8 @@ class LLMService:
             raw  = resp.json()["message"]["content"]
             return self._parse_llm_output(raw)
 
-        except httpx.ConnectError:
-            raise RuntimeError(
-                f"Cannot connect to Ollama at {self.ollama_url}. "
-                "Is the GPU server running?"
-            )
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            raise RuntimeError(f"GPU Ollama unreachable: {e}")
         except json.JSONDecodeError as e:
             logger.error(f"Ollama JSON parse error: {e}")
             return self._fallback()
@@ -202,7 +210,7 @@ class LLMService:
 
         try:
             completion = await self._groq.chat.completions.create(
-                model=self._model,
+                model=self._groq_model,
                 messages=messages,
                 temperature=0.4,
                 max_tokens=512,
