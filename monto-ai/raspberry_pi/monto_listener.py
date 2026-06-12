@@ -55,17 +55,63 @@ def set_backend(url: str):
 
 # ── AUDIO ─────────────────────────────────────────────────────────────────────
 
-def record_audio(duration: int) -> bytes:
-    """Record from mic for duration seconds, return WAV bytes."""
+def find_usb_mic() -> int:
+    """Find USB microphone device index. Returns -1 if not found (use default)."""
     pa = pyaudio.PyAudio()
-    logger.info(f"Recording {duration}s...")
+    usb_keywords = ["usb", "microphone", "mic", "audio", "headset", "earphone"]
+    best_idx = -1
+    try:
+        for i in range(pa.get_device_count()):
+            d = pa.get_device_info_by_index(i)
+            if d["maxInputChannels"] > 0:
+                name = d["name"].lower()
+                if any(k in name for k in usb_keywords):
+                    logger.info(f"USB mic found: [{i}] {d['name']}")
+                    best_idx = i
+                    break
+        if best_idx == -1:
+            logger.info("No USB mic found — using default input device")
+    finally:
+        pa.terminate()
+    return best_idx
 
-    stream = pa.open(
+
+def record_audio(duration: int, face=None) -> bytes:
+    """Record from USB mic (or default) for duration seconds, return WAV bytes."""
+    pa      = pyaudio.PyAudio()
+    mic_idx = find_usb_mic()
+
+    logger.info(f"Recording {duration}s from {'USB mic' if mic_idx >= 0 else 'default mic'}...")
+
+    kwargs = dict(
         format=pyaudio.paInt16, channels=1,
-        rate=SAMPLE_RATE, input=True, frames_per_buffer=1024,
+        rate=SAMPLE_RATE, input=True, frames_per_buffer=512,
     )
-    frames = [stream.read(1024, exception_on_overflow=False)
-              for _ in range(int(SAMPLE_RATE / 1024 * duration))]
+    if mic_idx >= 0:
+        kwargs["input_device_index"] = mic_idx
+
+    stream = pa.open(**kwargs)
+
+    frames      = []
+    total       = int(SAMPLE_RATE / 512 * duration)
+    peak_energy = 0
+
+    for i in range(total):
+        data = stream.read(512, exception_on_overflow=False)
+        frames.append(data)
+
+        # Live audio level for face animation
+        if face and i % 8 == 0:
+            arr    = np.frombuffer(data, dtype=np.int16).astype(np.float32)
+            energy = np.sqrt(np.mean(arr ** 2))
+            peak_energy = max(peak_energy, energy)
+            # Pulse face based on mic level
+            if energy > 800:
+                face.set_mic_level(min(1.0, energy / 3000.0))
+
+    if face:
+        face.set_mic_level(0.0)
+
     stream.stop_stream()
     stream.close()
     pa.terminate()
@@ -76,6 +122,8 @@ def record_audio(duration: int) -> bytes:
         wf.setsampwidth(2)
         wf.setframerate(SAMPLE_RATE)
         wf.writeframes(b"".join(frames))
+
+    logger.info(f"Recorded {len(frames)*512/SAMPLE_RATE:.1f}s, peak energy: {peak_energy:.0f}")
     return buf.getvalue()
 
 # ── BACKEND ───────────────────────────────────────────────────────────────────
@@ -162,10 +210,10 @@ def backend_manager(face):
 
 def handle_conversation(face):
     """One full conversation turn: record → send → respond."""
-    face.set_emotion("listening", "Listening...")
-    audio_bytes = record_audio(RECORD_SECONDS)
+    face.set_emotion("listening", "Listening... 🎤")
+    audio_bytes = record_audio(RECORD_SECONDS, face=face)
 
-    face.set_emotion("thinking", "Thinking...")
+    face.set_emotion("thinking", "Thinking... 🤔")
     result = send_to_backend(audio_bytes)
 
     if result:

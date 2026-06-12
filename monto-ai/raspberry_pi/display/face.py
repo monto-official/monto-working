@@ -177,13 +177,14 @@ class MontoFace:
         self.face_r  = int(min(self.W, self.H) * 0.30)  # face radius
 
         # State
-        self.emotion = "idle"
-        self.text    = ""
-        self.talking = False
-        self.running = True
-        self._lock   = threading.Lock()
-        self._tick   = 0
-        self.clock   = pygame.time.Clock()
+        self.emotion   = "idle"
+        self.text      = ""
+        self.talking   = False
+        self.running   = True
+        self.mic_level = 0.0   # 0.0-1.0 live mic input level
+        self._lock     = threading.Lock()
+        self._tick     = 0
+        self.clock     = pygame.time.Clock()
         self.particles: List[Particle] = []
 
         # Fonts
@@ -224,6 +225,11 @@ class MontoFace:
         with self._lock:
             self.talking = talking
 
+    def set_mic_level(self, level: float):
+        """Set live mic level 0.0-1.0 for listening animation."""
+        with self._lock:
+            self.mic_level = max(0.0, min(1.0, level))
+
     def stop(self):
         self.running = False
 
@@ -234,11 +240,12 @@ class MontoFace:
                 if e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE: self.running = False
 
             with self._lock:
-                emotion = self.emotion
-                text    = self.text
-                tick    = self._tick
-                talking = self.talking
-                parts   = list(self.particles)
+                emotion   = self.emotion
+                text      = self.text
+                tick      = self._tick
+                talking   = self.talking
+                mic_level = self.mic_level
+                parts     = list(self.particles)
 
             # ── Background
             self.screen.blit(self._bg_cached, (0, 0))
@@ -261,12 +268,20 @@ class MontoFace:
             # ── Face
             self._draw_face(emotion, tick, talking)
 
+            # ── Live mic visualizer (listening state)
+            if emotion == "listening":
+                self._draw_mic_visualizer(mic_level, tick)
+
+            # ── Speaking indicator (talking state)
+            if talking:
+                self._draw_speaking_indicator(tick)
+
             # ── Text card
             if text:
                 self._draw_text_card(text, emotion)
 
             # ── Status bar
-            self._draw_status_bar(emotion)
+            self._draw_status_bar(emotion, mic_level)
 
             pygame.display.flip()
             self._tick += 1
@@ -599,6 +614,56 @@ class MontoFace:
             d = random.uniform(r*.2, r*1.0)
             self.particles.append(Particle(cx + math.cos(a)*d, cy + math.sin(a)*d, kind))
 
+    # ── MIC VISUALIZER ────────────────────────────────────────────────────────
+
+    def _draw_mic_visualizer(self, mic_level: float, tick: int):
+        """Show live audio waveform bars at bottom during listening."""
+        bar_count = 24
+        bar_w     = int(self.W * 0.018)
+        gap       = int(self.W * 0.008)
+        total_w   = bar_count * (bar_w + gap)
+        start_x   = (self.W - total_w) // 2
+        base_y    = self.H - int(self.H * 0.065)
+        max_h     = int(self.H * 0.08)
+
+        for i in range(bar_count):
+            # Wave pattern + mic level
+            wave  = abs(math.sin(tick * 0.12 + i * 0.4)) * 0.4
+            level = mic_level * 0.6 + wave
+            h     = max(4, int(max_h * level))
+            x     = start_x + i * (bar_w + gap)
+            y     = base_y - h
+
+            alpha = int(180 + 75 * abs(math.sin(tick * 0.08 + i * 0.3)))
+            color = (40, 200, 255, alpha)
+
+            s = pygame.Surface((bar_w, h), pygame.SRCALPHA)
+            pygame.draw.rect(s, color, s.get_rect(), border_radius=bar_w // 2)
+            self.screen.blit(s, (x, y))
+
+    # ── SPEAKING INDICATOR ────────────────────────────────────────────────────
+
+    def _draw_speaking_indicator(self, tick: int):
+        """Animated speaker waves around the face when Monto is speaking."""
+        cx  = self.face_cx
+        cy  = self.face_cy
+        r   = self.face_r
+
+        # Draw 3 expanding arcs on the right side
+        for i in range(1, 4):
+            phase  = tick * 0.08 - i * 0.6
+            alpha  = max(0, int(140 * abs(math.sin(phase))))
+            offset = r + 15 + i * int(r * 0.18)
+            arc_r  = offset
+
+            s = pygame.Surface((arc_r * 2 + 4, arc_r * 2 + 4), pygame.SRCALPHA)
+            start_a = -math.pi / 3
+            end_a   =  math.pi / 3
+            pygame.draw.arc(s, (255, 200, 60, alpha),
+                            pygame.Rect(2, 2, arc_r*2, arc_r*2),
+                            start_a, end_a, max(2, int(r * 0.025)))
+            self.screen.blit(s, (cx - arc_r - 2, cy - arc_r - 2))
+
     # ── TEXT CARD ─────────────────────────────────────────────────────────────
 
     def _draw_text_card(self, text, emotion):
@@ -640,29 +705,41 @@ class MontoFace:
 
     # ── STATUS BAR ────────────────────────────────────────────────────────────
 
-    def _draw_status_bar(self, emotion):
-        acc    = Theme.accent(emotion)
-        icons  = {
-            "idle":      ("✦", "Say  'Hey Jarvis'  to talk to Monto!"),
-            "neutral":   ("✦", "Say  'Hey Jarvis'  to talk to Monto!"),
+    def _draw_status_bar(self, emotion, mic_level: float = 0.0):
+        acc   = Theme.accent(emotion)
+        icons = {
+            "idle":      ("●", "Press ENTER to talk to Monto"),
+            "neutral":   ("●", "Press ENTER to talk to Monto"),
             "happy":     ("😊", "Happy"),
             "excited":   ("🤩", "Excited"),
             "sad":       ("💛", "Comforting"),
             "thinking":  ("🤔", "Thinking..."),
             "surprised": ("✨", "Surprised"),
-            "listening": ("🎤", "Listening..."),
+            "listening": ("🎤", "Listening — speak now!"),
         }
-        icon, label = icons.get(emotion, ("✦", emotion.title()))
+        # Speaking override
+        if hasattr(self, 'talking') and self.talking:
+            icon, label = "🔊", "Monto is speaking..."
+        else:
+            icon, label = icons.get(emotion, ("●", emotion.title()))
 
-        bar_h  = int(self.H * 0.055)
-        bar_y  = self.H - bar_h
-        bar    = pygame.Surface((self.W, bar_h), pygame.SRCALPHA)
+        bar_h = int(self.H * 0.055)
+        bar_y = self.H - bar_h
+        bar   = pygame.Surface((self.W, bar_h), pygame.SRCALPHA)
         pygame.draw.rect(bar, (*Theme.BG_TOP, 200), bar.get_rect())
-        # Top accent line
         pygame.draw.line(bar, (*acc, 100), (0, 0), (self.W, 0), 1)
         self.screen.blit(bar, (0, bar_y))
 
-        # Status text center
+        # Mic level dots (listening mode)
+        if emotion == "listening":
+            dot_count = 5
+            for i in range(dot_count):
+                filled = mic_level * dot_count >= i + 1
+                col    = (*acc, 220) if filled else (*acc, 60)
+                dx     = int(self.W * 0.08) + i * int(self.W * 0.03)
+                dy     = bar_y + bar_h // 2
+                pygame.gfxdraw.filled_circle(self.screen, dx, dy, 5, col)
+
         status = self._f_status.render(f"{icon}  {label}", True, (*acc,))
         self.screen.blit(status, ((self.W - status.get_width()) // 2,
                                    bar_y + (bar_h - status.get_height()) // 2))
