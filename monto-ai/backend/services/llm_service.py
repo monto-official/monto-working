@@ -115,7 +115,6 @@ Allowed animations: smile, thinking, talking, excited, sad, blink"""
 
 
 class LLMService:
-class LLMService:
     def __init__(self, api_key: str = ""):
         self.use_local = os.getenv("USE_LOCAL_GPU", "false").lower() == "true"
 
