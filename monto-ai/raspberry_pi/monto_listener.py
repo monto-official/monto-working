@@ -1,16 +1,28 @@
 """
 Monto AI — Raspberry Pi Listener
-Wake word: "Hey Monto" using OpenWakeWord (open source, no API key needed)
-Records audio, sends to backend, plays TTS response, shows face animations.
+Wake word detection → record → send to backend → play TTS → show face
 
-Requirements: pip install -r requirements.txt
+Wake word: OpenWakeWord (no API key needed)
+Default:   "Hey Jarvis" (say "Hey Jarvis" to trigger)
+
+Setup:
+    pip install -r requirements.txt
+    sudo apt install -y mpg123
+
+.env variables:
+    BACKEND_URL         GPU backend URL (primary)
+    FALLBACK_BACKEND_URL  Laptop/Groq backend (used after 1 min if GPU offline)
+    SESSION_ID          Unique device ID
+    WAKE_WORD           Built-in wake word (hey_jarvis / alexa / hey_mycroft)
+    WAKE_MODEL_PATH     Path to custom .tflite wake word model
+    WAKE_THRESHOLD      Detection sensitivity 0.0-1.0 (default 0.5)
+    RECORD_SECONDS      How long to record after wake word (default 5)
+    FULLSCREEN          Show face fullscreen (true/false)
 """
 import os
 import io
-import sys
 import wave
 import time
-import struct
 import tempfile
 import logging
 import threading
@@ -19,241 +31,209 @@ import requests
 import pyaudio
 from dotenv import dotenv_values
 
-# Load .env
 env = dotenv_values(".env")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s: %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
-BACKEND_URL    = env.get("BACKEND_URL",    "http://100.122.50.13:8000")
-RECORD_SECONDS = int(env.get("RECORD_SECONDS", "5"))
-FULLSCREEN     = env.get("FULLSCREEN", "true").lower() == "true"
-SESSION_ID     = env.get("SESSION_ID", "pi-device-1")
-WAKE_THRESHOLD = float(env.get("WAKE_THRESHOLD", "0.5"))  # sensitivity 0-1
-SAMPLE_RATE    = 16000
-CHANNELS       = 1
-CHUNK          = 1280   # OpenWakeWord needs 80ms chunks at 16kHz
-# ─────────────────────────────────────────────────────────────────────────────
+GPU_BACKEND      = env.get("BACKEND_URL",          "http://100.76.66.40:8000")
+FALLBACK_BACKEND = env.get("FALLBACK_BACKEND_URL",  "http://100.122.50.13:8000")
+SESSION_ID       = env.get("SESSION_ID",            "pi-monto")
+WAKE_WORD        = env.get("WAKE_WORD",             "hey_jarvis")
+WAKE_MODEL_PATH  = env.get("WAKE_MODEL_PATH",       "")
+WAKE_THRESHOLD   = float(env.get("WAKE_THRESHOLD",  "0.5"))
+RECORD_SECONDS   = int(env.get("RECORD_SECONDS",    "5"))
+FULLSCREEN       = env.get("FULLSCREEN",            "true").lower() == "true"
+SAMPLE_RATE      = 16000
+CHUNK            = 1280   # 80ms at 16kHz — required by OpenWakeWord
 
+# Active backend (switches between GPU and fallback)
+_active_backend  = GPU_BACKEND
+_backend_lock    = threading.Lock()
+
+def get_backend() -> str:
+    with _backend_lock:
+        return _active_backend
+
+def set_backend(url: str):
+    global _active_backend
+    with _backend_lock:
+        _active_backend = url
+    logger.info(f"🔀 Active backend → {url}")
+
+# ── AUDIO ─────────────────────────────────────────────────────────────────────
 
 def record_audio(pa: pyaudio.PyAudio, duration: int) -> bytes:
-    """Record from mic for duration seconds, return WAV bytes."""
-    logger.info(f"Recording for {duration}s...")
+    logger.info(f"Recording {duration}s...")
     stream = pa.open(
-        format=pyaudio.paInt16,
-        channels=CHANNELS,
-        rate=SAMPLE_RATE,
-        input=True,
-        frames_per_buffer=1024,
+        format=pyaudio.paInt16, channels=1,
+        rate=SAMPLE_RATE, input=True, frames_per_buffer=1024,
     )
-    frames = []
-    for _ in range(int(SAMPLE_RATE / 1024 * duration)):
-        frames.append(stream.read(1024, exception_on_overflow=False))
+    frames = [stream.read(1024, exception_on_overflow=False)
+              for _ in range(int(SAMPLE_RATE / 1024 * duration))]
     stream.stop_stream()
     stream.close()
 
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
-        wf.setnchannels(CHANNELS)
+        wf.setnchannels(1)
         wf.setsampwidth(pa.get_sample_size(pyaudio.paInt16))
         wf.setframerate(SAMPLE_RATE)
         wf.writeframes(b"".join(frames))
     return buf.getvalue()
 
+# ── BACKEND CHECK ─────────────────────────────────────────────────────────────
 
-def wait_for_backend(max_tries: int = 20, delay: int = 3):
-    """Wait until the backend is reachable. Returns True when found."""
-    for attempt in range(1, max_tries + 1):
-        try:
-            r = requests.get(f"{BACKEND_URL}/health", timeout=3)
-            if r.ok:
-                logger.info(f"✅ Backend reachable at {BACKEND_URL}")
-                return True
-        except Exception:
-            pass
-        logger.info(f"Waiting for backend... ({attempt}/{max_tries})")
-        time.sleep(delay)
-    logger.error(f"❌ Backend not reachable after {max_tries} attempts")
-    return False
-
-
-def send_to_backend(audio_bytes: bytes) -> dict:
-    """Send audio to Monto backend and get response."""
+def check_url(url: str, timeout: int = 3) -> bool:
     try:
-        response = requests.post(
-            f"{BACKEND_URL}/voice/process",
+        return requests.get(f"{url}/health", timeout=timeout).ok
+    except Exception:
+        return False
+
+def send_to_backend(audio_bytes: bytes) -> dict | None:
+    url = get_backend()
+    try:
+        r = requests.post(
+            f"{url}/voice/process",
             files={"audio": ("audio.wav", audio_bytes, "audio/wav")},
             headers={"X-Session-Id": SESSION_ID},
             timeout=30,
         )
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.ConnectionError:
-        logger.error(f"Cannot connect to backend at {BACKEND_URL}")
-        return None
+        r.raise_for_status()
+        return r.json()
     except Exception as e:
-        logger.error(f"Backend error: {e}")
+        logger.error(f"Backend error ({url}): {e}")
         return None
-
 
 def play_tts(text: str, emotion: str = "neutral", face=None):
-    """Request TTS audio from backend and play it."""
+    url = get_backend()
     try:
-        response = requests.post(
-            f"{BACKEND_URL}/tts/speak",
+        r = requests.post(
+            f"{url}/tts/speak",
             json={"text": text, "emotion": emotion},
             timeout=15,
         )
-        response.raise_for_status()
-
-        content_type = response.headers.get("Content-Type", "audio/mpeg")
-        suffix = ".wav" if "wav" in content_type else ".mp3"
-
-        fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+        r.raise_for_status()
+        suffix = ".wav" if "wav" in r.headers.get("Content-Type", "") else ".mp3"
+        fd, path = tempfile.mkstemp(suffix=suffix)
         try:
-            os.write(fd, response.content)
+            os.write(fd, r.content)
             os.close(fd)
-            if face:
-                face.set_talking(True)
-            # Use aplay for WAV, mpg123 for MP3
+            if face: face.set_talking(True)
             if suffix == ".wav":
-                os.system(f"aplay -q {tmp_path}")
+                os.system(f"aplay -q {path}")
             else:
-                os.system(f"mpg123 -q {tmp_path}")
+                os.system(f"mpg123 -q {path}")
         finally:
-            if face:
-                face.set_talking(False)
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-
-    except requests.exceptions.ConnectionError:
-        logger.error(f"TTS: Cannot connect to backend at {BACKEND_URL}")
-    except requests.exceptions.Timeout:
-        logger.error("TTS: Request timed out")
+            if face: face.set_talking(False)
+            try: os.unlink(path)
+            except OSError: pass
     except Exception as e:
-        logger.error(f"TTS playback error: {e}")
+        logger.error(f"TTS error: {e}")
 
+# ── BACKEND MANAGER ───────────────────────────────────────────────────────────
 
-def listener_thread(face):
-    """Wake word detection + backend pipeline."""
+def backend_manager(face):
+    """
+    Background thread:
+    - Try GPU backend first
+    - After 1 minute of failure → switch to fallback (Groq/laptop)
+    - Keep checking GPU in background → switch back when available
+    """
+    gpu_fail_start = None
 
-    # ── Load OpenWakeWord ─────────────────────────────────────────────────────
+    while face.running:
+        gpu_ok = check_url(GPU_BACKEND)
+        current = get_backend()
+
+        if gpu_ok:
+            # GPU is up
+            if current != GPU_BACKEND:
+                logger.info("GPU backend back online — switching back")
+                set_backend(GPU_BACKEND)
+                face.set_emotion("excited", "GPU reconnected! 🚀")
+                time.sleep(2)
+            gpu_fail_start = None
+        else:
+            # GPU is down
+            if current == GPU_BACKEND:
+                # Start failure timer
+                if gpu_fail_start is None:
+                    gpu_fail_start = time.time()
+                    logger.warning("GPU backend unreachable — starting 60s countdown")
+
+                elapsed = time.time() - gpu_fail_start
+                if elapsed >= 60:
+                    # 1 minute passed — try fallback
+                    if FALLBACK_BACKEND and check_url(FALLBACK_BACKEND):
+                        logger.info("Switching to fallback backend (Groq cloud)")
+                        set_backend(FALLBACK_BACKEND)
+                        face.set_emotion("neutral", "Using cloud backup 🌐")
+                        time.sleep(2)
+                    else:
+                        logger.warning("Fallback also unreachable — waiting...")
+                        face.set_emotion("sad", "No server available 😢")
+
+        time.sleep(15)  # check every 15 seconds
+
+# ── WAKE WORD ─────────────────────────────────────────────────────────────────
+
+def init_wake_word():
+    """Initialize OpenWakeWord model. Returns (model, wake_name) or (None, None)."""
     try:
         from openwakeword.model import Model
     except ImportError:
-        logger.error("openwakeword not installed. Run: pip install openwakeword")
-        face.stop()
-        return
+        logger.error("openwakeword not installed: pip install openwakeword")
+        return None, None
 
     try:
-        # Use built-in "hey_jarvis" model as base — we rename the trigger
-        # For custom "hey monto" — download from:
-        # https://github.com/dscripka/openWakeWord/blob/main/docs/custom_models.md
-        # Then set: oww_model = Model(wakeword_models=["hey_monto.tflite"])
-
-        wake_model_path = env.get("WAKE_MODEL_PATH", "")
-        wake_word       = env.get("WAKE_WORD", "hey_jarvis")
-
-        if wake_model_path and os.path.exists(wake_model_path):
-            wake_name = os.path.basename(wake_model_path).replace(".tflite", "")
-            logger.info(f"Wake word: custom model → {wake_model_path}")
+        if WAKE_MODEL_PATH and os.path.exists(WAKE_MODEL_PATH):
+            model = Model(wakeword_model_paths=[WAKE_MODEL_PATH])
+            name  = os.path.basename(WAKE_MODEL_PATH).replace(".tflite", "")
         else:
-            wake_name = wake_word
-            logger.info(f"Wake word: '{wake_word}' — say '{wake_word.replace('_',' ').title()}'")
+            model = Model(wakeword_model_paths=[WAKE_WORD])
+            name  = WAKE_WORD
 
-        # Try different API signatures — version compatibility
-        try:
-            # New API (>=0.6)
-            if wake_model_path and os.path.exists(wake_model_path):
-                oww_model = Model(wakeword_models=[wake_model_path])
-            else:
-                oww_model = Model(wakeword_models=[wake_word])
-        except TypeError:
-            try:
-                # Old API with inference_framework
-                if wake_model_path and os.path.exists(wake_model_path):
-                    oww_model = Model(wakeword_models=[wake_model_path],
-                                      inference_framework="tflite")
-                else:
-                    oww_model = Model(wakeword_models=[wake_word],
-                                      inference_framework="tflite")
-            except TypeError:
-                # Oldest API — no wakeword_models arg
-                oww_model = Model(inference_framework="tflite")
-
-        logger.info(f"OpenWakeWord loaded — models: {list(oww_model.models.keys())}")
+        detected_models = list(model.models.keys())
+        logger.info(f"✅ OpenWakeWord ready — models: {detected_models}")
+        logger.info(f"   Say '{name.replace('_', ' ').title()}' to activate")
+        return model, name
 
     except Exception as e:
         logger.error(f"OpenWakeWord init failed: {e}")
-        face.stop()
+        return None, None
+
+# ── LISTENER ──────────────────────────────────────────────────────────────────
+
+def listener_thread(face):
+    model, wake_name = init_wake_word()
+    if model is None:
+        logger.error("Wake word disabled — cannot start listener")
+        face.set_emotion("sad", "Wake word failed to load 😢")
         return
 
     pa  = pyaudio.PyAudio()
     mic = pa.open(
-        rate=SAMPLE_RATE,
-        channels=1,
-        format=pyaudio.paInt16,
-        input=True,
+        rate=SAMPLE_RATE, channels=1,
+        format=pyaudio.paInt16, input=True,
         frames_per_buffer=CHUNK,
     )
 
-    logger.info(f'Listening for wake word "{wake_name}"...')
     face.set_emotion("idle")
+    logger.info(f'Ready — say "{wake_name.replace("_", " ").title()}" to start')
 
     try:
         while face.running:
-            # Read chunk
-            raw = mic.read(CHUNK, exception_on_overflow=False)
-            audio_int16 = np.frombuffer(raw, dtype=np.int16)
+            raw         = mic.read(CHUNK, exception_on_overflow=False)
+            audio_chunk = np.frombuffer(raw, dtype=np.int16)
+            predictions = model.predict(audio_chunk)
 
-            # Run wake word detection
-            prediction = oww_model.predict(audio_int16)
-
-            # Check if any model triggered
-            triggered = False
-            for name, score in prediction.items():
+            for name, score in predictions.items():
                 if score >= WAKE_THRESHOLD:
-                    logger.info(f"Wake word detected! [{name}] score={score:.2f}")
-                    triggered = True
+                    logger.info(f"Wake word! [{name}] score={score:.2f}")
+                    _handle_wake(pa, mic, face)
                     break
-
-            if triggered:
-                oww_model.reset()  # reset scores
-                face.set_emotion("excited", "")
-                mic.stop_stream()
-
-                # Record
-                face.set_emotion("listening", "Listening...")
-                audio_bytes = record_audio(pa, RECORD_SECONDS)
-
-                # Process
-                face.set_emotion("thinking", "Thinking...")
-                result = send_to_backend(audio_bytes)
-
-                if result:
-                    emotion  = result.get("emotion", "neutral")
-                    response = result.get("response", "")
-                    logger.info(f"[{emotion}] {response}")
-
-                    face.set_emotion(emotion, response)
-
-                    if response:
-                        play_tts(response, emotion=emotion, face=face)
-
-                    time.sleep(1.5)
-                else:
-                    face.set_emotion("sad", "Could not connect to server 😢")
-                    time.sleep(2)
-
-                face.set_emotion("idle")
-                mic.start_stream()
-                logger.info(f'Listening for wake word "{wake_name}"...')
 
     except Exception as e:
         logger.error(f"Listener error: {e}")
@@ -262,41 +242,95 @@ def listener_thread(face):
         mic.close()
         pa.terminate()
 
+def _handle_wake(pa, mic, face):
+    """Handle one wake word → record → process → respond cycle."""
+    model = None  # reset handled by predict state
+    mic.stop_stream()
+    face.set_emotion("excited", "")
+    time.sleep(0.3)
+
+    # Record
+    face.set_emotion("listening", "Listening...")
+    audio_bytes = record_audio(pa, RECORD_SECONDS)
+
+    # Send to backend
+    face.set_emotion("thinking", "Thinking...")
+    result = send_to_backend(audio_bytes)
+
+    if result:
+        emotion  = result.get("emotion", "neutral")
+        response = result.get("response", "")
+        logger.info(f"[{emotion}] {response[:80]}")
+        face.set_emotion(emotion, response)
+        if response:
+            play_tts(response, emotion=emotion, face=face)
+        time.sleep(1.5)
+    else:
+        face.set_emotion("sad", "No response 😢")
+        time.sleep(2)
+
+    face.set_emotion("idle")
+    mic.start_stream()
+
+# ── MAIN ──────────────────────────────────────────────────────────────────────
 
 def main():
     from display.face import MontoFace
 
-    logger.info(f"Backend: {BACKEND_URL}")
-    logger.info(f"Session: {SESSION_ID}")
-    logger.info(f"Fullscreen: {FULLSCREEN}")
+    logger.info(f"GPU backend:      {GPU_BACKEND}")
+    logger.info(f"Fallback backend: {FALLBACK_BACKEND}")
+    logger.info(f"Session ID:       {SESSION_ID}")
+    logger.info(f"Wake word:        {WAKE_WORD}")
+    logger.info(f"Fullscreen:       {FULLSCREEN}")
 
     face = MontoFace(fullscreen=FULLSCREEN)
     face.set_emotion("thinking", "Connecting to Monto...")
 
     def startup():
-        """Keep retrying forever until backend connects — never give up."""
-        retry_round = 0
+        # Step 1: Try GPU backend
+        retry = 0
         while face.running:
-            retry_round += 1
-            logger.info(f"Connecting to backend (round {retry_round})...")
+            retry += 1
+            logger.info(f"Trying GPU backend... (attempt {retry})")
 
-            if wait_for_backend(max_tries=20, delay=3):
-                # Connected!
-                face.set_emotion("excited", "Hey! I'm Monto 😊")
-                time.sleep(1.5)
-                # Start listener — blocks until error
-                listener_thread(face)
-                # If listener returns and face still running → reconnect
-                if face.running:
-                    logger.warning("Listener stopped — reconnecting...")
-                    face.set_emotion("thinking", "Reconnecting...")
-                    time.sleep(3)
-            else:
-                # 20 tries failed — wait 30s then try again
-                wait_secs = 30
-                logger.info(f"Backend unreachable — retrying in {wait_secs}s...")
-                face.set_emotion("sad", f"Waiting for server... retrying soon")
-                time.sleep(wait_secs)
+            if check_url(GPU_BACKEND):
+                set_backend(GPU_BACKEND)
+                break
+
+            if retry >= 4:  # ~1 minute (4 × 15s)
+                # Try fallback
+                if FALLBACK_BACKEND and check_url(FALLBACK_BACKEND):
+                    logger.info("GPU offline — using fallback backend")
+                    set_backend(FALLBACK_BACKEND)
+                    face.set_emotion("neutral", "Using cloud backup 🌐")
+                    time.sleep(2)
+                    break
+                else:
+                    face.set_emotion("sad", "Waiting for server...")
+                    logger.info("Both backends offline — retrying in 30s...")
+                    time.sleep(30)
+                    retry = 0
+                    continue
+
+            time.sleep(15)
+
+        if not face.running:
+            return
+
+        # Step 2: Start backend monitor in background
+        monitor = threading.Thread(target=backend_manager, args=(face,), daemon=True)
+        monitor.start()
+
+        # Step 3: Start listener (restarts on error)
+        face.set_emotion("excited", "Hey! I'm Monto 😊")
+        time.sleep(1.5)
+
+        while face.running:
+            listener_thread(face)
+            if face.running:
+                logger.warning("Listener stopped — restarting in 3s...")
+                face.set_emotion("thinking", "Restarting...")
+                time.sleep(3)
 
     t = threading.Thread(target=startup, daemon=True)
     t.start()
