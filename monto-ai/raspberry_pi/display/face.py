@@ -643,8 +643,8 @@ class MontoFace:
     def _draw_status_bar(self, emotion):
         acc    = Theme.accent(emotion)
         icons  = {
-            "idle":      ("✦", "Listening..."),
-            "neutral":   ("✦", "Ready"),
+            "idle":      ("✦", "Say  'Hey Jarvis'  to talk to Monto!"),
+            "neutral":   ("✦", "Say  'Hey Jarvis'  to talk to Monto!"),
             "happy":     ("😊", "Happy"),
             "excited":   ("🤩", "Excited"),
             "sad":       ("💛", "Comforting"),

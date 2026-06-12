@@ -179,61 +179,87 @@ def backend_manager(face):
 
 # ── WAKE WORD ─────────────────────────────────────────────────────────────────
 
-def init_wake_word():
-    """Initialize OpenWakeWord model. Returns (model, wake_name) or (None, None)."""
-    try:
-        from openwakeword.model import Model
-    except ImportError:
-        logger.error("openwakeword not installed: pip install openwakeword")
-        return None, None
-
-    try:
-        if WAKE_MODEL_PATH and os.path.exists(WAKE_MODEL_PATH):
-            model = Model(wakeword_model_paths=[WAKE_MODEL_PATH])
-            name  = os.path.basename(WAKE_MODEL_PATH).replace(".tflite", "")
-        else:
-            model = Model(wakeword_model_paths=[WAKE_WORD])
-            name  = WAKE_WORD
-
-        detected_models = list(model.models.keys())
-        logger.info(f"✅ OpenWakeWord ready — models: {detected_models}")
-        logger.info(f"   Say '{name.replace('_', ' ').title()}' to activate")
-        return model, name
-
-    except Exception as e:
-        logger.error(f"OpenWakeWord init failed: {e}")
-        return None, None
-
-# ── LISTENER ──────────────────────────────────────────────────────────────────
-
 def listener_thread(face):
-    model, wake_name = init_wake_word()
-    if model is None:
-        logger.error("Wake word disabled — cannot start listener")
-        face.set_emotion("sad", "Wake word failed to load 😢")
-        return
+    """
+    Wake word detection using Google Speech Recognition.
+    Say 'Hi Monto' or 'Hey Monto' to trigger.
+    No training, no model download needed.
+    Falls back to OpenWakeWord if speech_recognition unavailable.
+    """
+    # Try installing speech_recognition if not present
+    try:
+        import speech_recognition as sr
+        _listen_with_sr(face, sr)
+    except ImportError:
+        logger.warning("speech_recognition not installed — trying OpenWakeWord")
+        _listen_with_oww(face)
+
+
+def _listen_with_sr(face, sr):
+    """Speech recognition based wake word — say 'Hi Monto' or 'Hey Monto'."""
+    recognizer = sr.Recognizer()
+    recognizer.energy_threshold        = 300
+    recognizer.dynamic_energy_threshold = True
+    recognizer.pause_threshold          = 0.8
+
+    wake_keywords = ["monto", "hi monto", "hey monto", "hello monto",
+                     "monte", "hi monte", "hey monte"]  # common mishearings
 
     pa  = pyaudio.PyAudio()
     mic = pa.open(
         rate=SAMPLE_RATE, channels=1,
         format=pyaudio.paInt16, input=True,
-        frames_per_buffer=CHUNK,
+        frames_per_buffer=1024,
     )
 
     face.set_emotion("idle")
-    logger.info(f'Ready — say "{wake_name.replace("_", " ").title()}" to start')
+    logger.info("✅ Listening for 'Hi Monto' or 'Hey Monto'...")
+
+    LISTEN_SECS      = 2
+    FRAMES_PER_CHECK = int(SAMPLE_RATE / 1024 * LISTEN_SECS)
 
     try:
         while face.running:
-            raw         = mic.read(CHUNK, exception_on_overflow=False)
-            audio_chunk = np.frombuffer(raw, dtype=np.int16)
-            predictions = model.predict(audio_chunk)
+            # Collect 2s of audio
+            frames = [mic.read(1024, exception_on_overflow=False)
+                      for _ in range(FRAMES_PER_CHECK)]
 
-            for name, score in predictions.items():
-                if score >= WAKE_THRESHOLD:
-                    logger.info(f"Wake word! [{name}] score={score:.2f}")
+            # Energy check — skip silence
+            audio_arr = np.frombuffer(b"".join(frames), dtype=np.int16)
+            energy    = np.sqrt(np.mean(audio_arr.astype(np.float32) ** 2))
+            if energy < 150:
+                continue
+
+            # Build WAV
+            buf = io.BytesIO()
+            with wave.open(buf, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(pa.get_sample_size(pyaudio.paInt16))
+                wf.setframerate(SAMPLE_RATE)
+                wf.writeframes(b"".join(frames))
+
+            # Recognize
+            try:
+                audio_data = sr.AudioData(buf.getvalue(), SAMPLE_RATE, 2)
+                text = recognizer.recognize_google(
+                    audio_data, language="en-US"
+                ).lower()
+                logger.debug(f"Heard: '{text}'")
+
+                if any(kw in text for kw in wake_keywords):
+                    logger.info(f"✅ Wake word detected! Heard: '{text}'")
+                    mic.stop_stream()
                     _handle_wake(pa, mic, face)
-                    break
+                    mic.start_stream()
+                    logger.info("Listening for 'Hi Monto'...")
+
+            except sr.UnknownValueError:
+                pass   # silence or unclear speech
+            except sr.RequestError:
+                # Google SR offline — try local Whisper via backend
+                _check_with_backend(buf.getvalue(), mic, pa, face, wake_keywords)
+            except Exception as e:
+                logger.debug(f"SR: {e}")
 
     except Exception as e:
         logger.error(f"Listener error: {e}")
@@ -242,6 +268,64 @@ def listener_thread(face):
         mic.close()
         pa.terminate()
 
+
+def _check_with_backend(wav_bytes, mic, pa, face, wake_keywords):
+    """Use backend STT to check for wake word when Google SR is offline."""
+    try:
+        url = get_backend()
+        r = requests.post(
+            f"{url}/voice/process",
+            files={"audio": ("audio.wav", wav_bytes, "audio/wav")},
+            headers={"X-Session-Id": SESSION_ID},
+            timeout=10,
+        )
+        if r.ok:
+            transcript = r.json().get("transcript", "").lower()
+            if transcript and any(kw in transcript for kw in wake_keywords):
+                logger.info(f"Backend wake word detected: '{transcript}'")
+                mic.stop_stream()
+                _handle_wake(pa, mic, face)
+                mic.start_stream()
+    except Exception:
+        pass
+
+
+def _listen_with_oww(face):
+    """Fallback: OpenWakeWord detection."""
+    try:
+        from openwakeword.model import Model
+        wake_word = env.get("WAKE_WORD", "hey_jarvis")
+        model     = Model(wakeword_model_paths=[wake_word])
+        logger.info(f"OpenWakeWord fallback: say '{wake_word.replace('_',' ').title()}'")
+    except Exception as e:
+        logger.error(f"No wake word engine available: {e}")
+        face.set_emotion("sad", "Wake word unavailable 😢")
+        return
+
+    pa  = pyaudio.PyAudio()
+    mic = pa.open(rate=SAMPLE_RATE, channels=1,
+                  format=pyaudio.paInt16, input=True,
+                  frames_per_buffer=CHUNK)
+    face.set_emotion("idle")
+
+    try:
+        while face.running:
+            raw   = mic.read(CHUNK, exception_on_overflow=False)
+            chunk = np.frombuffer(raw, dtype=np.int16)
+            preds = model.predict(chunk)
+            for name, score in preds.items():
+                if score >= WAKE_THRESHOLD:
+                    logger.info(f"OWW wake: [{name}] {score:.2f}")
+                    mic.stop_stream()
+                    _handle_wake(pa, mic, face)
+                    mic.start_stream()
+                    break
+    except Exception as e:
+        logger.error(f"OWW error: {e}")
+    finally:
+        mic.stop_stream()
+        mic.close()
+        pa.terminate()
 def _handle_wake(pa, mic, face):
     """Handle one wake word → record → process → respond cycle."""
     model = None  # reset handled by predict state
