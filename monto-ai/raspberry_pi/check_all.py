@@ -43,17 +43,35 @@ finally:
 # ── 2. RECORD TEST ────────────────────────────────────────────────────────────
 sep()
 print("2. RECORDING TEST (3 seconds)")
-info("Recording 3s of audio from mic...")
+
+# Find supported sample rate
+pa2 = pyaudio.PyAudio()
+mic_rate = 44100  # default
+try:
+    for rate in [16000, 44100, 48000]:
+        try:
+            if pa2.is_format_supported(rate, input_device=mic_idx,
+                                        input_channels=1,
+                                        input_format=pyaudio.paInt16):
+                mic_rate = rate
+                break
+        except Exception:
+            continue
+finally:
+    pa2.terminate()
+
+info(f"Using sample rate: {mic_rate}Hz")
+info("Recording 3s of audio from mic... SPEAK NOW!")
 pa = pyaudio.PyAudio()
 try:
     stream = pa.open(
         format=pyaudio.paInt16, channels=1,
-        rate=SAMPLE_RATE, input=True,
+        rate=mic_rate, input=True,
         input_device_index=mic_idx,
         frames_per_buffer=512,
     )
     frames = [stream.read(512, exception_on_overflow=False)
-              for _ in range(int(SAMPLE_RATE / 512 * 3))]
+              for _ in range(int(mic_rate / 512 * 3))]
     stream.stop_stream()
     stream.close()
 
@@ -74,7 +92,7 @@ try:
     with wave.open(buf, "wb") as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)
-        wf.setframerate(SAMPLE_RATE)
+        wf.setframerate(mic_rate)
         wf.writeframes(b"".join(frames))
     wav_bytes = buf.getvalue()
     ok(f"WAV file size: {len(wav_bytes):,} bytes")
