@@ -55,6 +55,8 @@ class STTService:
                     return await self._transcribe_groq(audio_bytes, filename)
                 raise
         else:
+            if not self._has_groq:
+                raise RuntimeError("No STT service available. Set GROQ_API_KEY or USE_LOCAL_GPU=true")
             return await self._transcribe_groq(audio_bytes, filename)
 
     async def _transcribe_gpu(self, audio_bytes: bytes, filename: str) -> str:

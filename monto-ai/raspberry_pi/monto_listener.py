@@ -1,8 +1,15 @@
 """
 Monto AI — Raspberry Pi Listener
 Press SPACE (or GPIO button) to talk to Monto.
-USB mic auto-detected.
+USB mic auto-detected and cached at startup.
 Live mic level shown on screen during recording.
+
+Fixed bugs:
+  - PyAudio mic index cached at startup (not re-enumerated every press)
+  - Full traceback logged on errors (not just "something went wrong")
+  - subprocess.run instead of os.system for audio playback
+  - imports moved out of render loop
+  - face.run() not called — main loop owned here
 """
 import os
 import io
@@ -11,9 +18,13 @@ import time
 import tempfile
 import logging
 import threading
+import subprocess
+import traceback
 import numpy as np
 import requests
 import pyaudio
+import pygame
+from display.face import MontoFace, glow, Theme
 from dotenv import dotenv_values
 
 env = dotenv_values(".env")
@@ -31,72 +42,83 @@ GPIO_PIN         = int(env.get("GPIO_BUTTON_PIN",   "0"))
 
 _active_backend = GPU_BACKEND
 _backend_lock   = threading.Lock()
-_busy           = threading.Event()   # prevent double-trigger
+_busy           = threading.Event()
+
+# Cached mic device index (set once at startup)
+_mic_idx        = None
 
 def get_backend():
     with _backend_lock: return _active_backend
+
 def set_backend(url):
     global _active_backend
     with _backend_lock: _active_backend = url
     logger.info(f"Backend → {url}")
 
-# ── AUDIO ─────────────────────────────────────────────────────────────────────
+# ── AUDIO DEVICE SETUP ────────────────────────────────────────────────────────
 
-def find_mic():
-    """Return best USB mic device index, or None for default."""
-    pa = pyaudio.PyAudio()
+def init_mic():
+    """Find and cache USB mic index at startup. Called once."""
+    global _mic_idx
+    pa  = pyaudio.PyAudio()
     idx = None
     try:
-        usb_kw = ["usb", "microphone", "mic", "headset", "earphone", "input"]
+        usb_kw = ["usb", "microphone", "mic", "headset", "earphone"]
+        logger.info("Available audio input devices:")
         for i in range(pa.get_device_count()):
             d = pa.get_device_info_by_index(i)
             if d["maxInputChannels"] > 0:
+                logger.info(f"  [{i}] {d['name']} (channels: {d['maxInputChannels']})")
                 name = d["name"].lower()
-                logger.info(f"Audio input [{i}]: {d['name']}")
                 if any(k in name for k in usb_kw) and idx is None:
                     idx = i
+                    logger.info(f"  ↑ Selected as USB mic")
     finally:
         pa.terminate()
-    if idx is not None:
-        logger.info(f"Using USB mic at index {idx}")
+
+    _mic_idx = idx
+    if _mic_idx is not None:
+        logger.info(f"✅ USB mic cached at index {_mic_idx}")
     else:
-        logger.info("Using default mic")
-    return idx
+        logger.info("✅ Using default mic (no USB mic found)")
 
 
 def record_audio_live(duration: int, face) -> bytes:
-    """Record audio while showing live mic level on face display."""
-    pa      = pyaudio.PyAudio()
-    mic_idx = find_mic()
-
+    """Record from cached mic, showing live level on face."""
+    pa     = pyaudio.PyAudio()
     kwargs = dict(
         format=pyaudio.paInt16, channels=1,
         rate=SAMPLE_RATE, input=True, frames_per_buffer=512,
     )
-    if mic_idx is not None:
-        kwargs["input_device_index"] = mic_idx
+    if _mic_idx is not None:
+        kwargs["input_device_index"] = _mic_idx
 
-    stream = pa.open(**kwargs)
+    try:
+        stream = pa.open(**kwargs)
+    except OSError as e:
+        pa.terminate()
+        raise RuntimeError(f"Cannot open mic (index={_mic_idx}): {e}. "
+                           "Check mic is connected and not in use.")
+
     frames = []
     total  = int(SAMPLE_RATE / 512 * duration)
 
-    for i in range(total):
-        data = stream.read(512, exception_on_overflow=False)
-        frames.append(data)
+    try:
+        for i in range(total):
+            data = stream.read(512, exception_on_overflow=False)
+            frames.append(data)
 
-        # Update live mic level every 8 frames (~80ms)
-        if i % 8 == 0 and face:
-            arr    = np.frombuffer(data, dtype=np.int16).astype(np.float32)
-            rms    = np.sqrt(np.mean(arr ** 2))
-            level  = min(1.0, rms / 2500.0)
-            face.set_mic_level(level)
-
-    stream.stop_stream()
-    stream.close()
-    pa.terminate()
-
-    if face:
-        face.set_mic_level(0.0)
+            if i % 8 == 0 and face:
+                arr   = np.frombuffer(data, dtype=np.int16).astype(np.float32)
+                rms   = np.sqrt(np.mean(arr ** 2))
+                level = min(1.0, rms / 2500.0)
+                face.set_mic_level(level)
+    finally:
+        stream.stop_stream()
+        stream.close()
+        pa.terminate()
+        if face:
+            face.set_mic_level(0.0)
 
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
@@ -142,10 +164,13 @@ def play_tts(text, emotion="neutral", face=None):
             os.write(fd, r.content)
             os.close(fd)
             if face: face.set_talking(True)
+            # Use subprocess instead of os.system (safer, no shell injection)
             if suffix == ".wav":
-                os.system(f"aplay -q '{path}'")
+                subprocess.run(["aplay", "-q", path],
+                               check=False, timeout=30)
             else:
-                os.system(f"mpg123 -q '{path}'")
+                subprocess.run(["mpg123", "-q", path],
+                               check=False, timeout=30)
         finally:
             if face: face.set_talking(False)
             try: os.unlink(path)
@@ -163,9 +188,9 @@ def backend_monitor(face):
         if gpu_ok:
             if current != GPU_BACKEND:
                 set_backend(GPU_BACKEND)
-                face.set_emotion("excited", "GPU back online! 🚀")
-                time.sleep(2)
                 if not _busy.is_set():
+                    face.set_emotion("excited", "GPU back online! 🚀")
+                    time.sleep(2)
                     face.set_emotion("idle")
             gpu_fail_start = None
         else:
@@ -175,9 +200,9 @@ def backend_monitor(face):
                 elif time.time() - gpu_fail_start >= 60:
                     if FALLBACK_BACKEND and check_url(FALLBACK_BACKEND):
                         set_backend(FALLBACK_BACKEND)
-                        face.set_emotion("neutral", "Using cloud backup 🌐")
-                        time.sleep(2)
                         if not _busy.is_set():
+                            face.set_emotion("neutral", "Using cloud backup 🌐")
+                            time.sleep(2)
                             face.set_emotion("idle")
                     gpu_fail_start = None
         time.sleep(15)
@@ -185,44 +210,53 @@ def backend_monitor(face):
 # ── CONVERSATION ──────────────────────────────────────────────────────────────
 
 def do_conversation(face):
-    """Run one full conversation turn in background thread."""
+    """Trigger one conversation turn in a background thread."""
     if _busy.is_set():
-        return   # already busy
+        logger.info("Already busy — ignoring button press")
+        return
 
     def _run():
         _busy.set()
         try:
-            # 1. Record
-            face.set_emotion("listening", f"Listening... ({RECORD_SECONDS}s)")
+            # Step 1: Record
+            face.set_emotion("listening", f"Listening... speak now!")
             audio = record_audio_live(RECORD_SECONDS, face)
 
-            # 2. Process
+            # Step 2: Send to backend
             face.set_emotion("thinking", "Thinking...")
             result = send_to_backend(audio)
 
-            # 3. Respond
+            # Step 3: Respond
             if result:
-                emotion   = result.get("emotion",    "neutral")
-                response  = result.get("response",   "")
+                emotion    = result.get("emotion",    "neutral")
+                response   = result.get("response",   "")
                 transcript = result.get("transcript", "")
-                logger.info(f"You said: '{transcript}'")
+                logger.info(f"You: '{transcript}'")
                 logger.info(f"Monto [{emotion}]: '{response[:80]}'")
                 face.set_emotion(emotion, response)
                 if response:
                     play_tts(response, emotion=emotion, face=face)
                 time.sleep(1.5)
             else:
-                face.set_emotion("sad", "No response from server 😢")
+                face.set_emotion("sad", "Could not reach server 😢")
                 time.sleep(2)
 
-            face.set_emotion("idle")
+        except RuntimeError as e:
+            # Specific known errors (mic not found etc)
+            logger.error(f"Recording error: {e}")
+            face.set_emotion("sad", str(e)[:60])
+            time.sleep(3)
+
         except Exception as e:
-            logger.error(f"Conversation error: {e}")
-            face.set_emotion("sad", "Something went wrong 😢")
-            time.sleep(2)
-            face.set_emotion("idle")
+            # Log full traceback for debugging
+            logger.error(f"Conversation error:\n{traceback.format_exc()}")
+            face.set_emotion("sad", f"Error: {str(e)[:50]}")
+            time.sleep(3)
+
         finally:
             _busy.clear()
+            if face.running:
+                face.set_emotion("idle")
 
     threading.Thread(target=_run, daemon=True).start()
 
@@ -233,43 +267,39 @@ def gpio_listener(face, pin):
         import RPi.GPIO as GPIO
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        logger.info(f"GPIO button on pin {pin}")
+        logger.info(f"GPIO button ready on pin {pin}")
         while face.running:
             if GPIO.input(pin) == GPIO.LOW:
                 do_conversation(face)
                 time.sleep(0.8)
             time.sleep(0.05)
     except ImportError:
-        logger.warning("RPi.GPIO not available")
+        logger.warning("RPi.GPIO not available — GPIO button disabled")
     except Exception as e:
         logger.error(f"GPIO error: {e}")
 
-# ── MAIN ──────────────────────────────────────────────────────────────────────
+# ── MAIN LOOP ─────────────────────────────────────────────────────────────────
 
 def main():
-    import pygame
-    from display.face import MontoFace
+    # Step 1: Init mic at startup (cached for all future recordings)
+    init_mic()
 
-    logger.info(f"GPU:      {GPU_BACKEND}")
-    logger.info(f"Fallback: {FALLBACK_BACKEND}")
-    logger.info(f"Session:  {SESSION_ID}")
-    logger.info(f"Record:   {RECORD_SECONDS}s")
-
+    # Step 2: Create face display
     face = MontoFace(fullscreen=FULLSCREEN)
     face.set_emotion("thinking", "Connecting...")
 
+    # Step 3: Connect to backend in background
     def startup():
-        # Connect to backend
         retry = 0
         while face.running:
             retry += 1
             if check_url(GPU_BACKEND):
                 set_backend(GPU_BACKEND)
-                logger.info("Connected to GPU backend")
+                logger.info("✅ Connected to GPU backend")
                 break
             if retry >= 3 and FALLBACK_BACKEND and check_url(FALLBACK_BACKEND):
                 set_backend(FALLBACK_BACKEND)
-                logger.info("Using fallback backend")
+                logger.info("✅ Using fallback backend")
                 break
             face.set_emotion("thinking", f"Connecting... ({retry})")
             logger.info(f"Waiting for backend ({retry})...")
@@ -278,24 +308,22 @@ def main():
         if not face.running:
             return
 
-        # Show ready state
-        face.set_emotion("happy", "Hi! I'm Monto 😊")
+        face.set_emotion("happy", "Hi! I'm Monto 😊  Press SPACE to talk!")
         time.sleep(2)
         face.set_emotion("idle")
 
-        # Start backend monitor
+        # Start monitors
         threading.Thread(target=backend_monitor, args=(face,), daemon=True).start()
-
-        # GPIO button
         if GPIO_PIN > 0:
             threading.Thread(target=gpio_listener, args=(face, GPIO_PIN), daemon=True).start()
 
     threading.Thread(target=startup, daemon=True).start()
 
-    # ── Main pygame loop — handles SPACE key ──────────────────────────────────
-    logger.info("Press SPACE to talk to Monto (ESC to quit)")
+    logger.info("Controls: SPACE or ENTER = talk  |  ESC = quit")
 
+    # Step 4: Main pygame render + event loop
     while face.running:
+        # ── Events ───────────────────────────────────────────────────────────
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 face.running = False
@@ -303,16 +331,10 @@ def main():
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     face.running = False
-
-                elif event.key == pygame.K_SPACE:
-                    # SPACE → start conversation
+                elif event.key in (pygame.K_SPACE, pygame.K_RETURN):
                     do_conversation(face)
 
-                elif event.key == pygame.K_RETURN:
-                    # ENTER also works
-                    do_conversation(face)
-
-        # Render frame
+        # ── Render ───────────────────────────────────────────────────────────
         with face._lock:
             emotion   = face.emotion
             text      = face.text
@@ -321,14 +343,13 @@ def main():
             mic_level = face.mic_level
             parts     = list(face.particles)
 
-        import pygame as pg
         face.screen.blit(face._bg_cached, (0, 0))
 
-        from display.face import glow, Theme
         acc = Theme.accent(emotion)
         glow(face.screen, (*acc, 22), face.face_cx, face.face_cy,
              int(min(face.W, face.H) * 0.55), steps=5)
 
+        # Particles
         for p in parts:
             p.update()
             p.draw(face.screen)
@@ -345,14 +366,15 @@ def main():
         if text:
             face._draw_text_card(text, emotion)
 
-        face._draw_status_bar(emotion, mic_level)
+        face._draw_status_bar(emotion, mic_level, talking)
 
-        pg.display.flip()
+        pygame.display.flip()
         with face._lock:
             face._tick += 1
         face.clock.tick(60)
 
     pygame.quit()
+    logger.info("Monto stopped.")
 
 
 if __name__ == "__main__":
