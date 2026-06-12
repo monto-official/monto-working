@@ -66,7 +66,7 @@ def record_audio(pa: pyaudio.PyAudio, duration: int) -> bytes:
 
 
 def wait_for_backend(max_tries: int = 20, delay: int = 3):
-    """Wait until the backend is reachable."""
+    """Wait until the backend is reachable. Returns True when found."""
     for attempt in range(1, max_tries + 1):
         try:
             r = requests.get(f"{BACKEND_URL}/health", timeout=3)
@@ -158,17 +158,36 @@ def listener_thread(face):
         # Then set: oww_model = Model(wakeword_models=["hey_monto.tflite"])
 
         wake_model_path = env.get("WAKE_MODEL_PATH", "")
+        wake_word       = env.get("WAKE_WORD", "hey_jarvis")
+
         if wake_model_path and os.path.exists(wake_model_path):
-            oww_model = Model(wakeword_models=[wake_model_path], inference_framework="tflite")
             wake_name = os.path.basename(wake_model_path).replace(".tflite", "")
             logger.info(f"Wake word: custom model → {wake_model_path}")
         else:
-            # Built-in pre-trained models available without any recording:
-            # "alexa", "hey_jarvis", "hey_mycroft", "timer", "weather"
-            wake_word  = env.get("WAKE_WORD", "alexa")
-            oww_model  = Model(wakeword_models=[wake_word], inference_framework="tflite")
-            wake_name  = wake_word
-            logger.info(f"Wake word: built-in '{wake_word}' — say '{wake_word.replace('_',' ').title()}' to trigger")
+            wake_name = wake_word
+            logger.info(f"Wake word: '{wake_word}' — say '{wake_word.replace('_',' ').title()}'")
+
+        # Try different API signatures — version compatibility
+        try:
+            # New API (>=0.6)
+            if wake_model_path and os.path.exists(wake_model_path):
+                oww_model = Model(wakeword_models=[wake_model_path])
+            else:
+                oww_model = Model(wakeword_models=[wake_word])
+        except TypeError:
+            try:
+                # Old API with inference_framework
+                if wake_model_path and os.path.exists(wake_model_path):
+                    oww_model = Model(wakeword_models=[wake_model_path],
+                                      inference_framework="tflite")
+                else:
+                    oww_model = Model(wakeword_models=[wake_word],
+                                      inference_framework="tflite")
+            except TypeError:
+                # Oldest API — no wakeword_models arg
+                oww_model = Model(inference_framework="tflite")
+
+        logger.info(f"OpenWakeWord loaded — models: {list(oww_model.models.keys())}")
 
     except Exception as e:
         logger.error(f"OpenWakeWord init failed: {e}")
@@ -255,12 +274,29 @@ def main():
     face.set_emotion("thinking", "Connecting to Monto...")
 
     def startup():
-        if not wait_for_backend():
-            face.set_emotion("sad", "Cannot connect to server 😢")
-            time.sleep(5)
-            face.stop()
-            return
-        listener_thread(face)
+        """Keep retrying forever until backend connects — never give up."""
+        retry_round = 0
+        while face.running:
+            retry_round += 1
+            logger.info(f"Connecting to backend (round {retry_round})...")
+
+            if wait_for_backend(max_tries=20, delay=3):
+                # Connected!
+                face.set_emotion("excited", "Hey! I'm Monto 😊")
+                time.sleep(1.5)
+                # Start listener — blocks until error
+                listener_thread(face)
+                # If listener returns and face still running → reconnect
+                if face.running:
+                    logger.warning("Listener stopped — reconnecting...")
+                    face.set_emotion("thinking", "Reconnecting...")
+                    time.sleep(3)
+            else:
+                # 20 tries failed — wait 30s then try again
+                wait_secs = 30
+                logger.info(f"Backend unreachable — retrying in {wait_secs}s...")
+                face.set_emotion("sad", f"Waiting for server... retrying soon")
+                time.sleep(wait_secs)
 
     t = threading.Thread(target=startup, daemon=True)
     t.start()
