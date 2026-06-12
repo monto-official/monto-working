@@ -171,10 +171,10 @@ class MontoFace:
         pygame.mouse.set_visible(False)
 
         # Layout zones
-        self.logo_h  = int(self.H * 0.18)   # top 18% — logo
-        self.face_cy = int(self.H * 0.50)   # face center at 50%
+        self.logo_h  = int(self.H * 0.22)   # top 22% — logo (taller now)
+        self.face_cy = int(self.H * 0.53)   # face center at 53%
         self.face_cx = self.W // 2
-        self.face_r  = int(min(self.W, self.H) * 0.30)  # face radius
+        self.face_r  = int(min(self.W, self.H) * 0.27)  # face radius
 
         # State
         self.emotion   = "idle"
@@ -293,37 +293,73 @@ class MontoFace:
 
     def _draw_logo(self, emotion, tick):
         acc = Theme.accent(emotion)
-        cy  = int(self.logo_h * 0.45)
+        cy  = int(self.logo_h * 0.48)
 
         # Animated glow behind text
         pulse = 0.7 + 0.3 * abs(math.sin(tick * 0.03))
-        glow(self.screen, (*acc, int(30 * pulse)), self.face_cx, cy,
-             int(self.W * 0.28), steps=4)
+        glow(self.screen, (*acc, int(28 * pulse)), self.face_cx, cy,
+             int(self.W * 0.32), steps=4)
 
-        # Shadow
-        shadow = self._f_logo.render("MONTO", True, (5, 3, 20))
+        # ── "MONTO KIDS" main title ───────────────────────────────────────────
+        shadow = self._f_logo.render("MONTO KIDS", True, (5, 3, 20))
         sx = (self.W - shadow.get_width()) // 2
         self.screen.blit(shadow, (sx + 3, cy - shadow.get_height()//2 + 3))
 
-        # Main logo text — layered for glow effect
+        # Layered glow effect
         for col, off in [((*(c//2 for c in acc), 255), 1),
                          (Theme.LOGO_GLOW, 0),
                          (Theme.LOGO_MAIN, 0)]:
-            t = self._f_logo.render("MONTO", True, col[:3])
+            t = self._f_logo.render("MONTO KIDS", True, col[:3])
             self.screen.blit(t, ((self.W - t.get_width()) // 2 + off,
                                   cy - t.get_height()//2 + off))
 
-        # Subtitle
-        sub = self._f_sub.render("AI Companion  ✦", True, Theme.TEXT_DIM)
-        self.screen.blit(sub, ((self.W - sub.get_width()) // 2,
-                                 cy + self._f_logo.get_height()//2 + 4))
+        title_bottom = cy + self._f_logo.get_height()//2
 
-        # Thin accent line
-        lw   = int(self.W * 0.25)
-        ly   = cy + self._f_logo.get_height()//2 + self._f_sub.get_height() + 10
-        for ox, w2, a in [(-lw//2 - 30, lw + 60, 30), (-lw//2, lw, 120)]:
+        # ── Animated separator dots ───────────────────────────────────────────
+        sep_y    = title_bottom + 6
+        dot_cols = [(255,200,80), (200,180,255), (80,200,255),
+                    (255,120,160), (120,255,180)]
+        dot_total = len(dot_cols)
+        dot_gap   = int(self.W * 0.018)
+        dot_start = self.face_cx - (dot_total * dot_gap) // 2
+
+        for i, dc in enumerate(dot_cols):
+            bounce = int(math.sin(tick * 0.08 + i * 0.7) * 3)
+            r_dot  = 4 + (1 if i == tick // 8 % dot_total else 0)
+            pygame.gfxdraw.filled_circle(
+                self.screen,
+                dot_start + i * dot_gap,
+                sep_y + bounce,
+                r_dot,
+                (*dc, 200)
+            )
+            pygame.gfxdraw.aacircle(
+                self.screen,
+                dot_start + i * dot_gap,
+                sep_y + bounce,
+                r_dot,
+                (*dc, 200)
+            )
+
+        # ── "AI Sathi" subtitle ───────────────────────────────────────────────
+        sub_y    = sep_y + 12
+        sub_text = "AI Sathi  ✦"
+
+        # Animated color shift for subtitle
+        r_s = int(160 + 60 * math.sin(tick * 0.04))
+        g_s = int(140 + 60 * math.sin(tick * 0.04 + 2.1))
+        b_s = int(220 + 30 * math.sin(tick * 0.04 + 4.2))
+        sub_col = (min(255,r_s), min(255,g_s), min(255,b_s))
+
+        sub = self._f_sub.render(sub_text, True, sub_col)
+        self.screen.blit(sub, ((self.W - sub.get_width()) // 2, sub_y))
+
+        # ── Thin accent line ──────────────────────────────────────────────────
+        ly = sub_y + self._f_sub.get_height() + 6
+        lw = int(self.W * 0.22)
+        for ox, w2, a in [(-lw//2 - 40, lw + 80, 25), (-lw//2, lw, 110)]:
             s = pygame.Surface((w2, 2), pygame.SRCALPHA)
-            pygame.draw.line(s, (*acc, a), (0,1), (w2,1), 2)
+            pygame.draw.line(s, (*acc, a), (0, 1), (w2, 1), 2)
             self.screen.blit(s, (self.face_cx + ox, ly))
 
     # ── FACE ──────────────────────────────────────────────────────────────────
