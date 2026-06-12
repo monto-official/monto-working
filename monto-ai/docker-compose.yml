@@ -1,36 +1,120 @@
+################################################################################
+# Monto AI — Full Stack Docker Compose (Linux / GPU Server)
+#
+# Services:
+#   asterisk   — Asterisk PBX (SIP server) — handles all VoIP routing
+#   backend    — FastAPI AI backend (STT + LLM + TTS + call routes)
+#   frontend   — Monto AI chat UI (Next.js, port 3000)
+#   parent-app — Parent calling app  (Next.js, port 3001)
+#
+# Usage:
+#   cp .env.example .env && nano .env   # fill in API keys
+#   docker compose up -d --build
+#
+# Logs:
+#   docker compose logs -f asterisk
+#   docker compose logs -f backend
+################################################################################
+
 version: "3.9"
 
 services:
+
+  # ── Asterisk PBX ────────────────────────────────────────────────────────────
+  asterisk:
+    build:
+      context: ./asterisk
+      dockerfile: Dockerfile
+    container_name: monto-asterisk
+    restart: unless-stopped
+    # network_mode host is needed so Asterisk can reach RTP peers (Pi, browser)
+    # without hairpin NAT issues. This is standard for Asterisk in Docker.
+    network_mode: host
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      # Persist Asterisk logs
+      - asterisk-logs:/var/log/asterisk
+    healthcheck:
+      test: ["CMD", "asterisk", "-rx", "core show version"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  # ── FastAPI Backend ──────────────────────────────────────────────────────────
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: monto-backend
+    restart: unless-stopped
+    depends_on:
+      asterisk:
+        condition: service_healthy
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - ALLOWED_ORIGINS=http://localhost:3000
-    restart: unless-stopped
+      # Asterisk is on host network, reachable at 127.0.0.1
+      - ASTERISK_HOST=127.0.0.1
+      - ASTERISK_AMI_PORT=5038
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001,http://${SERVER_IP:-127.0.0.1}:3000,http://${SERVER_IP:-127.0.0.1}:3001
+    volumes:
+      - backend-db:/app/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 20s
 
+  # ── Monto AI Frontend (child-facing chat UI) ─────────────────────────────────
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: monto-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
-    depends_on:
-      - backend
-    restart: unless-stopped
+      - NEXT_PUBLIC_API_URL=http://${SERVER_IP:-127.0.0.1}:8000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
-networks:
-  default:
-    name: monto-network
+  # ── Parent App (parent calling UI) ──────────────────────────────────────────
+  parent-app:
+    build:
+      context: ../parent-app
+      dockerfile: Dockerfile
+    container_name: monto-parent-app
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      # Asterisk WebSocket — browser connects directly to host port 8088
+      - NEXT_PUBLIC_ASTERISK_WS_URL=ws://${SERVER_IP:-127.0.0.1}:8088/ws
+      - NEXT_PUBLIC_SIP_USERNAME=${PARENT_SIP_USERNAME:-parent}
+      - NEXT_PUBLIC_SIP_PASSWORD=${PARENT_SIP_PASSWORD:-parentpass123}
+      - NEXT_PUBLIC_SIP_DOMAIN=${SERVER_IP:-127.0.0.1}
+      - NEXT_PUBLIC_MONTO_BOX_EXTENSION=${MONTO_EXTENSION:-monto}
+      - NEXT_PUBLIC_MONTO_API_URL=http://${SERVER_IP:-127.0.0.1}:8000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  asterisk-logs:
+  backend-db:
