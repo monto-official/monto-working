@@ -154,11 +154,14 @@ def record_audio_live(duration: int, face) -> bytes:
     # Resample to 16kHz if needed (Whisper requires 16kHz)
     if _mic_rate != 16000:
         try:
-            import audioop
+            try:
+                import audioop
+            except ImportError:
+                import audioop_lts as audioop  # Python 3.13+
             raw, _ = audioop.ratecv(raw, 2, 1, _mic_rate, 16000, None)
             logger.info(f"Resampled {_mic_rate}Hz → 16000Hz")
         except ImportError:
-            logger.warning("audioop not available — sending at native rate")
+            logger.warning("audioop not available — install: pip install audioop-lts")
 
     buf = io.BytesIO()
     out_rate = 16000 if _mic_rate != 16000 else _mic_rate
