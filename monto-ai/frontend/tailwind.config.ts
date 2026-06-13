@@ -37,7 +37,8 @@ const config: Config = {
         },
       },
       fontFamily: {
-        sans: ["Inter", "system-ui", "sans-serif"],
+        sans: ["Nunito", "Inter", "system-ui", "sans-serif"],
+        kids: ["'Fredoka One'", "cursive"],
       },
       animation: {
         "pulse-ring": "pulseRing 1.5s ease-out infinite",

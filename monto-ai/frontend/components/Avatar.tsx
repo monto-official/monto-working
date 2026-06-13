@@ -32,19 +32,19 @@ export function Avatar({ emotion, size = 200 }: AvatarProps) {
   const rightEyeY = leftEyeY;
   const eyeScale = emotion === "surprised" ? 1.3 : 1;
 
-  // Face colors per emotion
+  // Face colors per emotion — more vibrant kids colors
   const faceColors: Record<Emotion, string> = {
-    happy: "#FFF9C4",
-    thinking: "#E8EAF6",
-    excited: "#FFF3E0",
-    sad: "#ECEFF1",
-    surprised: "#FCE4EC",
-    neutral: "#F3F4F6",
-    talking: "#F0F4FF",
+    happy:     "#FDE68A",
+    thinking:  "#DDD6FE",
+    excited:   "#FED7AA",
+    sad:       "#BAE6FD",
+    surprised: "#FBCFE8",
+    neutral:   "#E0E7FF",
+    talking:   "#E0E7FF",
   };
 
   // Cheek colors
-  const cheekColor = emotion === "happy" || emotion === "excited" ? "#FFCDD2" : "transparent";
+  const cheekColor = emotion === "happy" || emotion === "excited" ? "#FCA5A5" : "transparent";
 
   return (
     <motion.div
