@@ -114,6 +114,7 @@ export default function Home() {
   const [wakeOn, setWakeOn]           = useState(false);
   const [showChat, setShowChat]       = useState(false);
   const [emojiBurst, setEmojiBurst]   = useState(0);
+  const [lang, setLang]               = useState<"english" | "nepali">("english");
   const [greeting]                    = useState(() =>
     GREETING_MESSAGES[Math.floor(Math.random() * GREETING_MESSAGES.length)]);
 
@@ -121,7 +122,7 @@ export default function Home() {
   const recorder = useAudioRecorder();
   const { speak, cancel: cancelTTS } = useTTS();
   const conversation = useConversation();
-  const settings: Settings = { language: "english", voice: "female", autoSpeak, darkMode: true };
+  const settings: Settings = { language: lang, voice: "female", autoSpeak, darkMode: true };
 
   const cfg = EMOTION_CONFIG[emotion] ?? EMOTION_CONFIG.neutral;
 

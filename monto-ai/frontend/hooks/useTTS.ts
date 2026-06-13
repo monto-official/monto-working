@@ -4,9 +4,15 @@ import { Settings } from "@/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+// ── Nepali detection ──────────────────────────────────────────────────────────
+function isNepali(text: string): boolean {
+  // Devanagari Unicode range: U+0900–U+097F
+  return /[\u0900-\u097F]/.test(text);
+}
+
 export function useTTS() {
-  const audioRef    = useRef<HTMLAudioElement | null>(null);
-  const [usingElevenLabs, setUsingElevenLabs] = useState(true);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [usingBackend, setUsingBackend] = useState(true);
 
   const cancelAll = useCallback(() => {
     if (audioRef.current) {
@@ -19,103 +25,102 @@ export function useTTS() {
     }
   }, []);
 
-  const speakWithBackend = useCallback(
-    async (
-      text: string,
-      emotion: string,
-      settings: Settings,
-      onStart?: () => void,
-      onEnd?: () => void
-    ): Promise<boolean> => {
-      try {
-        const res = await fetch(`${API_URL}/tts/speak`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text,
-            voice:    settings.voice || "monto",
-            emotion:  emotion || "neutral",   // ← pass emotion for voice tone
-            language: settings.language || "english",
-          }),
-        });
+  // ── Backend TTS (ElevenLabs / Piper / gTTS Nepali) ───────────────────────
+  const speakWithBackend = useCallback(async (
+    text: string,
+    emotion: string,
+    language: string,
+    onStart?: () => void,
+    onEnd?: () => void
+  ): Promise<boolean> => {
+    try {
+      const res = await fetch(`${API_URL}/tts/speak`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          voice:    "monto",
+          emotion:  emotion || "neutral",
+          language: language,   // "nepali" routes to gTTS/Edge TTS on GPU
+        }),
+      });
 
-        if (!res.ok) return false;
+      if (!res.ok) return false;
 
-        // Detect audio format from response header (WAV local, MP3 cloud)
-        const contentType = res.headers.get("Content-Type") || "audio/mpeg";
-        const arrayBuffer = await res.arrayBuffer();
-        const blob        = new Blob([arrayBuffer], { type: contentType });
-        const url         = URL.createObjectURL(blob);
+      const contentType = res.headers.get("Content-Type") || "audio/mpeg";
+      const arrayBuffer = await res.arrayBuffer();
+      const blob        = new Blob([arrayBuffer], { type: contentType });
+      const url         = URL.createObjectURL(blob);
 
-        const audio = new Audio(url);
-        audioRef.current = audio;
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onplay  = () => onStart?.();
+      audio.onended = () => { URL.revokeObjectURL(url); audioRef.current = null; onEnd?.(); };
+      audio.onerror = () => { URL.revokeObjectURL(url); audioRef.current = null; onEnd?.(); };
+      await audio.play();
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
 
-        audio.onplay   = () => onStart?.();
-        audio.onended  = () => { URL.revokeObjectURL(url); audioRef.current = null; onEnd?.(); };
-        audio.onerror  = () => { URL.revokeObjectURL(url); audioRef.current = null; onEnd?.(); };
+  // ── Browser TTS fallback ──────────────────────────────────────────────────
+  const speakWithBrowser = useCallback((
+    text: string,
+    language: string,
+    onStart?: () => void,
+    onEnd?: () => void
+  ) => {
+    if (typeof window === "undefined" || !window.speechSynthesis) { onEnd?.(); return; }
+    window.speechSynthesis.cancel();
 
-        await audio.play();
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    []
-  );
+    const utterance    = new SpeechSynthesisUtterance(text);
+    const isNe         = language === "nepali" || isNepali(text);
+    utterance.lang     = isNe ? "ne-NP" : "en-US";
+    utterance.rate     = isNe ? 0.85 : 0.9;
+    utterance.pitch    = 1.1;
+    utterance.volume   = 1;
 
-  const speakWithBrowser = useCallback(
-    (
-      text: string,
-      settings: Settings,
-      onStart?: () => void,
-      onEnd?: () => void
-    ) => {
-      if (typeof window === "undefined" || !window.speechSynthesis) return;
-      window.speechSynthesis.cancel();
+    // Try to find a matching voice
+    const voices   = window.speechSynthesis.getVoices();
+    const preferred = voices.find(v => v.lang.startsWith(isNe ? "ne" : "en-US"));
+    if (preferred) utterance.voice = preferred;
 
-      const utterance  = new SpeechSynthesisUtterance(text);
-      utterance.lang   = settings.language === "nepali" ? "ne-NP" : "en-US";
-      utterance.rate   = 0.9;
-      utterance.pitch  = settings.voice === "female" ? 1.2 : 0.9;
-      utterance.volume = 1;
+    utterance.onstart = () => onStart?.();
+    utterance.onend   = () => onEnd?.();
+    utterance.onerror = () => onEnd?.();
+    window.speechSynthesis.speak(utterance);
+  }, []);
 
-      const voices     = window.speechSynthesis.getVoices();
-      const langVoice  = voices.find((v) =>
-        v.lang.startsWith(settings.language === "nepali" ? "ne" : "en")
-      );
-      if (langVoice) utterance.voice = langVoice;
+  // ── Main speak function ───────────────────────────────────────────────────
+  const speak = useCallback(async (
+    text:      string,
+    emotion:   string,
+    settings:  Settings,
+    onStart?:  () => void,
+    onEnd?:    () => void
+  ) => {
+    cancelAll();
+    if (!text.trim()) { onEnd?.(); return; }
 
-      utterance.onstart = () => onStart?.();
-      utterance.onend   = () => onEnd?.();
-      utterance.onerror = () => onEnd?.();
-      window.speechSynthesis.speak(utterance);
-    },
-    []
-  );
+    // Auto-detect language from text content
+    const detectedNepali = isNepali(text);
+    const language       = detectedNepali ? "nepali" : (settings.language || "english");
 
-  const speak = useCallback(
-    async (
-      text:     string,
-      emotion:  string,       // ← emotion passed in
-      settings: Settings,
-      onStart?: () => void,
-      onEnd?:   () => void
-    ) => {
-      cancelAll();
-      if (!text.trim()) { onEnd?.(); return; }
+    if (usingBackend) {
+      const ok = await speakWithBackend(text, emotion, language, onStart, onEnd);
+      if (ok) return;
+      // Backend failed — fall back to browser
+      setUsingBackend(false);
+    }
 
-      if (usingElevenLabs) {
-        const ok = await speakWithBackend(text, emotion, settings, onStart, onEnd);
-        if (ok) return;
-        setUsingElevenLabs(false);
-      }
+    // Browser TTS fallback
+    speakWithBrowser(text, language, onStart, onEnd);
+  }, [usingBackend, cancelAll, speakWithBackend, speakWithBrowser]);
 
-      speakWithBrowser(text, settings, onStart, onEnd);
-    },
-    [usingElevenLabs, cancelAll, speakWithBackend, speakWithBrowser]
-  );
-
-  const cancel = useCallback(() => cancelAll(), [cancelAll]);
-
-  return { speak, cancel, usingElevenLabs };
+  return {
+    speak,
+    cancel: cancelAll,
+    usingElevenLabs: usingBackend,
+  };
 }
