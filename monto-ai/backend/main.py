@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 from models.schemas import HealthResponse
 from routes.voice  import router as voice_router
 from routes.tts    import router as tts_router
-from routes.call   import router as call_router
 from services.stt_service import STTService
 from services.llm_service import LLMService
 from services.tts_service import TTSService
@@ -89,7 +88,6 @@ app.add_middleware(
 
 app.include_router(voice_router)
 app.include_router(tts_router)
-app.include_router(call_router)
 
 
 @app.get("/health", response_model=HealthResponse)

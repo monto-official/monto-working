@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu, Volume2, VolumeX, AlertCircle, RefreshCw } from "lucide-react";
+import { Menu, Volume2, VolumeX, AlertCircle, RefreshCw, Mic } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { MicButton } from "@/components/MicButton";
 import { StatusIndicator } from "@/components/StatusIndicator";
@@ -13,6 +13,7 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 import { useTTS } from "@/hooks/useTTS";
 import { useConversation } from "@/hooks/useConversation";
+import { useWakeWord } from "@/hooks/useWakeWord";
 import { sendVoiceQuery, checkHealth, APIError } from "@/lib/api";
 import { Emotion, RecordingState, Settings, VoiceQueryResponse } from "@/types";
 import { cn } from "@/lib/utils";
@@ -48,10 +49,21 @@ export default function Home() {
   const [sidebarTab, setSidebarTab] = useState<"history" | "about">("history");
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [view, setView] = useState<"chat" | "voice">("voice");
+  const [wakeWordEnabled, setWakeWordEnabled] = useState(false);
 
   const recorder = useAudioRecorder();
   const { speak, cancel: cancelTTS, usingElevenLabs } = useTTS();
   const conversation = useConversation();
+
+  // Wake word — triggers auto-recording when "Monto" is heard
+  const { supported: wakeSupported, listening: wakeListening } = useWakeWord({
+    onDetected: () => {
+      if (recordingState === "idle" && backendOnline) {
+        handleMicPress();
+      }
+    },
+    enabled: wakeWordEnabled && recordingState === "idle",
+  });
 
   // Load settings and check backend on mount
   useEffect(() => {
@@ -277,7 +289,7 @@ export default function Home() {
                     Hello, I&apos;m Monto
                   </h1>
                   <p className="text-sm text-gray-400 dark:text-gray-500 mt-0.5">
-                    Your Child-Safe AI Companion
+                    Monto Kids · AI Sathi 🌟
                   </p>
                 </motion.div>
               </div>
@@ -361,6 +373,33 @@ export default function Home() {
                     ? "Tap again to stop"
                     : "Tap the mic to speak"}
                 </p>
+
+                {/* Wake word toggle */}
+                {wakeSupported && (
+                  <button
+                    onClick={() => setWakeWordEnabled(v => !v)}
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-2 rounded-full text-xs font-medium transition-all",
+                      wakeWordEnabled
+                        ? "bg-primary-100 dark:bg-primary-900/40 text-primary-600 dark:text-primary-300 border border-primary-300 dark:border-primary-700"
+                        : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-transparent"
+                    )}
+                  >
+                    <motion.div
+                      className={cn(
+                        "w-2 h-2 rounded-full",
+                        wakeWordEnabled && wakeListening ? "bg-primary-500" : "bg-gray-400"
+                      )}
+                      animate={wakeWordEnabled && wakeListening
+                        ? { scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }
+                        : {}}
+                      transition={{ duration: 1.5, repeat: Infinity }}
+                    />
+                    {wakeWordEnabled
+                      ? wakeListening ? "Listening for 'Monto'..." : "Wake word on"
+                      : "Say 'Monto' to activate"}
+                  </button>
+                )}
               </div>
             </motion.div>
           ) : (
