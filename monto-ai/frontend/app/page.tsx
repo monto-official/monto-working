@@ -1,7 +1,7 @@
 "use client";
-import { useState, useEffect, useCallback, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Volume2, VolumeX, Mic, Sparkles, Star, RefreshCw } from "lucide-react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { motion, AnimatePresence, useSpring, useTransform } from "framer-motion";
+import { Volume2, VolumeX, Mic, Sparkles, MessageCircle, X, ChevronRight } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 import { useTTS } from "@/hooks/useTTS";
@@ -11,102 +11,129 @@ import { sendVoiceQuery, checkHealth, APIError } from "@/lib/api";
 import { Emotion, RecordingState, Settings, VoiceQueryResponse } from "@/types";
 import { cn } from "@/lib/utils";
 
-const DEFAULT_SETTINGS: Settings = {
-  language: "english",
-  voice: "female",
-  autoSpeak: true,
-  darkMode: true,
-};
+// ── Emotion config ────────────────────────────────────────────────────────────
+const EMOTION_CONFIG = {
+  happy:     { color: "#FBBF24", glow: "#F59E0B", bg: "#78350F", emojis: ["😊","🌟","🎉","✨","🌈"] },
+  excited:   { color: "#F472B6", glow: "#EC4899", bg: "#831843", emojis: ["🤩","🚀","⭐","🎊","💫"] },
+  sad:       { color: "#60A5FA", glow: "#3B82F6", bg: "#1E3A5F", emojis: ["💛","🤗","💙","🌸"] },
+  thinking:  { color: "#A78BFA", glow: "#8B5CF6", bg: "#3B1D6E", emojis: ["🤔","💭","💡","🔮"] },
+  surprised: { color: "#34D399", glow: "#10B981", bg: "#064E3B", emojis: ["😲","✨","🎯","💥"] },
+  neutral:   { color: "#818CF8", glow: "#6366F1", bg: "#1E1B4B", emojis: ["😊","🌟","✦"] },
+  talking:   { color: "#818CF8", glow: "#6366F1", bg: "#1E1B4B", emojis: ["🔊","💬","✨"] },
+} as const;
+
+const GREETING_MESSAGES = [
+  "Hi! I'm Monto, your AI friend! 🌟",
+  "Ask me anything! I love chatting! 😊",
+  "Let's learn something fun today! 🚀",
+  "What's on your mind? I'm listening! 💭",
+];
 
 // ── Star background ───────────────────────────────────────────────────────────
-function StarField() {
-  const stars = Array.from({ length: 30 }, (_, i) => ({
+const StarField = () => {
+  const stars = useMemo(() => Array.from({ length: 50 }, (_, i) => ({
+    id: i,
     x: Math.random() * 100,
     y: Math.random() * 100,
-    size: Math.random() * 3 + 1,
-    delay: Math.random() * 3,
-  }));
+    size: Math.random() * 2.5 + 0.5,
+    duration: Math.random() * 3 + 2,
+    delay: Math.random() * 4,
+  })), []);
 
   return (
-    <div className="fixed inset-0 pointer-events-none overflow-hidden">
-      {stars.map((s, i) => (
-        <motion.div
-          key={i}
+    <div className="fixed inset-0 pointer-events-none">
+      {stars.map(s => (
+        <motion.div key={s.id}
           className="absolute rounded-full bg-white"
-          style={{
-            left: `${s.x}%`,
-            top: `${s.y}%`,
-            width: s.size,
-            height: s.size,
-          }}
-          animate={{ opacity: [0.1, 0.8, 0.1], scale: [1, 1.4, 1] }}
-          transition={{ duration: 2 + s.delay, repeat: Infinity, delay: s.delay, ease: "easeInOut" }}
+          style={{ left: `${s.x}%`, top: `${s.y}%`, width: s.size, height: s.size }}
+          animate={{ opacity: [0.1, 0.9, 0.1], scale: [0.8, 1.3, 0.8] }}
+          transition={{ duration: s.duration, repeat: Infinity, delay: s.delay, ease: "easeInOut" }}
         />
       ))}
+      {/* Nebula blobs */}
+      <div className="absolute top-10 left-10 w-64 h-64 rounded-full opacity-10"
+           style={{ background: "radial-gradient(circle, #7C3AED, transparent)" }} />
+      <div className="absolute bottom-20 right-5 w-48 h-48 rounded-full opacity-10"
+           style={{ background: "radial-gradient(circle, #EC4899, transparent)" }} />
+      <div className="absolute top-1/2 left-1/3 w-32 h-32 rounded-full opacity-8"
+           style={{ background: "radial-gradient(circle, #3B82F6, transparent)" }} />
     </div>
   );
-}
-
-// ── Floating emojis ───────────────────────────────────────────────────────────
-const EMOTION_EMOJIS: Record<string, string[]> = {
-  happy:     ["😊", "🌟", "✨", "🎉"],
-  excited:   ["🤩", "🎊", "⭐", "🚀"],
-  sad:       ["💛", "🤗", "💙"],
-  thinking:  ["🤔", "💭", "💡"],
-  surprised: ["😲", "✨", "🎯"],
-  neutral:   ["😊", "🌟"],
-  idle:      ["✨", "🌟"],
 };
 
-function FloatingEmojis({ emotion }: { emotion: string }) {
-  const emojis = EMOTION_EMOJIS[emotion] || EMOTION_EMOJIS.idle;
+// ── Floating emoji burst ──────────────────────────────────────────────────────
+const EmojiBurst = ({ emotion, trigger }: { emotion: string; trigger: number }) => {
+  const cfg = EMOTION_CONFIG[emotion as keyof typeof EMOTION_CONFIG] ?? EMOTION_CONFIG.neutral;
   return (
-    <div className="absolute inset-0 pointer-events-none overflow-hidden">
-      {emojis.map((emoji, i) => (
-        <motion.div
-          key={`${emotion}-${i}`}
-          className="absolute text-2xl"
-          style={{ left: `${15 + i * 25}%`, bottom: "10%" }}
-          initial={{ y: 0, opacity: 0, scale: 0 }}
-          animate={{ y: [-20, -120], opacity: [0, 1, 0], scale: [0.5, 1.2, 0.8] }}
-          transition={{ duration: 2, delay: i * 0.3, repeat: Infinity, repeatDelay: 2 }}
+    <AnimatePresence>
+      {trigger > 0 && cfg.emojis.map((emoji, i) => (
+        <motion.div key={`${trigger}-${i}`}
+          className="fixed text-2xl pointer-events-none z-50 select-none"
+          style={{
+            left: `${30 + Math.random() * 40}%`,
+            top: `${40 + Math.random() * 20}%`,
+          }}
+          initial={{ opacity: 0, scale: 0, y: 0 }}
+          animate={{ opacity: [0, 1, 1, 0], scale: [0, 1.4, 1.2, 0.8], y: -120 - i * 20 }}
+          transition={{ duration: 1.8, delay: i * 0.12, ease: "easeOut" }}
         >
           {emoji}
         </motion.div>
       ))}
-    </div>
+    </AnimatePresence>
   );
-}
+};
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ── Mic visualizer bars ───────────────────────────────────────────────────────
+const AudioBars = ({ level, color }: { level: number; color: string }) => (
+  <div className="flex items-center gap-0.5 h-8">
+    {Array.from({ length: 12 }, (_, i) => {
+      const h = Math.max(4, (Math.sin(i * 0.8) * 0.5 + 0.5) * 28 * level + 4);
+      return (
+        <motion.div key={i}
+          className="w-1 rounded-full"
+          style={{ background: color }}
+          animate={{ height: [4, h, 4] }}
+          transition={{ duration: 0.4, delay: i * 0.05, repeat: Infinity, ease: "easeInOut" }}
+        />
+      );
+    })}
+  </div>
+);
+
+// ── Main ──────────────────────────────────────────────────────────────────────
 export default function Home() {
-  const [settings]        = useState<Settings>(DEFAULT_SETTINGS);
-  const [emotion, setEmotion]           = useState<Emotion>("neutral");
-  const [transcript, setTranscript]     = useState("");
-  const [response, setResponse]         = useState<VoiceQueryResponse | null>(null);
-  const [recordingState, setRecordingState] = useState<RecordingState>("idle");
-  const [apiError, setApiError]         = useState<string | null>(null);
-  const [isSpeaking, setIsSpeaking]     = useState(false);
-  const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
-  const [autoSpeak, setAutoSpeak]       = useState(true);
-  const [wakeEnabled, setWakeEnabled]   = useState(false);
-  const [showChat, setShowChat]         = useState(false);
-  const busyRef = useRef(false);
+  const [emotion, setEmotion]         = useState<Emotion>("neutral");
+  const [transcript, setTranscript]   = useState("");
+  const [response, setResponse]       = useState<VoiceQueryResponse | null>(null);
+  const [recordingState, setRS]       = useState<RecordingState>("idle");
+  const [apiError, setApiError]       = useState<string | null>(null);
+  const [isSpeaking, setIsSpeaking]   = useState(false);
+  const [online, setOnline]           = useState<boolean | null>(null);
+  const [autoSpeak, setAutoSpeak]     = useState(true);
+  const [wakeOn, setWakeOn]           = useState(false);
+  const [showChat, setShowChat]       = useState(false);
+  const [emojiBurst, setEmojiBurst]   = useState(0);
+  const [greeting]                    = useState(() =>
+    GREETING_MESSAGES[Math.floor(Math.random() * GREETING_MESSAGES.length)]);
 
-  const recorder     = useAudioRecorder();
+  const busyRef  = useRef(false);
+  const recorder = useAudioRecorder();
   const { speak, cancel: cancelTTS } = useTTS();
   const conversation = useConversation();
+  const settings: Settings = { language: "english", voice: "female", autoSpeak, darkMode: true };
 
-  useEffect(() => { checkHealth().then(setBackendOnline); }, []);
+  const cfg = EMOTION_CONFIG[emotion] ?? EMOTION_CONFIG.neutral;
 
-  // ── Process audio ─────────────────────────────────────────────────────────
+  useEffect(() => { checkHealth().then(setOnline); }, []);
+
+  // ── Process ───────────────────────────────────────────────────────────────
   const processAudio = useCallback(async (blob: Blob) => {
     if (busyRef.current) return;
     busyRef.current = true;
-    setRecordingState("processing");
+    setRS("processing");
     setEmotion("thinking");
     cancelTTS();
-
     try {
       const result = await sendVoiceQuery(blob);
       setTranscript(result.transcript);
@@ -114,160 +141,180 @@ export default function Home() {
       setEmotion(result.emotion as Emotion);
       conversation.addUserMessage(result.transcript);
       conversation.addAssistantMessage(result);
+      setEmojiBurst(b => b + 1);
 
       if (autoSpeak && result.response) {
-        setRecordingState("speaking");
+        setRS("speaking");
         setIsSpeaking(true);
         speak(result.response, result.emotion, settings,
           () => setIsSpeaking(true),
-          () => { setIsSpeaking(false); setEmotion(result.emotion as Emotion); setRecordingState("idle"); }
+          () => { setIsSpeaking(false); setEmotion(result.emotion as Emotion); setRS("idle"); }
         );
       } else {
-        setRecordingState("idle");
+        setRS("idle");
       }
     } catch (err) {
-      const msg = err instanceof APIError ? err.message : "Oops! Something went wrong 😢";
+      const msg = err instanceof APIError ? err.message : "Oops! Try again 😢";
       setApiError(msg);
       setEmotion("sad");
-      setRecordingState("error");
-      setTimeout(() => { setApiError(null); setRecordingState("idle"); setEmotion("neutral"); }, 3000);
+      setRS("error");
+      setTimeout(() => { setApiError(null); setRS("idle"); setEmotion("neutral"); }, 3000);
     } finally {
       busyRef.current = false;
     }
   }, [autoSpeak, settings, speak, cancelTTS, conversation]);
 
-  // ── Mic button press ──────────────────────────────────────────────────────
-  const handleMicPress = useCallback(async () => {
+  const handleMic = useCallback(async () => {
     if (busyRef.current) return;
     setApiError(null);
-
     if (recorder.recordingState === "recording") {
       const blob = await recorder.stopRecording();
-      if (!blob || blob.size < 1000) {
-        setApiError("Too short! Please speak a little longer 🎤");
-        setRecordingState("error");
-        setTimeout(() => { setApiError(null); setRecordingState("idle"); }, 3000);
+      if (!blob || blob.size < 800) {
+        setApiError("Too short — hold and speak! 🎤");
+        setRS("error");
+        setTimeout(() => { setApiError(null); setRS("idle"); }, 2500);
         return;
       }
       await processAudio(blob);
     } else {
-      setTranscript("");
-      setResponse(null);
-      setEmotion("neutral");
+      setTranscript(""); setResponse(null); setEmotion("neutral");
       await recorder.startRecording();
-      setRecordingState("recording");
+      setRS("recording");
     }
   }, [recorder, processAudio]);
 
-  // Sync recorder state
   useEffect(() => {
-    if (recorder.recordingState === "requesting") setRecordingState("requesting");
-    if (recorder.recordingState === "recording")  setRecordingState("recording");
-    if (recorder.recordingState === "error") {
-      setApiError(recorder.error);
-      setRecordingState("error");
-    }
+    if (recorder.recordingState === "requesting") setRS("requesting");
+    if (recorder.recordingState === "recording")  setRS("recording");
+    if (recorder.recordingState === "error") { setApiError(recorder.error); setRS("error"); }
   }, [recorder.recordingState, recorder.error]);
 
-  // ── Wake word ─────────────────────────────────────────────────────────────
-  const { supported: wakeSupported, listening: wakeListening } = useWakeWord({
-    onDetected: () => { if (recordingState === "idle" && backendOnline) handleMicPress(); },
-    enabled: wakeEnabled && recordingState === "idle",
+  const { supported: wakeOk, listening: wakeListen } = useWakeWord({
+    onDetected: () => { if (recordingState === "idle" && online) handleMic(); },
+    enabled: wakeOn && recordingState === "idle",
   });
 
-  const isRecording   = recordingState === "recording";
-  const isProcessing  = recordingState === "processing" || recordingState === "requesting";
-  const isBusy        = isRecording || isProcessing || isSpeaking;
+  const isRec    = recordingState === "recording";
+  const isProc   = recordingState === "processing" || recordingState === "requesting";
+  const isBusy   = isRec || isProc || isSpeaking;
 
-  // Emotion → accent color
-  const accentColor = {
-    happy:     "#FBBF24",
-    excited:   "#F472B6",
-    sad:       "#60A5FA",
-    thinking:  "#A78BFA",
-    surprised: "#34D399",
-    neutral:   "#818CF8",
-    talking:   "#818CF8",
-  }[emotion] ?? "#818CF8";
+  // Status text
+  const statusText = useMemo(() => {
+    if (apiError) return apiError;
+    if (recordingState === "recording")  return "🔴 Listening... tap to stop";
+    if (recordingState === "processing") return "💭 Thinking...";
+    if (recordingState === "speaking")   return "🔊 Monto is speaking...";
+    if (wakeOn && wakeListen)            return "👂 Listening for 'Monto'...";
+    if (wakeOn)                          return "Wake word active";
+    return "Tap mic or say 'Monto'";
+  }, [recordingState, apiError, wakeOn, wakeListen]);
 
   return (
-    <div className="min-h-screen flex flex-col relative overflow-hidden"
-         style={{ background: "linear-gradient(180deg, #0F0A1E 0%, #1E0A3C 50%, #0A0F2E 100%)" }}>
+    <div className="min-h-dvh flex flex-col relative overflow-hidden select-none"
+         style={{ background: `linear-gradient(160deg, #0D0820 0%, #180D3A 45%, #0A1428 100%)` }}>
 
       <StarField />
+      <EmojiBurst emotion={emotion} trigger={emojiBurst} />
 
-      {/* Floating emojis when responding */}
-      <AnimatePresence>
-        {(emotion === "happy" || emotion === "excited") && <FloatingEmojis emotion={emotion} />}
-      </AnimatePresence>
+      {/* Emotion ambient glow */}
+      <motion.div className="fixed inset-0 pointer-events-none"
+        animate={{ opacity: [0.08, 0.14, 0.08] }}
+        transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+        style={{ background: `radial-gradient(ellipse 60% 50% at 50% 40%, ${cfg.glow}55, transparent)` }}
+      />
 
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <header className="relative z-10 flex items-center justify-between px-5 pt-5 pb-3">
-        {/* Backend status */}
-        <div className="flex items-center gap-2">
+      {/* ── Header ──────────────────────────────────────────────────────── */}
+      <header className="relative z-20 flex items-center justify-between px-5 pt-safe pt-4 pb-2">
+        {/* Status pill */}
+        <motion.div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full glass glass-border"
+          initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}>
           <motion.div
-            className={cn("w-2.5 h-2.5 rounded-full", backendOnline ? "bg-green-400" : "bg-red-400")}
-            animate={{ scale: [1, 1.3, 1] }}
+            className={cn("w-1.5 h-1.5 rounded-full", online ? "bg-emerald-400" : "bg-red-400")}
+            animate={{ scale: [1, 1.4, 1] }}
             transition={{ duration: 2, repeat: Infinity }}
           />
-          <span className="text-xs text-white/50">
-            {backendOnline ? "Connected" : "Offline"}
+          <span className="text-[10px] text-white/50 font-semibold tracking-wide">
+            {online ? "ONLINE" : "OFFLINE"}
           </span>
-        </div>
+        </motion.div>
 
-        {/* Logo */}
-        <motion.div className="text-center" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-          <h1 className="font-kids text-2xl shimmer-text tracking-wide">
-            MONTO KIDS
-          </h1>
-          <p className="text-white/60 text-[10px] tracking-widest uppercase">AI Sathi ✦</p>
+        {/* Brand */}
+        <motion.div className="text-center" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
+          <div className="font-kids text-3xl text-shimmer leading-none">MONTO</div>
+          <div className="text-[9px] tracking-[0.3em] text-white/40 uppercase mt-0.5">Kids · AI Sathi ✦</div>
         </motion.div>
 
         {/* Chat toggle */}
-        <button
+        <motion.button
           onClick={() => setShowChat(v => !v)}
-          className="text-white/60 hover:text-white transition-colors text-xs font-semibold"
+          className="w-9 h-9 rounded-full glass glass-border flex items-center justify-center"
+          whileTap={{ scale: 0.85 }}
+          initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}
         >
-          {showChat ? "Voice" : "Chat"}
-        </button>
+          {showChat
+            ? <X className="w-4 h-4 text-white/70" />
+            : <MessageCircle className="w-4 h-4 text-white/70" />}
+        </motion.button>
       </header>
 
-      {/* ── Main content ───────────────────────────────────────────────────── */}
-      <main className="relative z-10 flex-1 flex flex-col items-center px-5 pb-6 max-w-md mx-auto w-full">
+      {/* ── Main ────────────────────────────────────────────────────────── */}
+      <main className="relative z-10 flex-1 flex flex-col items-center px-5 pb-safe pb-6 max-w-md mx-auto w-full overflow-hidden">
         <AnimatePresence mode="wait">
           {!showChat ? (
             <motion.div key="voice" className="flex flex-col items-center w-full flex-1"
-              initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
 
-              {/* Avatar with glow */}
-              <div className="relative mt-2 mb-4">
-                {/* Outer glow ring */}
-                <motion.div
-                  className="absolute inset-0 rounded-full"
-                  style={{ background: `radial-gradient(circle, ${accentColor}40 0%, transparent 70%)` }}
-                  animate={{ scale: [1, 1.15, 1], opacity: [0.6, 1, 0.6] }}
-                  transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+              {/* ── Avatar area ──────────────────────────────────────── */}
+              <div className="relative flex items-center justify-center mt-2 mb-2">
+                {/* Outer orbit ring */}
+                <motion.div className="absolute rounded-full border"
+                  style={{
+                    width: 250, height: 250,
+                    borderColor: `${cfg.color}25`,
+                    boxShadow: `0 0 60px ${cfg.glow}20`,
+                  }}
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+                >
+                  {/* Orbit dots */}
+                  {[0, 90, 180, 270].map((deg, i) => (
+                    <div key={i} className="absolute w-2 h-2 rounded-full"
+                         style={{
+                           background: cfg.color,
+                           top: "50%", left: "50%",
+                           transform: `rotate(${deg}deg) translateX(123px) translateY(-50%)`,
+                           opacity: 0.6,
+                         }} />
+                  ))}
+                </motion.div>
+
+                {/* Inner glow */}
+                <motion.div className="absolute rounded-full"
+                  style={{ width: 200, height: 200, background: `radial-gradient(circle, ${cfg.glow}30, transparent)` }}
+                  animate={{ scale: [1, 1.12, 1], opacity: [0.6, 1, 0.6] }}
+                  transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
                 />
 
                 {/* Avatar */}
                 <motion.div
-                  animate={{ y: [0, -8, 0] }}
-                  transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut" }}
+                  className="float relative z-10"
+                  animate={isRec ? { scale: [1, 1.03, 1] } : {}}
+                  transition={{ duration: 0.3, repeat: Infinity }}
                 >
-                  <Avatar emotion={emotion} size={200} />
+                  <Avatar emotion={emotion} size={190} />
                 </motion.div>
 
-                {/* Speaking sound waves */}
+                {/* Speaking arcs */}
                 <AnimatePresence>
                   {isSpeaking && (
-                    <div className="absolute -right-4 top-1/2 -translate-y-1/2">
-                      {[0, 1, 2].map(i => (
+                    <div className="absolute right-0 top-1/2 -translate-y-1/2">
+                      {[0,1,2].map(i => (
                         <motion.div key={i}
                           className="absolute rounded-full border-2"
-                          style={{ borderColor: accentColor + "80" }}
-                          initial={{ width: 20, height: 20, x: -10, y: -10, opacity: 0 }}
-                          animate={{ width: [20, 60], height: [20, 60], x: [-10, -30], y: [-10, -30], opacity: [0.8, 0] }}
-                          transition={{ duration: 1.2, delay: i * 0.3, repeat: Infinity }}
+                          style={{ borderColor: cfg.color + "70", right: -4 - i * 14, top: "50%", transform: "translateY(-50%)" }}
+                          initial={{ width: 16, height: 16, opacity: 0.9 }}
+                          animate={{ width: 16 + i * 18, height: 16 + i * 18, opacity: 0 }}
+                          transition={{ duration: 1, delay: i * 0.25, repeat: Infinity }}
                         />
                       ))}
                     </div>
@@ -275,217 +322,250 @@ export default function Home() {
                 </AnimatePresence>
               </div>
 
-              {/* Name tag */}
-              <motion.div className="text-center mb-4"
-                initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-                <p className="text-white/50 text-sm">
-                  {recordingState === "idle"     && !wakeListening && "Tap the mic or say 'Monto'"}
-                  {recordingState === "idle"     && wakeListening  && "🎙 Listening for 'Monto'..."}
-                  {recordingState === "recording" && "🔴 Listening... tap to stop"}
-                  {recordingState === "processing" && "💭 Thinking..."}
-                  {recordingState === "speaking"   && "🔊 Monto is speaking..."}
-                  {recordingState === "error"      && (apiError || "Something went wrong")}
-                </p>
+              {/* ── Status / greeting ────────────────────────────────── */}
+              <motion.div className="text-center mb-3 px-4" layout>
+                <AnimatePresence mode="wait">
+                  <motion.p key={statusText}
+                    className={cn(
+                      "text-sm font-semibold leading-snug",
+                      apiError ? "text-red-300" :
+                      isRec ? "text-red-300" :
+                      isProc ? "text-purple-300" :
+                      isSpeaking ? "text-yellow-300" :
+                      "text-white/50"
+                    )}
+                    initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.2 }}
+                  >
+                    {statusText}
+                  </motion.p>
+                </AnimatePresence>
               </motion.div>
 
-              {/* Response card */}
+              {/* ── Audio visualizer ─────────────────────────────────── */}
               <AnimatePresence>
-                {response?.response && (
-                  <motion.div
-                    key="response"
-                    initial={{ opacity: 0, y: 20, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className="w-full mb-4 rounded-3xl p-4 relative overflow-hidden"
-                    style={{
-                      background: "rgba(255,255,255,0.08)",
-                      backdropFilter: "blur(20px)",
-                      border: `1px solid ${accentColor}40`,
-                    }}
-                  >
-                    {/* Accent top border */}
-                    <div className="absolute top-0 left-0 right-0 h-0.5 rounded-full"
-                         style={{ background: `linear-gradient(90deg, transparent, ${accentColor}, transparent)` }} />
-
-                    {transcript && (
-                      <p className="text-white/50 text-xs mb-2 flex items-center gap-1.5">
-                        <Mic className="w-3 h-3" />
-                        {transcript}
-                      </p>
-                    )}
-                    <div className="flex items-start gap-2">
-                      <motion.div
-                        className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
-                        style={{ background: `linear-gradient(135deg, ${accentColor}, #EC4899)` }}
-                        animate={isSpeaking ? { scale: [1, 1.2, 1] } : {}}
-                        transition={{ duration: 0.5, repeat: Infinity }}
-                      >
-                        <Sparkles className="w-3 h-3 text-white" />
-                      </motion.div>
-                      <p className="text-white text-sm leading-relaxed font-medium">
-                        {response.response}
-                      </p>
-                    </div>
+                {isRec && (
+                  <motion.div className="mb-3"
+                    initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.8 }}>
+                    <AudioBars level={recorder.audioLevel} color={cfg.color} />
                   </motion.div>
                 )}
               </AnimatePresence>
 
-              {/* Backend offline */}
-              <AnimatePresence>
-                {backendOnline === false && (
-                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                    className="w-full mb-4 rounded-2xl bg-red-500/20 border border-red-500/40 p-3 flex items-center gap-2">
-                    <p className="text-red-300 text-xs flex-1">Backend offline — start the server!</p>
-                    <button onClick={() => checkHealth().then(setBackendOnline)}>
-                      <RefreshCw className="w-4 h-4 text-red-300" />
-                    </button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              {/* ── Response card ─────────────────────────────────────── */}
+              <div className="w-full flex-1 flex flex-col justify-center">
+                <AnimatePresence mode="wait">
+                  {response ? (
+                    <motion.div key="response"
+                      className="w-full rounded-3xl p-4 relative overflow-hidden glass glass-border"
+                      style={{ borderColor: `${cfg.color}30` }}
+                      initial={{ opacity: 0, y: 24, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -16, scale: 0.95 }}
+                      transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                    >
+                      {/* Animated top edge */}
+                      <motion.div className="absolute top-0 left-0 right-0 h-0.5"
+                        style={{ background: `linear-gradient(90deg, transparent, ${cfg.color}, ${cfg.glow}, transparent)` }}
+                        animate={{ opacity: [0.5, 1, 0.5] }}
+                        transition={{ duration: 2, repeat: Infinity }}
+                      />
 
-              {/* Controls */}
-              <div className="flex flex-col items-center gap-5 w-full mt-auto">
+                      {/* You said */}
+                      {transcript && (
+                        <div className="flex items-center gap-2 mb-3 pb-2.5 border-b border-white/10">
+                          <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                               style={{ background: `${cfg.color}30` }}>
+                            <Mic className="w-2.5 h-2.5" style={{ color: cfg.color }} />
+                          </div>
+                          <p className="text-white/50 text-xs leading-snug">{transcript}</p>
+                        </div>
+                      )}
+
+                      {/* Monto reply */}
+                      <div className="flex items-start gap-2.5">
+                        <motion.div
+                          className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
+                          style={{ background: `linear-gradient(135deg, ${cfg.color}, ${cfg.glow})` }}
+                          animate={isSpeaking ? { scale: [1, 1.2, 1] } : {}}
+                          transition={{ duration: 0.5, repeat: Infinity }}
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-white" />
+                        </motion.div>
+                        <div className="flex-1">
+                          <p className="text-[11px] font-bold mb-1 uppercase tracking-wider"
+                             style={{ color: cfg.color }}>Monto</p>
+                          <p className="text-white text-sm leading-relaxed font-medium">
+                            {response.response}
+                          </p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ) : (
+                    <motion.div key="greeting"
+                      className="w-full rounded-3xl p-4 glass glass-border text-center"
+                      initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0 }}>
+                      <p className="text-white/40 text-sm leading-relaxed">{greeting}</p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* ── Controls ──────────────────────────────────────────── */}
+              <div className="flex flex-col items-center gap-4 mt-5 w-full">
                 {/* Mic button */}
                 <div className="relative flex items-center justify-center">
-                  {/* Recording rings */}
+                  {/* Pulse rings */}
                   <AnimatePresence>
-                    {isRecording && [0, 1, 2].map(i => (
+                    {isRec && [0,1,2].map(i => (
                       <motion.div key={i}
                         className="absolute rounded-full"
-                        style={{ border: `2px solid ${accentColor}` }}
-                        initial={{ width: 88, height: 88, opacity: 0.8 }}
-                        animate={{ width: 88 + i * 40 + recorder.audioLevel * 20, height: 88 + i * 40 + recorder.audioLevel * 20, opacity: 0 }}
-                        transition={{ duration: 1.5, repeat: Infinity, delay: i * 0.4 }}
+                        style={{ border: `2px solid ${cfg.color}` }}
+                        initial={{ width: 88, height: 88, opacity: 0.7 }}
+                        animate={{ width: 88 + i*36 + recorder.audioLevel*24, height: 88 + i*36 + recorder.audioLevel*24, opacity: 0 }}
+                        transition={{ duration: 1.4, delay: i * 0.35, repeat: Infinity, ease: "easeOut" }}
                       />
                     ))}
                   </AnimatePresence>
 
+                  {/* Button */}
                   <motion.button
-                    onClick={handleMicPress}
-                    disabled={backendOnline === false || isProcessing}
-                    className={cn(
-                      "relative z-10 w-22 h-22 rounded-full flex items-center justify-center",
-                      "focus:outline-none",
-                      isProcessing ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
-                    )}
+                    onClick={handleMic}
+                    disabled={!online || isProc}
+                    className="relative z-10 w-22 h-22 rounded-full flex items-center justify-center focus:outline-none disabled:opacity-40"
                     style={{
                       width: 88, height: 88,
-                      background: isRecording
-                        ? "linear-gradient(135deg, #EF4444, #DC2626)"
-                        : `linear-gradient(135deg, ${accentColor}, #EC4899)`,
-                      boxShadow: isRecording
-                        ? "0 0 30px rgba(239,68,68,0.6)"
-                        : `0 0 30px ${accentColor}80`,
+                      background: isRec
+                        ? `linear-gradient(135deg, #EF4444, #DC2626)`
+                        : `linear-gradient(135deg, ${cfg.color}, ${cfg.glow})`,
+                      boxShadow: isRec
+                        ? "0 0 40px rgba(239,68,68,0.5), 0 8px 32px rgba(0,0,0,0.4)"
+                        : `0 0 40px ${cfg.glow}50, 0 8px 32px rgba(0,0,0,0.4)`,
                     }}
-                    whileHover={{ scale: 1.08 }}
-                    whileTap={{ scale: 0.92 }}
+                    whileHover={{ scale: 1.06 }}
+                    whileTap={{ scale: 0.9 }}
                   >
                     <AnimatePresence mode="wait">
-                      {isProcessing ? (
-                        <motion.div key="spin"
-                          animate={{ rotate: 360 }}
-                          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}>
-                          <Sparkles className="w-9 h-9 text-white" />
+                      {isProc ? (
+                        <motion.div key="spin" animate={{ rotate: 360 }}
+                          transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}>
+                          <Sparkles className="w-10 h-10 text-white" />
                         </motion.div>
-                      ) : isRecording ? (
+                      ) : isRec ? (
                         <motion.div key="stop"
-                          initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}>
-                          <div className="w-7 h-7 bg-white rounded-md" />
+                          initial={{ scale: 0, rotate: -90 }} animate={{ scale: 1, rotate: 0 }}
+                          exit={{ scale: 0 }} transition={{ type: "spring", stiffness: 400 }}>
+                          <div className="w-8 h-8 rounded-lg bg-white" />
                         </motion.div>
                       ) : (
                         <motion.div key="mic"
-                          initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}>
-                          <Mic className="w-9 h-9 text-white" />
+                          initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}
+                          transition={{ type: "spring", stiffness: 400 }}>
+                          <Mic className="w-10 h-10 text-white" />
                         </motion.div>
                       )}
                     </AnimatePresence>
                   </motion.button>
                 </div>
 
-                {/* Secondary controls */}
-                <div className="flex items-center gap-4">
+                {/* Bottom row */}
+                <div className="flex items-center gap-3">
                   {/* Volume */}
-                  <motion.button
-                    onClick={() => setAutoSpeak(v => !v)}
-                    className="w-12 h-12 rounded-2xl flex items-center justify-center"
-                    style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)" }}
-                    whileTap={{ scale: 0.9 }}
-                  >
+                  <motion.button onClick={() => setAutoSpeak(v => !v)}
+                    className="w-11 h-11 rounded-2xl glass glass-border flex items-center justify-center"
+                    whileTap={{ scale: 0.85 }}>
                     {autoSpeak
-                      ? <Volume2 className="w-5 h-5 text-white/80" />
-                      : <VolumeX className="w-5 h-5 text-white/40" />}
+                      ? <Volume2 className="w-4 h-4" style={{ color: cfg.color }} />
+                      : <VolumeX className="w-4 h-4 text-white/30" />}
                   </motion.button>
 
                   {/* Wake word */}
-                  {wakeSupported && (
-                    <motion.button
-                      onClick={() => setWakeEnabled(v => !v)}
-                      className="px-4 h-12 rounded-2xl flex items-center gap-2 text-xs font-bold"
+                  {wakeOk && (
+                    <motion.button onClick={() => setWakeOn(v => !v)}
+                      className="h-11 px-4 rounded-2xl flex items-center gap-2 font-bold text-xs"
                       style={{
-                        background: wakeEnabled ? `${accentColor}30` : "rgba(255,255,255,0.1)",
-                        border: `1px solid ${wakeEnabled ? accentColor : "rgba(255,255,255,0.15)"}`,
-                        color: wakeEnabled ? accentColor : "rgba(255,255,255,0.5)",
+                        background: wakeOn ? `${cfg.color}25` : "rgba(255,255,255,0.06)",
+                        border: `1px solid ${wakeOn ? cfg.color + "60" : "rgba(255,255,255,0.12)"}`,
+                        color: wakeOn ? cfg.color : "rgba(255,255,255,0.4)",
                       }}
-                      whileTap={{ scale: 0.9 }}
-                    >
-                      <motion.div
-                        className="w-2 h-2 rounded-full"
-                        style={{ background: wakeEnabled && wakeListening ? accentColor : "rgba(255,255,255,0.3)" }}
-                        animate={wakeEnabled && wakeListening ? { scale: [1, 1.5, 1] } : {}}
+                      whileTap={{ scale: 0.9 }}>
+                      <motion.div className="w-2 h-2 rounded-full"
+                        style={{ background: wakeOn && wakeListen ? cfg.color : "rgba(255,255,255,0.2)" }}
+                        animate={wakeOn && wakeListen ? { scale: [1, 1.6, 1] } : {}}
                         transition={{ duration: 1, repeat: Infinity }}
                       />
-                      {wakeEnabled ? (wakeListening ? "Listening..." : "Wake On") : "Say Monto"}
+                      {wakeOn ? (wakeListen ? "Listening..." : "Wake On") : "Say Monto"}
                     </motion.button>
                   )}
+
+                  {/* New chat */}
+                  <motion.button
+                    onClick={() => { conversation.clearHistory(); setTranscript(""); setResponse(null); setEmotion("neutral"); }}
+                    className="w-11 h-11 rounded-2xl glass glass-border flex items-center justify-center"
+                    whileTap={{ scale: 0.85 }}>
+                    <ChevronRight className="w-4 h-4 text-white/40 rotate-180" />
+                  </motion.button>
                 </div>
               </div>
             </motion.div>
 
           ) : (
-            /* ── Chat view ───────────────────────────────────────────────── */
+            /* ── Chat view ──────────────────────────────────────────── */
             <motion.div key="chat" className="flex flex-col w-full flex-1 overflow-hidden"
-              initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+              initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
 
-              <div className="flex-1 overflow-y-auto space-y-3 py-3">
-                <AnimatePresence>
-                  {conversation.messages.map((msg) => (
-                    <motion.div key={msg.id}
-                      initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-                      className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}>
-                      <div
-                        className={cn("max-w-[80%] px-4 py-3 rounded-3xl text-sm leading-relaxed")}
-                        style={msg.role === "user"
-                          ? { background: "linear-gradient(135deg, #7C3AED, #EC4899)", color: "white" }
-                          : { background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", color: "white" }}
-                      >
-                        {msg.text}
-                      </div>
-                    </motion.div>
-                  ))}
+              {/* Messages */}
+              <div className="flex-1 overflow-y-auto space-y-3 py-3 px-1">
+                {conversation.messages.length === 0 && (
+                  <div className="text-center text-white/30 text-sm mt-8">{greeting}</div>
+                )}
+                <AnimatePresence initial={false}>
+                  {conversation.messages.map((msg) => {
+                    const isUser = msg.role === "user";
+                    const mCfg = EMOTION_CONFIG[(msg.emotion ?? "neutral") as keyof typeof EMOTION_CONFIG] ?? EMOTION_CONFIG.neutral;
+                    return (
+                      <motion.div key={msg.id}
+                        className={cn("flex", isUser ? "justify-end" : "justify-start")}
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        transition={{ type: "spring", stiffness: 300, damping: 28 }}>
+                        {!isUser && (
+                          <div className="w-7 h-7 rounded-full mr-2 flex-shrink-0 mt-1 flex items-center justify-center"
+                               style={{ background: `linear-gradient(135deg, ${mCfg.color}, ${mCfg.glow})` }}>
+                            <Sparkles className="w-3 h-3 text-white" />
+                          </div>
+                        )}
+                        <div className={cn("max-w-[78%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed font-medium")}
+                             style={isUser
+                               ? { background: `linear-gradient(135deg, #7C3AED, #EC4899)`, color: "white", borderBottomRightRadius: 6 }
+                               : { background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", color: "white", borderBottomLeftRadius: 6 }}>
+                          {msg.text}
+                        </div>
+                      </motion.div>
+                    );
+                  })}
                 </AnimatePresence>
               </div>
 
-              <div className="flex flex-col items-center gap-3 pt-3">
-                <div className="relative flex items-center justify-center">
-                  <motion.button onClick={handleMicPress}
-                    disabled={backendOnline === false || isProcessing}
-                    className="w-16 h-16 rounded-full flex items-center justify-center focus:outline-none"
-                    style={{
-                      background: isRecording
-                        ? "linear-gradient(135deg, #EF4444, #DC2626)"
-                        : `linear-gradient(135deg, ${accentColor}, #EC4899)`,
-                      boxShadow: `0 0 25px ${accentColor}60`,
-                    }}
-                    whileTap={{ scale: 0.9 }}>
-                    {isProcessing
-                      ? <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}>
-                          <Sparkles className="w-7 h-7 text-white" />
-                        </motion.div>
-                      : isRecording
-                        ? <div className="w-5 h-5 bg-white rounded" />
-                        : <Mic className="w-7 h-7 text-white" />}
-                  </motion.button>
-                </div>
+              {/* Chat mic */}
+              <div className="pt-3 flex items-center justify-center gap-3">
+                <motion.button onClick={handleMic}
+                  disabled={!online || isProc}
+                  className="w-16 h-16 rounded-full flex items-center justify-center focus:outline-none disabled:opacity-40"
+                  style={{
+                    background: isRec
+                      ? "linear-gradient(135deg, #EF4444, #DC2626)"
+                      : `linear-gradient(135deg, ${cfg.color}, ${cfg.glow})`,
+                    boxShadow: `0 0 30px ${cfg.glow}50`,
+                  }}
+                  whileTap={{ scale: 0.9 }}>
+                  {isProc ? <motion.div animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}>
+                    <Sparkles className="w-7 h-7 text-white" /></motion.div>
+                  : isRec ? <div className="w-5 h-5 rounded bg-white" />
+                  : <Mic className="w-7 h-7 text-white" />}
+                </motion.button>
               </div>
             </motion.div>
           )}
