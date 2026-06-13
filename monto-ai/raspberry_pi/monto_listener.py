@@ -123,7 +123,7 @@ def init_mic():
         logger.info(f"✅ Mic ready: index={_mic_idx}, rate={_mic_rate}Hz")
     else:
         _mic_rate = 16000
-        logger.info("✅ Using default mic at 16000Hz")
+        logger.warning("⚠️  No mic found — connect a USB mic or I2S mic to use voice")
 
 
 def record_audio_live(duration: int, face) -> bytes:
@@ -161,9 +161,6 @@ def record_audio_live(duration: int, face) -> bytes:
     except OSError as e:
         pa.terminate()
         raise RuntimeError(f"Cannot open mic (index={_mic_idx}, rate={_mic_rate}): {e}")
-
-    frames = []
-    total  = int(_mic_rate / 512 * duration)
 
     try:
         for i in range(total):
@@ -301,8 +298,11 @@ def do_conversation(face):
     def _run():
         _busy.set()
         try:
-            # Step 1: Record
-            face.set_emotion("listening", f"Listening... speak now!")
+            # Check if mic is available
+            if _mic_idx is None:
+                face.set_emotion("sad", "No mic connected! Please connect a USB mic 🎤")
+                time.sleep(3)
+                return
             audio = record_audio_live(RECORD_SECONDS, face)
 
             # Step 2: Send to backend
@@ -335,7 +335,6 @@ def do_conversation(face):
             logger.error(f"Conversation error:\n{traceback.format_exc()}")
             face.set_emotion("sad", f"Error: {str(e)[:50]}")
             time.sleep(3)
-
         finally:
             _busy.clear()
             if face.running:

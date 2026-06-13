@@ -193,6 +193,8 @@ export default function Home() {
   const { supported: wakeOk, listening: wakeListen } = useWakeWord({
     onDetected: () => { if (recordingState === "idle" && online) handleMic(); },
     enabled: wakeOn && recordingState === "idle",
+    keywords: ["monto", "hey monto", "hi monto", "मन्टो", "हे मन्टो"],
+    language: lang === "nepali" ? "ne-NP" : "en-US",
   });
 
   const isRec    = recordingState === "recording";
@@ -480,6 +482,17 @@ export default function Home() {
                     {autoSpeak
                       ? <Volume2 className="w-4 h-4" style={{ color: cfg.color }} />
                       : <VolumeX className="w-4 h-4 text-white/30" />}
+                  </motion.button>
+
+                  {/* Language toggle EN/NE */}
+                  <motion.button
+                    onClick={() => setLang(l => l === "english" ? "nepali" : "english")}
+                    className="h-11 px-3 rounded-2xl glass glass-border flex items-center gap-1.5 font-bold text-xs"
+                    style={{ color: lang === "nepali" ? "#F472B6" : cfg.color }}
+                    whileTap={{ scale: 0.85 }}
+                  >
+                    <span className="text-sm">{lang === "nepali" ? "🇳🇵" : "🇺🇸"}</span>
+                    <span>{lang === "nepali" ? "नेपाली" : "EN"}</span>
                   </motion.button>
 
                   {/* Wake word */}
