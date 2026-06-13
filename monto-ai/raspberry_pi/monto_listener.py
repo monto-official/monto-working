@@ -59,64 +59,98 @@ def set_backend(url):
 # ── AUDIO DEVICE SETUP ────────────────────────────────────────────────────────
 
 def init_mic():
-    """Find and cache USB mic index and sample rate at startup. Called once."""
+    """Find and cache I2S or USB mic index and sample rate at startup."""
     global _mic_idx, _mic_rate
     pa  = pyaudio.PyAudio()
     idx = None
     try:
-        usb_kw = ["usb", "microphone", "mic", "headset", "earphone", "composite"]
+        # I2S mic keywords
+        i2s_kw  = ["i2s", "inmp441", "admp441", "sph0645"]
+        usb_kw  = ["usb", "microphone", "mic", "headset", "earphone", "composite"]
+        all_kw  = i2s_kw + usb_kw
+
         logger.info("Available audio input devices:")
         for i in range(pa.get_device_count()):
             d = pa.get_device_info_by_index(i)
             if d["maxInputChannels"] > 0:
                 logger.info(f"  [{i}] {d['name']} (SR:{d['defaultSampleRate']:.0f})")
                 name = d["name"].lower()
-                if any(k in name for k in usb_kw) and idx is None:
+                # Prefer I2S mic, then USB
+                if any(k in name for k in i2s_kw) and idx is None:
                     idx = i
-                    logger.info(f"  ↑ Selected as USB mic")
+                    logger.info(f"  ↑ I2S mic selected")
+                elif any(k in name for k in usb_kw) and idx is None:
+                    idx = i
+                    logger.info(f"  ↑ USB mic selected")
     finally:
         pa.terminate()
 
     _mic_idx = idx
 
     if _mic_idx is not None:
-        # Detect which sample rate the mic actually supports
         pa2 = pyaudio.PyAudio()
         try:
             d = pa2.get_device_info_by_index(_mic_idx)
-            default_sr = int(d["defaultSampleRate"])
-
-            # Try preferred rates in order
-            for rate in [16000, 44100, 48000, 22050, 8000]:
+            # I2S mics usually support 16000Hz
+            for rate in [16000, 44100, 48000, 22050]:
                 try:
-                    supported = pa2.is_format_supported(
+                    if pa2.is_format_supported(
                         rate,
                         input_device=_mic_idx,
                         input_channels=1,
-                        input_format=pyaudio.paInt16,
-                    )
-                    if supported:
+                        input_format=pyaudio.paInt32,  # I2S uses 32-bit
+                    ):
                         _mic_rate = rate
                         break
                 except Exception:
-                    continue
+                    # Try 16-bit
+                    try:
+                        if pa2.is_format_supported(
+                            rate,
+                            input_device=_mic_idx,
+                            input_channels=1,
+                            input_format=pyaudio.paInt16,
+                        ):
+                            _mic_rate = rate
+                            break
+                    except Exception:
+                        continue
             else:
-                _mic_rate = default_sr
+                _mic_rate = int(d["defaultSampleRate"])
         finally:
             pa2.terminate()
 
-        logger.info(f"✅ USB mic: index={_mic_idx}, sample_rate={_mic_rate}Hz")
+        logger.info(f"✅ Mic ready: index={_mic_idx}, rate={_mic_rate}Hz")
     else:
         _mic_rate = 16000
         logger.info("✅ Using default mic at 16000Hz")
 
 
 def record_audio_live(duration: int, face) -> bytes:
-    """Record from cached mic, showing live level on face.
-    Auto-resamples to 16kHz WAV for Whisper compatibility."""
-    pa     = pyaudio.PyAudio()
+    """Record from I2S or USB mic, show live level, return 16kHz WAV.
+    - I2S mics (INMP441): 32-bit samples, converted to 16-bit
+    - USB mics: 16-bit samples directly
+    - Auto-resamples to 16kHz for Whisper
+    """
+    pa = pyaudio.PyAudio()
+
+    # Try 32-bit first (I2S INMP441), fall back to 16-bit (USB)
+    pa_format    = pyaudio.paInt32
+    sample_width = 4
+    try:
+        pa.is_format_supported(_mic_rate, input_device=_mic_idx,
+                               input_channels=1, input_format=pyaudio.paInt32)
+        logger.info("Using 32-bit I2S audio format")
+    except Exception:
+        pa_format    = pyaudio.paInt16
+        sample_width = 2
+        logger.info("Using 16-bit audio format")
+    finally:
+        pa.terminate()
+
+    pa = pyaudio.PyAudio()
     kwargs = dict(
-        format=pyaudio.paInt16, channels=1,
+        format=pa_format, channels=1,
         rate=_mic_rate, input=True, frames_per_buffer=512,
     )
     if _mic_idx is not None:
@@ -137,38 +171,43 @@ def record_audio_live(duration: int, face) -> bytes:
             frames.append(data)
 
             if i % 8 == 0 and face:
-                arr   = np.frombuffer(data, dtype=np.int16).astype(np.float32)
-                rms   = np.sqrt(np.mean(arr ** 2))
-                level = min(1.0, rms / 2500.0)
+                if sample_width == 4:
+                    arr = np.frombuffer(data, dtype=np.int32).astype(np.float32) / 2147483648.0
+                else:
+                    arr = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+                rms   = float(np.sqrt(np.mean(arr ** 2)))
+                level = min(1.0, rms * 12)
                 face.set_mic_level(level)
     finally:
         stream.stop_stream()
         stream.close()
         pa.terminate()
-        if face:
-            face.set_mic_level(0.0)
+        if face: face.set_mic_level(0.0)
 
-    # Combine frames
     raw = b"".join(frames)
 
-    # Resample to 16kHz if needed (Whisper requires 16kHz)
+    # Convert 32-bit I2S → 16-bit PCM
+    if sample_width == 4:
+        arr32 = np.frombuffer(raw, dtype=np.int32)
+        raw   = (arr32 >> 16).astype(np.int16).tobytes()
+
+    # Resample to 16kHz if needed
     if _mic_rate != 16000:
         try:
             try:
                 import audioop
             except ImportError:
-                import audioop_lts as audioop  # Python 3.13+
+                import audioop_lts as audioop
             raw, _ = audioop.ratecv(raw, 2, 1, _mic_rate, 16000, None)
             logger.info(f"Resampled {_mic_rate}Hz → 16000Hz")
         except ImportError:
-            logger.warning("audioop not available — install: pip install audioop-lts")
+            logger.warning("audioop not available — pip install audioop-lts")
 
     buf = io.BytesIO()
-    out_rate = 16000 if _mic_rate != 16000 else _mic_rate
     with wave.open(buf, "wb") as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)
-        wf.setframerate(out_rate)
+        wf.setframerate(16000)
         wf.writeframes(raw)
     return buf.getvalue()
 
