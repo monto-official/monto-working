@@ -1,179 +1,198 @@
 """
-Monto AI — GPU Server: Piper TTS
-Runs on your GPU machine.
-Converts text to speech using Piper (fast, local, no API key).
+Monto AI — GPU Piper TTS Server
+Runs on the GPU machine. Serves Piper TTS via HTTP.
 
-Endpoint: POST /v1/tts/synthesize   → returns WAV audio bytes
-          GET  /health
-          GET  /voices              → list available voices
+Port  : 5002 (default)
+Auth  : Bearer token from GPU_SERVER_API_KEY
+Output: WAV audio bytes
 
-Setup:
-    pip install piper-tts
-    # Download voice model:
-    python -m piper --download-dir ./voices en_US-lessac-medium
-    # Or for a child-friendly voice:
-    python -m piper --download-dir ./voices en_US-amy-medium
+Usage:
+    python piper_server.py
+
+Endpoints:
+    POST /v1/tts/synthesize   — text + voice + emotion → WAV bytes
+    GET  /voices              — list downloaded voice models
+    GET  /health              — status
 """
-import os
 import io
+import os
+import json
 import logging
 import subprocess
 import tempfile
-import functools
-from flask import Flask, request, jsonify, send_file
+import threading
+from pathlib import Path
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
+import uvicorn
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.responses import Response
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel
+
+load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
 logger = logging.getLogger(__name__)
 
-app         = Flask(__name__)
-API_KEY     = os.getenv("GPU_SERVER_API_KEY",  "monto-secret-2024")
-VOICES_DIR  = os.getenv("PIPER_VOICES_DIR",   "./voices")
-DEFAULT_VOICE = os.getenv("PIPER_DEFAULT_VOICE", "en_US-amy-medium")
+# ── Config ────────────────────────────────────────────────────────────────────
+API_KEY       = os.getenv("GPU_SERVER_API_KEY",   "monto-secret-2024")
+DEFAULT_VOICE = os.getenv("PIPER_DEFAULT_VOICE",  "en_US-amy-medium")
+VOICES_DIR    = Path(os.getenv("PIPER_VOICES_DIR", "./voices"))
+PORT          = int(os.getenv("PIPER_PORT",        "5002"))
+PIPER_BIN     = os.getenv("PIPER_BIN",             "piper")
 
-# ── EMOTION → PIPER SETTINGS ─────────────────────────────────────────────────
-# Piper uses --length-scale (speed) and --noise-scale (expressiveness)
-# length_scale: >1 = slower, <1 = faster
-# noise_scale:  higher = more varied/expressive
-EMOTION_PARAMS = {
-    "happy":     {"length_scale": 0.95, "noise_scale": 0.667, "noise_w": 0.8},
-    "excited":   {"length_scale": 0.88, "noise_scale": 0.8,   "noise_w": 0.9},
-    "sad":       {"length_scale": 1.15, "noise_scale": 0.5,   "noise_w": 0.6},
-    "thinking":  {"length_scale": 1.05, "noise_scale": 0.55,  "noise_w": 0.7},
-    "surprised": {"length_scale": 0.90, "noise_scale": 0.75,  "noise_w": 0.85},
-    "neutral":   {"length_scale": 1.00, "noise_scale": 0.667, "noise_w": 0.8},
+# Emotion → Piper speed tuning (length_scale: higher = slower)
+EMOTION_SPEED = {
+    "happy":     0.90,
+    "excited":   0.82,
+    "sad":       1.20,
+    "thinking":  1.10,
+    "surprised": 0.85,
+    "neutral":   1.00,
+    "talking":   1.00,
 }
 
+# ── Auth ──────────────────────────────────────────────────────────────────────
+security = HTTPBearer()
 
-# ── AUTH ──────────────────────────────────────────────────────────────────────
-def require_key(f):
-    @functools.wraps(f)
-    def wrapper(*args, **kwargs):
-        auth = request.headers.get("Authorization", "")
-        if auth != f"Bearer {API_KEY}":
-            return jsonify({"error": "Unauthorized"}), 401
-        return f(*args, **kwargs)
-    return wrapper
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    if credentials.credentials != API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+    return credentials.credentials
 
+# ── Schema ────────────────────────────────────────────────────────────────────
 
-def get_voice_model_path(voice_name: str) -> str:
-    """Find the .onnx model file for a voice."""
-    path = os.path.join(VOICES_DIR, f"{voice_name}.onnx")
-    if os.path.exists(path):
-        return path
-    # Try default
-    fallback = os.path.join(VOICES_DIR, f"{DEFAULT_VOICE}.onnx")
-    if os.path.exists(fallback):
-        logger.warning(f"Voice '{voice_name}' not found, using default '{DEFAULT_VOICE}'")
-        return fallback
+class TTSRequest(BaseModel):
+    text:    str
+    voice:   str = DEFAULT_VOICE
+    emotion: str = "neutral"
+
+# ── App ────────────────────────────────────────────────────────────────────────
+app = FastAPI(title="Monto Piper TTS", version="1.0.0")
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _find_model(voice: str) -> Path:
+    """Locate <voice>.onnx in VOICES_DIR. Tries exact match then default."""
+    VOICES_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Try exact voice name
+    candidate = VOICES_DIR / f"{voice}.onnx"
+    if candidate.exists():
+        return candidate
+
+    # Try default voice
+    default = VOICES_DIR / f"{DEFAULT_VOICE}.onnx"
+    if default.exists():
+        return default
+
+    # Any available voice
+    models = list(VOICES_DIR.glob("*.onnx"))
+    if models:
+        logger.warning(f"Voice '{voice}' not found — using {models[0].name}")
+        return models[0]
+
     raise FileNotFoundError(
-        f"Voice model not found: {path}\n"
-        f"Download with: python -m piper --download-dir {VOICES_DIR} {voice_name}"
+        f"No Piper voice models found in {VOICES_DIR}. "
+        f"Download one from https://github.com/rhasspy/piper/releases "
+        f"and place the .onnx file in {VOICES_DIR}/"
     )
 
 
-# ── ROUTES ────────────────────────────────────────────────────────────────────
-@app.route("/v1/tts/synthesize", methods=["POST"])
-@require_key
-def synthesize():
-    """
-    Request body (JSON):
-      text    : str   — text to speak
-      voice   : str   — voice name e.g. "en_US-amy-medium" (optional)
-      emotion : str   — happy/sad/excited/thinking/surprised/neutral (optional)
-      language: str   — language hint (optional, for future multi-lang support)
+def _synthesize(text: str, voice: str, emotion: str) -> bytes:
+    """Run piper subprocess and return WAV bytes."""
+    model_path = _find_model(voice)
+    length_scale = EMOTION_SPEED.get(emotion, 1.0)
 
-    Returns: WAV audio bytes (audio/wav)
-    """
-    data    = request.get_json(force=True, silent=True) or {}
-    text    = data.get("text", "").strip()
-    voice   = data.get("voice",   DEFAULT_VOICE)
-    emotion = data.get("emotion", "neutral")
-
-    if not text:
-        return jsonify({"error": "text is required"}), 400
-
-    if len(text) > 1000:
-        return jsonify({"error": "text too long (max 1000 chars)"}), 400
+    fd, wav_path = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
 
     try:
-        model_path = get_voice_model_path(voice)
-    except FileNotFoundError as e:
-        return jsonify({"error": str(e)}), 404
-
-    params = EMOTION_PARAMS.get(emotion, EMOTION_PARAMS["neutral"])
-
-    # Write text to a temp file — piper reads from stdin or file
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as out_tmp:
-        out_path = out_tmp.name
-
-    try:
-        # Piper CLI: echo "text" | piper --model voice.onnx --output_file out.wav
-        cmd = [
-            "piper",
-            "--model",        model_path,
-            "--output_file",  out_path,
-            "--length_scale", str(params["length_scale"]),
-            "--noise_scale",  str(params["noise_scale"]),
-            "--noise_w",      str(params["noise_w"]),
-        ]
-
         result = subprocess.run(
-            cmd,
+            [
+                PIPER_BIN,
+                "--model",        str(model_path),
+                "--output_file",  wav_path,
+                "--length_scale", str(length_scale),
+            ],
             input=text.encode("utf-8"),
             capture_output=True,
             timeout=30,
         )
-
         if result.returncode != 0:
-            err = result.stderr.decode("utf-8", errors="replace")
-            logger.error(f"Piper error: {err}")
-            return jsonify({"error": f"Piper failed: {err}"}), 500
+            raise RuntimeError(
+                f"Piper exited {result.returncode}: {result.stderr.decode()[:200]}"
+            )
 
-        with open(out_path, "rb") as f:
-            wav_bytes = f.read()
-
-        logger.info(f"TTS [{emotion}] {len(wav_bytes)} bytes: '{text[:60]}'")
-        return send_file(
-            io.BytesIO(wav_bytes),
-            mimetype="audio/wav",
-            as_attachment=False,
-            download_name="monto_speech.wav",
-        )
-
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": "TTS timed out"}), 504
-    except Exception as e:
-        logger.error(f"TTS error: {e}")
-        return jsonify({"error": str(e)}), 500
+        with open(wav_path, "rb") as f:
+            return f.read()
     finally:
         try:
-            os.unlink(out_path)
+            os.unlink(wav_path)
         except OSError:
             pass
 
+# ── Routes ─────────────────────────────────────────────────────────────────────
 
-@app.route("/voices")
-@require_key
-def list_voices():
-    """List all downloaded voice models."""
-    voices = []
-    if os.path.isdir(VOICES_DIR):
-        for f in os.listdir(VOICES_DIR):
-            if f.endswith(".onnx"):
-                voices.append(f.replace(".onnx", ""))
-    return jsonify({"voices": voices, "default": DEFAULT_VOICE})
+@app.get("/health")
+async def health():
+    models = [p.stem for p in VOICES_DIR.glob("*.onnx")] if VOICES_DIR.exists() else []
+    # Check piper binary exists
+    try:
+        result = subprocess.run([PIPER_BIN, "--version"], capture_output=True, timeout=5)
+        piper_ok = result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        piper_ok = False
+
+    return {
+        "status":         "ok" if piper_ok else "piper_not_found",
+        "piper_binary":   PIPER_BIN,
+        "piper_ok":       piper_ok,
+        "voices_dir":     str(VOICES_DIR),
+        "available_voices": models,
+        "default_voice":  DEFAULT_VOICE,
+    }
 
 
-@app.route("/health")
-def health():
-    return jsonify({
-        "status":        "ok",
-        "default_voice": DEFAULT_VOICE,
-        "voices_dir":    VOICES_DIR,
-    })
+@app.get("/voices")
+async def list_voices(token: str = Depends(verify_token)):
+    if not VOICES_DIR.exists():
+        return {"voices": []}
+    voices = [
+        {"name": p.stem, "path": str(p), "size_mb": round(p.stat().st_size / 1_048_576, 1)}
+        for p in sorted(VOICES_DIR.glob("*.onnx"))
+    ]
+    return {"voices": voices}
+
+
+@app.post("/v1/tts/synthesize")
+async def synthesize(
+    req:   TTSRequest,
+    token: str = Depends(verify_token),
+):
+    if not req.text.strip():
+        raise HTTPException(status_code=400, detail="Text cannot be empty")
+
+    logger.info(f"TTS [{req.emotion}] voice={req.voice}: '{req.text[:60]}'")
+
+    try:
+        wav_bytes = _synthesize(req.text, req.voice, req.emotion)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    logger.info(f"Piper WAV: {len(wav_bytes):,} bytes")
+    return Response(
+        content=wav_bytes,
+        media_type="audio/wav",
+        headers={"Content-Disposition": "inline; filename=speech.wav"},
+    )
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("PIPER_PORT", 5002))
-    logger.info(f"Piper TTS server starting on port {port}")
-    app.run(host="0.0.0.0", port=port, threaded=True)
+    uvicorn.run(app, host="0.0.0.0", port=PORT)

@@ -1,39 +1,63 @@
 """
-Monto AI — Nepali TTS Server
-Uses Microsoft Edge TTS for high-quality Nepali voice (online).
-Falls back to gTTS if edge-tts unavailable.
+Monto AI — GPU Nepali TTS Server
+Runs on the GPU machine. Serves Edge TTS (Microsoft Neural) for Nepali.
 
-Port: 5003
-Available Nepali voices:
-  ne-NP-HemkalaNeural  (Female - recommended)
-  ne-NP-SagarNeural    (Male)
+Port  : 5003 (default)
+Auth  : Bearer token from GPU_SERVER_API_KEY
+Output: MP3 audio bytes
+
+Usage:
+    python nepali_tts_server.py
+
+Endpoints:
+    POST /v1/tts/nepali   — text → MP3 bytes
+    GET  /health          — status + available voices
 """
-import os
 import io
-import asyncio
-import functools
+import os
 import logging
-from flask import Flask, request, jsonify, send_file
 
-logging.basicConfig(level=logging.INFO)
+import uvicorn
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.responses import Response
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel
+
+load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
 logger = logging.getLogger(__name__)
 
-app     = Flask(__name__)
-API_KEY = os.getenv("GPU_SERVER_API_KEY", "monto-secret-2024")
-VOICE   = os.getenv("NEPALI_VOICE", "ne-NP-HemkalaNeural")  # Female child-friendly
+# ── Config ────────────────────────────────────────────────────────────────────
+API_KEY       = os.getenv("GPU_SERVER_API_KEY", "monto-secret-2024")
+NEPALI_VOICE  = os.getenv("NEPALI_VOICE",       "ne-NP-HemkalaNeural")
+PORT          = int(os.getenv("NEPALI_TTS_PORT", "5003"))
 
+# ── Auth ──────────────────────────────────────────────────────────────────────
+security = HTTPBearer()
 
-def require_key(f):
-    @functools.wraps(f)
-    def wrapper(*args, **kwargs):
-        auth = request.headers.get("Authorization", "")
-        if auth != f"Bearer {API_KEY}":
-            return jsonify({"error": "Unauthorized"}), 401
-        return f(*args, **kwargs)
-    return wrapper
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    if credentials.credentials != API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+    return credentials.credentials
 
+# ── Schema ────────────────────────────────────────────────────────────────────
+
+class NepaliTTSRequest(BaseModel):
+    text:  str
+    voice: str = NEPALI_VOICE   # can override per-request
+
+# ── App ────────────────────────────────────────────────────────────────────────
+app = FastAPI(title="Monto Nepali TTS", version="1.0.0")
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _edge_tts(text: str, voice: str) -> bytes:
+    """Synthesize Nepali speech via edge-tts library."""
     import edge_tts
     buf = io.BytesIO()
     communicate = edge_tts.Communicate(text, voice)
@@ -41,65 +65,54 @@ async def _edge_tts(text: str, voice: str) -> bytes:
         if chunk["type"] == "audio":
             buf.write(chunk["data"])
     buf.seek(0)
-    return buf.read()
+    data = buf.read()
+    if not data:
+        raise RuntimeError("Edge TTS returned empty audio")
+    return data
+
+# ── Routes ─────────────────────────────────────────────────────────────────────
+
+@app.get("/health")
+async def health():
+    try:
+        import edge_tts
+        edge_ok = True
+    except ImportError:
+        edge_ok = False
+
+    return {
+        "status":        "ok" if edge_ok else "edge_tts_missing",
+        "edge_tts":      edge_ok,
+        "default_voice": NEPALI_VOICE,
+        "voices": [
+            "ne-NP-HemkalaNeural",  # Female — best for kids
+            "ne-NP-SagarNeural",    # Male
+        ],
+    }
 
 
-def _gtts_fallback(text: str) -> bytes:
-    from gtts import gTTS
-    buf = io.BytesIO()
-    gTTS(text=text, lang="ne").write_to_fp(buf)
-    buf.seek(0)
-    return buf.read()
+@app.post("/v1/tts/nepali")
+async def nepali_tts(
+    req:   NepaliTTSRequest,
+    token: str = Depends(verify_token),
+):
+    if not req.text.strip():
+        raise HTTPException(status_code=400, detail="Text cannot be empty")
 
-
-@app.route("/v1/tts/nepali", methods=["POST"])
-@require_key
-def nepali_tts():
-    data    = request.get_json(force=True, silent=True) or {}
-    text    = data.get("text", "").strip()
-    voice   = data.get("voice", VOICE)
-
-    if not text:
-        return jsonify({"error": "text required"}), 400
+    logger.info(f"Nepali TTS [{req.voice}]: '{req.text[:60]}'")
 
     try:
-        # Try Edge TTS first (best quality)
-        audio = asyncio.run(_edge_tts(text, voice))
-        logger.info(f"Edge TTS [{voice}]: '{text[:60]}' → {len(audio)} bytes")
+        mp3_bytes = await _edge_tts(req.text, req.voice)
+        logger.info(f"Nepali TTS: {len(mp3_bytes):,} bytes")
+        return Response(
+            content=mp3_bytes,
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": "inline; filename=nepali_speech.mp3"},
+        )
     except Exception as e:
-        logger.warning(f"Edge TTS failed ({e}), falling back to gTTS")
-        try:
-            audio = _gtts_fallback(text)
-            logger.info(f"gTTS fallback: '{text[:60]}' → {len(audio)} bytes")
-        except Exception as e2:
-            logger.error(f"Both TTS failed: {e2}")
-            return jsonify({"error": str(e2)}), 500
-
-    return send_file(
-        io.BytesIO(audio),
-        mimetype="audio/mpeg",
-        download_name="monto_nepali.mp3",
-    )
-
-
-@app.route("/voices")
-@require_key
-def list_voices():
-    return jsonify({
-        "nepali_voices": [
-            "ne-NP-HemkalaNeural (Female)",
-            "ne-NP-SagarNeural (Male)",
-        ],
-        "current": VOICE,
-    })
-
-
-@app.route("/health")
-def health():
-    return jsonify({"status": "ok", "engine": "edge-tts + gtts fallback", "voice": VOICE})
+        logger.error(f"Nepali TTS error: {e}")
+        raise HTTPException(status_code=502, detail=f"Nepali TTS failed: {e}")
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("NEPALI_TTS_PORT", 5003))
-    logger.info(f"Nepali TTS server on port {port} | voice: {VOICE}")
-    app.run(host="0.0.0.0", port=port, threaded=True)
+    uvicorn.run(app, host="0.0.0.0", port=PORT)

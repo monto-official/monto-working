@@ -140,19 +140,30 @@ class LLMService:
         transcript:   str,
         history:      list = None,
         facts_prompt: str  = "",
+        language:     str  = "english",
     ):
         from models.schemas import LLMResponse
 
         if not transcript.strip():
+            if language == "nepali":
+                reply = "सुनिएन! अलि जोरले बोलिदिनुस् 😊"
+            else:
+                reply = "I didn't catch that. Could you please say it again? 😊"
             return LLMResponse(
                 intent="UNKNOWN",
                 emotion="neutral",
                 animation="blink",
-                response="I didn't catch that. Could you please say it again? 😊",
+                response=reply,
                 confidence=0.1,
             )
 
-        system   = SYSTEM_PROMPT + facts_prompt
+        # Add an explicit language instruction to the system prompt
+        if language == "nepali":
+            lang_instruction = "\n\n[IMPORTANT: The child is speaking Nepali. You MUST reply in Nepali (Devanagari script). Do NOT reply in English.]"
+        else:
+            lang_instruction = "\n\n[IMPORTANT: The child is speaking English. You MUST reply in English.]"
+
+        system   = SYSTEM_PROMPT + lang_instruction + facts_prompt
         messages = [{"role": "system", "content": system}]
         messages += (history or [])
         messages.append({"role": "user", "content": transcript})

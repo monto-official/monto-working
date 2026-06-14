@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Monto AI — Network Security Config
+  Allows HTTP (cleartext) to the backend server.
+  Needed because Android 9+ blocks HTTP by default.
+  Both the Tailscale IP and local LAN IPs are allowed.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- Tailscale GPU backend (production) -->
+        <domain includeSubdomains="false">100.76.66.40</domain>
+        <domain includeSubdomains="false">100.122.50.13</domain>
+        <!-- Local network (development) -->
+        <domain includeSubdomains="false">192.168.1.100</domain>
+        <domain includeSubdomains="false">192.168.1.101</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

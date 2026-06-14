@@ -1,9 +1,10 @@
 """
 Voice Routes
 POST /voice/query   — receives audio, returns AI structured response (JSON)
-POST /voice/process — used by Raspberry Pi: returns JSON + triggers TTS internally
+POST /voice/process — used by Raspberry Pi: returns JSON for face + TTS
 """
 import logging
+import re
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Header
 from fastapi.responses import Response
 from models.schemas import VoiceQueryResponse
@@ -18,6 +19,36 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/voice", tags=["voice"])
 
 DEFAULT_SESSION = "pi-default"
+
+# ── Language detection ────────────────────────────────────────────────────────
+
+def detect_language(text: str) -> str:
+    """Detect if text is Nepali (Devanagari) or English."""
+    if any('\u0900' <= ch <= '\u097F' for ch in text):
+        return "nepali"
+    return "english"
+
+def _get_nepali_empty_response() -> dict:
+    return {
+        "transcript": "",
+        "intent":     "UNKNOWN",
+        "emotion":    "neutral",
+        "animation":  "blink",
+        "response":   "सुनिएन! अलि जोरले बोलिदिनुस् 😊",
+        "confidence": 0.0,
+        "language":   "nepali",
+    }
+
+def _get_english_empty_response() -> dict:
+    return {
+        "transcript": "",
+        "intent":     "UNKNOWN",
+        "emotion":    "neutral",
+        "animation":  "blink",
+        "response":   "Hmm, I didn't quite catch that! Could you say it again? 😊",
+        "confidence": 0.0,
+        "language":   "english",
+    }
 
 
 def get_stt_service() -> STTService:
@@ -58,7 +89,6 @@ async def voice_query(
         raise HTTPException(status_code=502, detail=f"Speech recognition failed: {str(e)}")
 
     if not transcript.strip():
-        # Return a friendly response instead of an error — better UX for children
         from models.schemas import LLMResponse
         return VoiceQueryResponse(
             transcript="",
@@ -68,6 +98,10 @@ async def voice_query(
             response="Hmm, I didn't quite catch that! Could you say it again a little louder? 😊",
             confidence=0.0,
         )
+
+    # Detect language from transcript
+    detected_lang = detect_language(transcript)
+    logger.info(f"[{session_id}] Language detected: {detected_lang}")
 
     # Layer 1: Filter child's input before sending to LLM
     filter_result = check_content(transcript)
@@ -86,8 +120,9 @@ async def voice_query(
     history      = memory.get_history(session_id)
     facts_prompt = memory.get_facts_prompt(session_id)
 
+    # Pass detected language to LLM so it replies in the same language
     try:
-        llm_result = await llm.get_response(transcript, history, facts_prompt)
+        llm_result = await llm.get_response(transcript, history, facts_prompt, language=detected_lang)
     except Exception as e:
         logger.error(f"LLM failed: {e}")
         raise HTTPException(status_code=502, detail=f"AI response failed: {str(e)}")
@@ -96,6 +131,10 @@ async def voice_query(
     llm_result.response = sanitize_response(llm_result.response)
     memory.add_turn(session_id, transcript, llm_result.response)
     animation = resolve_animation(llm_result.emotion.value, llm_result.animation.value)
+
+    # Response language — use detected OR check response text
+    response_lang = detect_language(llm_result.response) if llm_result.response else detected_lang
+    logger.info(f"[{session_id}] Response language: {response_lang}")
 
     return VoiceQueryResponse(
         transcript=transcript,
@@ -141,6 +180,10 @@ async def voice_process(
             "confidence": 0.0,
         }
 
+    # Detect language from transcript
+    detected_lang = detect_language(transcript)
+    logger.info(f"[Pi/{session_id}] Language detected: {detected_lang}")
+
     # Layer 1: Filter child's input
     filter_result = check_content(transcript)
     if not filter_result.is_safe:
@@ -159,7 +202,7 @@ async def voice_process(
     facts_prompt = memory.get_facts_prompt(session_id)
 
     try:
-        llm_result = await llm.get_response(transcript, history, facts_prompt)
+        llm_result = await llm.get_response(transcript, history, facts_prompt, language=detected_lang)
     except Exception as e:
         logger.error(f"[Pi] LLM failed: {e}")
         raise HTTPException(status_code=502, detail=f"LLM failed: {str(e)}")
@@ -178,6 +221,7 @@ async def voice_process(
         "animation":  animation,
         "response":   llm_result.response,
         "confidence": llm_result.confidence,
+        "language":   detected_lang,
     }
 
 

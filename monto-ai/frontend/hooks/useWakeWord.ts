@@ -19,10 +19,12 @@ export function useWakeWord({
   keywords = ["monto", "hey monto", "hi monto", "hello monto"],
   language = "en-US",
 }: UseWakeWordOptions) {
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  // Web Speech API types are vendor-prefixed — use any for compatibility
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null);
   const runningRef     = useRef(false);
   const [supported, setSupported] = useState(false);
-  const [listening, setListening]  = useState(false);
+  const [listening, setListening] = useState(false);
 
   const stop = useCallback(() => {
     runningRef.current = false;
@@ -34,23 +36,24 @@ export function useWakeWord({
   }, []);
 
   const start = useCallback(() => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const w = window as any;
+    const SpeechRecognitionImpl = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!SpeechRecognitionImpl) return;
 
-    if (!SpeechRecognition) return;
-
-    const r = new SpeechRecognition();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r: any = new SpeechRecognitionImpl();
     r.continuous      = true;
     r.interimResults  = true;
     r.lang            = language;
     r.maxAlternatives = 3;
 
-    r.onresult = (event: SpeechRecognitionEvent) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    r.onresult = (event: any) => {
       for (let i = event.resultIndex; i < event.results.length; i++) {
         for (let j = 0; j < event.results[i].length; j++) {
-          const text = event.results[i][j].transcript.toLowerCase().trim();
-          if (keywords.some(kw => text.includes(kw))) {
+          const text: string = event.results[i][j].transcript.toLowerCase().trim();
+          if (keywords.some((kw) => text.includes(kw))) {
             console.log(`Wake word detected: "${text}"`);
             onDetected();
             // Brief pause after detection to avoid double-trigger
@@ -64,9 +67,9 @@ export function useWakeWord({
       }
     };
 
-    r.onerror = (e: SpeechRecognitionErrorEvent) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    r.onerror = (e: any) => {
       if (e.error === "no-speech" || e.error === "aborted") return;
-      // Restart on error
       if (runningRef.current) {
         setTimeout(() => { if (runningRef.current) start(); }, 1000);
       }
@@ -74,7 +77,6 @@ export function useWakeWord({
 
     r.onend = () => {
       setListening(false);
-      // Auto-restart
       if (runningRef.current) {
         setTimeout(() => { if (runningRef.current) start(); }, 500);
       }
@@ -88,10 +90,9 @@ export function useWakeWord({
   }, [onDetected, keywords, language, stop]);
 
   useEffect(() => {
-    const ok = !!(
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition
-    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const w = window as any;
+    const ok = !!(w.SpeechRecognition || w.webkitSpeechRecognition);
     setSupported(ok);
   }, []);
 

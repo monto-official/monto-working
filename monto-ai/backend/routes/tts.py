@@ -1,6 +1,7 @@
 """
 TTS Route
-POST /tts/speak — text + emotion → audio bytes (WAV in local mode, MP3 in cloud)
+POST /tts/speak — text + emotion → audio bytes
+Auto-detects Nepali from text content — no need to pass language explicitly.
 """
 import logging
 from fastapi import APIRouter, HTTPException, Depends
@@ -12,11 +13,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tts", tags=["tts"])
 
 
+def _is_nepali(text: str) -> bool:
+    return any('\u0900' <= ch <= '\u097F' for ch in text)
+
+
 class TTSRequest(BaseModel):
     text:     str
-    voice:    str = "monto"    # monto | male | female | piper-voice-name
-    emotion:  str = "neutral"  # drives voice expressiveness / speed
-    language: str = "english"
+    voice:    str = "monto"
+    emotion:  str = "neutral"
+    language: str = "auto"   # "auto" = detect from text, "nepali", "english"
 
 
 def get_tts_service() -> TTSService:
@@ -29,10 +34,6 @@ async def speak(
     req: TTSRequest,
     tts: TTSService = Depends(get_tts_service),
 ):
-    """
-    Convert text → audio.
-    Returns WAV (local Piper) or MP3 (ElevenLabs cloud) depending on mode.
-    """
     if not req.text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty")
 
@@ -42,15 +43,22 @@ async def speak(
     if not tts or not tts.enabled:
         raise HTTPException(status_code=503, detail="TTS service not available")
 
+    # Auto-detect language if not explicitly set
+    if req.language == "auto":
+        language = "nepali" if _is_nepali(req.text) else "english"
+    else:
+        language = req.language
+
+    logger.info(f"TTS [{language}/{req.emotion}]: '{req.text[:60]}'")
+
     try:
         audio_bytes = await tts.synthesize(
             text=req.text,
             voice=req.voice,
             emotion=req.emotion,
-            language=req.language,
+            language=language,
         )
 
-        # Return correct MIME type based on which backend is active
         mime = getattr(tts, "audio_format", "audio/mpeg")
         ext  = "wav" if mime == "audio/wav" else "mp3"
 
@@ -63,5 +71,5 @@ async def speak(
             },
         )
     except Exception as e:
-        logger.error(f"TTS route error: {e}")
+        logger.error(f"TTS error: {e}")
         raise HTTPException(status_code=502, detail=f"TTS failed: {str(e)}")

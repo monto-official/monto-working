@@ -1,76 +1,138 @@
 """
-Monto AI — GPU Server: Whisper STT
-Runs on your GPU machine.
-Transcribes audio using faster-whisper.
+Monto AI — GPU Whisper STT Server
+Runs on the GPU machine. Serves faster-whisper via HTTP.
 
-Endpoint: POST /v1/audio/transcriptions
-          GET  /health
+Port  : 5001 (default)
+Auth  : Bearer token from GPU_SERVER_API_KEY
+Model : configured by WHISPER_MODEL env var
+
+Usage:
+    python whisper_server.py
+
+Endpoints:
+    POST /v1/audio/transcriptions   — OpenAI-compatible transcription
+    GET  /health                    — status + model info
 """
 import os
-import functools
-import tempfile
+import io
 import logging
-from flask import Flask, request, jsonify
-from faster_whisper import WhisperModel
+import tempfile
+import threading
+from contextlib import asynccontextmanager
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
+import uvicorn
+from dotenv import load_dotenv
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
 logger = logging.getLogger(__name__)
 
-app      = Flask(__name__)
-API_KEY  = os.getenv("GPU_SERVER_API_KEY", "monto-secret-2024")
-MODEL_SZ = os.getenv("WHISPER_MODEL",      "large-v3")
-DEVICE   = os.getenv("WHISPER_DEVICE",     "cuda")   # "cuda" or "cpu"
-COMPUTE  = os.getenv("WHISPER_COMPUTE",    "float16") # float16 / int8
+# ── Config ────────────────────────────────────────────────────────────────────
+API_KEY      = os.getenv("GPU_SERVER_API_KEY", "monto-secret-2024")
+MODEL_SIZE   = os.getenv("WHISPER_MODEL",      "large-v3")
+DEVICE       = os.getenv("WHISPER_DEVICE",     "cuda")
+COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE",    "float16")
+PORT         = int(os.getenv("WHISPER_PORT",   "5001"))
 
-logger.info(f"Loading Whisper {MODEL_SZ} on {DEVICE} ({COMPUTE})...")
-model = WhisperModel(MODEL_SZ, device=DEVICE, compute_type=COMPUTE)
-logger.info("✅ Whisper ready")
+# ── Auth ──────────────────────────────────────────────────────────────────────
+security = HTTPBearer()
+
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    if credentials.credentials != API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+    return credentials.credentials
+
+# ── Model ──────────────────────────────────────────────────────────────────────
+_model      = None
+_model_lock = threading.Lock()
+
+def get_model():
+    global _model
+    with _model_lock:
+        if _model is None:
+            raise HTTPException(status_code=503, detail="Model not loaded yet — try again shortly")
+        return _model
 
 
-# ── AUTH ──────────────────────────────────────────────────────────────────────
-def require_key(f):
-    @functools.wraps(f)
-    def wrapper(*args, **kwargs):
-        auth = request.headers.get("Authorization", "")
-        if auth != f"Bearer {API_KEY}":
-            return jsonify({"error": "Unauthorized"}), 401
-        return f(*args, **kwargs)
-    return wrapper
+def load_model():
+    global _model
+    logger.info(f"Loading faster-whisper [{MODEL_SIZE}] on {DEVICE}...")
+    from faster_whisper import WhisperModel
+    _model = WhisperModel(
+        MODEL_SIZE,
+        device=DEVICE,
+        compute_type=COMPUTE_TYPE,
+        cpu_threads=4,
+        num_workers=2,
+    )
+    logger.info(f"✅ Whisper model [{MODEL_SIZE}] loaded on {DEVICE}")
+
+# ── App ────────────────────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Load model in a thread so FastAPI starts fast
+    t = threading.Thread(target=load_model, daemon=True)
+    t.start()
+    yield
+    logger.info("Whisper server shutting down")
+
+app = FastAPI(title="Monto Whisper STT", version="1.0.0", lifespan=lifespan)
+
+# ── Routes ─────────────────────────────────────────────────────────────────────
+
+@app.get("/health")
+async def health():
+    model_ready = _model is not None
+    return {
+        "status":     "ok" if model_ready else "loading",
+        "model":      MODEL_SIZE,
+        "device":     DEVICE,
+        "compute":    COMPUTE_TYPE,
+        "ready":      model_ready,
+    }
 
 
-# ── ROUTES ────────────────────────────────────────────────────────────────────
-@app.route("/v1/audio/transcriptions", methods=["POST"])
-@require_key
-def transcribe():
-    if "file" not in request.files:
-        return jsonify({"error": "No file provided"}), 400
+@app.post("/v1/audio/transcriptions")
+async def transcribe(
+    file:  UploadFile = File(...),
+    token: str        = Depends(verify_token),
+):
+    model = get_model()
 
-    audio_file = request.files["file"]
-    language   = request.form.get("language", None)   # None = auto-detect
-    filename   = audio_file.filename or "audio.wav"
-    suffix     = os.path.splitext(filename)[-1] or ".wav"
+    audio_bytes = await file.read()
+    if not audio_bytes or len(audio_bytes) < 1000:
+        return {"text": "", "language": "unknown", "duration": 0.0}
 
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        audio_file.save(tmp.name)
-        tmp_path = tmp.name
-
+    # Write to temp file — faster-whisper needs a path or numpy array
+    suffix = "." + (file.filename or "audio.wav").rsplit(".", 1)[-1].lower()
+    fd, tmp_path = tempfile.mkstemp(suffix=suffix)
     try:
+        os.write(fd, audio_bytes)
+        os.close(fd)
+
         segments, info = model.transcribe(
             tmp_path,
-            language=language,
             beam_size=5,
-            vad_filter=True,          # skip silence automatically
-            vad_parameters={"min_silence_duration_ms": 300},
+            vad_filter=True,
+            vad_parameters=dict(min_silence_duration_ms=500),
+            language=os.getenv("WHISPER_LANGUAGE") or None,
         )
+
         text = " ".join(seg.text.strip() for seg in segments).strip()
-        logger.info(f"STT [{info.language}]: '{text[:80]}'")
-        return jsonify({
+        logger.info(f"Transcribed [{info.language}] ({info.duration:.1f}s): '{text[:80]}'")
+
+        return {
             "text":     text,
             "language": info.language,
-        })
-    except Exception as e:
-        logger.error(f"Transcription error: {e}")
-        return jsonify({"error": str(e)}), 500
+            "duration": round(info.duration, 2),
+        }
     finally:
         try:
             os.unlink(tmp_path)
@@ -78,12 +140,5 @@ def transcribe():
             pass
 
 
-@app.route("/health")
-def health():
-    return jsonify({"status": "ok", "model": MODEL_SZ, "device": DEVICE})
-
-
 if __name__ == "__main__":
-    port = int(os.getenv("WHISPER_PORT", 5001))
-    logger.info(f"Whisper server starting on port {port}")
-    app.run(host="0.0.0.0", port=port, threaded=True)
+    uvicorn.run(app, host="0.0.0.0", port=PORT)

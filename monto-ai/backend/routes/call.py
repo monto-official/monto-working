@@ -16,7 +16,8 @@ Prerequisites:
 import asyncio
 import logging
 import os
-import telnetlib
+import socket
+import time
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
@@ -66,40 +67,68 @@ class AsteriskAMI:
 
     def _send_action(self, action_lines: list[str]) -> str:
         """
-        Open a fresh TCP connection to AMI, authenticate, send one action,
-        read the response, and close.
+        Open a raw TCP connection to AMI, authenticate, send one action,
+        read the response, and close. Uses socket instead of telnetlib
+        (telnetlib was removed in Python 3.13).
         """
+        CRLF = b"\r\n"
         try:
-            with telnetlib.Telnet(self.host, self.port, timeout=5) as tn:
-                # Read the Asterisk banner
-                tn.read_until(b"\r\n", timeout=3)
+            sock = socket.create_connection((self.host, self.port), timeout=5)
+        except OSError as exc:
+            raise ConnectionError(f"Cannot connect to Asterisk AMI at {self.host}:{self.port}: {exc}")
 
-                # Login
-                login = (
-                    f"Action: Login\r\n"
-                    f"Username: {self.user}\r\n"
-                    f"Secret: {self.secret}\r\n"
-                    f"\r\n"
-                )
-                tn.write(login.encode())
-                resp = tn.read_until(b"\r\n\r\n", timeout=3).decode(errors="ignore")
-                if "Success" not in resp and "Authentication accepted" not in resp:
-                    raise ConnectionError(f"AMI login failed: {resp!r}")
+        try:
+            def recv_until(marker: bytes, timeout: float = 5.0) -> str:
+                """Read from socket until marker is found or timeout."""
+                buf = b""
+                sock.settimeout(timeout)
+                deadline = time.monotonic() + timeout
+                while marker not in buf:
+                    if time.monotonic() > deadline:
+                        break
+                    try:
+                        chunk = sock.recv(4096)
+                        if not chunk:
+                            break
+                        buf += chunk
+                    except socket.timeout:
+                        break
+                return buf.decode(errors="ignore")
 
-                # Send the action
-                payload = "\r\n".join(action_lines) + "\r\n\r\n"
-                tn.write(payload.encode())
+            # Read the Asterisk banner line
+            recv_until(b"\r\n", timeout=3)
 
-                # Read response (up to 2 KB)
-                result = tn.read_until(b"\r\n\r\n", timeout=5).decode(errors="ignore")
+            # Login
+            login_msg = (
+                f"Action: Login\r\n"
+                f"Username: {self.user}\r\n"
+                f"Secret: {self.secret}\r\n"
+                f"\r\n"
+            )
+            sock.sendall(login_msg.encode())
+            resp = recv_until(b"\r\n\r\n", timeout=3)
+            if "Success" not in resp and "Authentication accepted" not in resp:
+                raise ConnectionError(f"AMI login failed: {resp!r}")
 
-                # Logout
-                tn.write(b"Action: Logoff\r\n\r\n")
-                return result
+            # Send the action
+            payload = "\r\n".join(action_lines) + "\r\n\r\n"
+            sock.sendall(payload.encode())
 
-        except Exception as exc:
-            logger.error(f"[AMI] Connection error: {exc}")
-            raise
+            # Read response
+            result = recv_until(b"\r\n\r\n", timeout=5)
+
+            # Logout
+            try:
+                sock.sendall(b"Action: Logoff\r\n\r\n")
+            except OSError:
+                pass
+
+            return result
+        finally:
+            try:
+                sock.close()
+            except OSError:
+                pass
 
     async def originate(
         self,
