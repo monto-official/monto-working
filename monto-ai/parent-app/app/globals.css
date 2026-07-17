@@ -3,44 +3,72 @@
 @tailwind utilities;
 
 :root {
-  --background: #0f0a1e;
-  --foreground: #e2e8f0;
+  --radius: 1rem;
+
+  --background: 0.985 0.005 250;
+  --foreground: 0.22 0.04 265;
+
+  --card: 1 0 0;
+  --card-foreground: 0.22 0.04 265;
+
+  /* Primary blue #2563EB */
+  --primary: 0.55 0.21 263;
+  --primary-foreground: 0.99 0 0;
+
+  /* Secondary purple #7C3AED */
+  --secondary: 0.55 0.24 295;
+  --secondary-foreground: 0.99 0 0;
+
+  --muted: 0.96 0.01 250;
+  --muted-foreground: 0.5 0.03 260;
+
+  --accent: 0.95 0.03 280;
+  --accent-foreground: 0.3 0.12 280;
+
+  --success: 0.7 0.16 160;
+  --success-foreground: 0.99 0 0;
+
+  --warning: 0.78 0.16 70;
+  --warning-foreground: 0.2 0.05 70;
+
+  --destructive: 0.62 0.23 25;
+  --destructive-foreground: 0.99 0 0;
+
+  --border: 0.92 0.01 255;
+  --input: 0.94 0.01 255;
+  --ring: 0.55 0.21 263;
 }
 
 * {
   box-sizing: border-box;
+  border-color: oklch(var(--border));
 }
 
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Inter, system-ui, sans-serif;
+  margin: 0;
+  padding: 0;
+  background: oklch(0.94 0.02 260);
+  color: oklch(var(--foreground));
+  font-family: "Inter", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Glass card utility */
-.glass {
-  background: rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+h1, h2, h3, h4 {
+  font-family: "Plus Jakarta Sans", "Inter", system-ui, sans-serif;
+  letter-spacing: -0.02em;
 }
 
-.glass-border {
-  border: 1px solid rgba(255, 255, 255, 0.1);
+.brand-gradient {
+  background: linear-gradient(135deg, oklch(0.55 0.21 263), oklch(0.55 0.24 295));
 }
-
-/* Pulse ring for incoming call */
-@keyframes pulseRing {
-  0%   { transform: scale(0.8); opacity: 0.8; }
-  100% { transform: scale(2.2); opacity: 0; }
+.soft-gradient {
+  background: linear-gradient(135deg, oklch(0.97 0.03 263), oklch(0.96 0.04 295));
 }
-
-.pulse-ring {
-  animation: pulseRing 1.5s ease-out infinite;
+.shadow-card {
+  box-shadow: 0 4px 24px -8px oklch(0.55 0.21 263 / 0.15);
 }
-
-/* Sound wave bars */
-@keyframes soundBar {
-  0%, 100% { transform: scaleY(0.3); }
-  50%       { transform: scaleY(1); }
+.shadow-elevated {
+  box-shadow: 0 10px 40px -12px oklch(0.55 0.21 263 / 0.25);
 }

@@ -1,494 +1,188 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
-  Phone, PhoneOff, PhoneIncoming, Mic, MicOff,
-  Wifi, WifiOff, Settings, AlertCircle, CheckCircle2,
-  Volume2, Heart,
+  Battery, Clock, MapPin, Search, ChevronRight, Activity,
+  MessageCircleQuestion, Bell, Phone, Music, Mic, TrendingUp, BookOpen, User,
 } from "lucide-react";
-import { useSIP, type SIPStatus } from "@/hooks/useSIP";
-import { cn, formatDuration } from "@/lib/utils";
+import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
+import { PhoneShell } from "@/components/PhoneShell";
+import { MontoLogo } from "@/components/AppHeader";
+import { BottomNav } from "@/components/BottomNav";
+import { Input } from "@/components/ui/input";
+import { loadChildProfile, DEFAULT_CHILD } from "@/lib/profile-storage";
+import type { ChildProfile } from "@/types";
 
-// ── Config from env ─────────────────────────────────────────────────────────
-const SIP_CONFIG = {
-  wsUrl:          process.env.NEXT_PUBLIC_ASTERISK_WS_URL  ?? "ws://localhost:8088/ws",
-  username:       process.env.NEXT_PUBLIC_SIP_USERNAME      ?? "parent",
-  password:       process.env.NEXT_PUBLIC_SIP_PASSWORD      ?? "parentpass123",
-  domain:         process.env.NEXT_PUBLIC_SIP_DOMAIN        ?? "localhost",
-  montoExtension: process.env.NEXT_PUBLIC_MONTO_BOX_EXTENSION ?? "monto",
-};
+const usage = [
+  { day: "Mon", hours: 1.8 },
+  { day: "Tue", hours: 2.4 },
+  { day: "Wed", hours: 1.2 },
+  { day: "Thu", hours: 2.9 },
+  { day: "Fri", hours: 3.4 },
+  { day: "Sat", hours: 2.1 },
+  { day: "Sun", hours: 1.5 },
+];
 
-const MONTO_API = process.env.NEXT_PUBLIC_MONTO_API_URL ?? "http://localhost:8000";
+const questions = [
+  { q: "Why is the sky blue?", date: "Today", time: "4:15 PM" },
+  { q: "How do airplanes stay in the air?", date: "Today", time: "2:02 PM" },
+  { q: "Who invented the computer?", date: "Yesterday", time: "6:30 PM" },
+  { q: "What is the largest planet?", date: "Yesterday", time: "5:11 PM" },
+];
 
-// ── Status display helpers ──────────────────────────────────────────────────
-const STATUS_LABEL: Record<SIPStatus, string> = {
-  disconnected: "Not connected",
-  connecting:   "Connecting...",
-  registered:   "Ready",
-  incoming:     "Incoming call",
-  calling:      "Calling Monto...",
-  "in-call":    "In call",
-  error:        "Connection error",
-};
+const actions = [
+  { to: "/", label: "Usage", icon: Activity, color: "text-primary", bg: "bg-primary/10" },
+  { to: "/", label: "Questions", icon: MessageCircleQuestion, color: "text-secondary", bg: "bg-secondary/10" },
+  { to: "/reminders", label: "Reminders", icon: Bell, color: "text-warning", bg: "bg-warning/15" },
+  { to: "/call", label: "Call", icon: Phone, color: "text-success", bg: "bg-success/15" },
+  { to: "/music", label: "Music", icon: Music, color: "text-secondary", bg: "bg-secondary/10" },
+  { to: "/recordings", label: "Recordings", icon: Mic, color: "text-destructive", bg: "bg-destructive/10" },
+  { to: "/stories", label: "Bedtime Stories", icon: BookOpen, color: "text-primary", bg: "bg-primary/10" },
+  { to: "/profile", label: "Profile", icon: User, color: "text-secondary", bg: "bg-secondary/10" },
+] as const;
 
-const STATUS_COLOR: Record<SIPStatus, string> = {
-  disconnected: "bg-slate-400",
-  connecting:   "bg-yellow-400",
-  registered:   "bg-emerald-400",
-  incoming:     "bg-blue-400",
-  calling:      "bg-yellow-400",
-  "in-call":    "bg-emerald-400",
-  error:        "bg-red-400",
-};
+export default function Dashboard() {
+  const [child, setChild] = useState<ChildProfile>(DEFAULT_CHILD);
 
-// ── Avatar / ring component ─────────────────────────────────────────────────
-function MontoAvatar({ status }: { status: SIPStatus }) {
-  const pulse = status === "incoming" || status === "calling";
-  const active = status === "in-call";
-
-  return (
-    <div className="relative flex items-center justify-center w-40 h-40 mx-auto">
-      {/* Pulse rings for incoming/outgoing */}
-      <AnimatePresence>
-        {pulse && [0, 1, 2].map((i) => (
-          <motion.div
-            key={i}
-            className="absolute rounded-full border-2 border-indigo-400"
-            initial={{ width: 80, height: 80, opacity: 0.8 }}
-            animate={{ width: 160 + i * 30, height: 160 + i * 30, opacity: 0 }}
-            transition={{ duration: 1.5, delay: i * 0.4, repeat: Infinity, ease: "easeOut" }}
-          />
-        ))}
-      </AnimatePresence>
-
-      {/* Avatar circle */}
-      <motion.div
-        className="relative z-10 w-36 h-36 rounded-full flex items-center justify-center"
-        style={{
-          background: active
-            ? "linear-gradient(135deg, #059669, #10b981)"
-            : "linear-gradient(135deg, #4f46e5, #7c3aed)",
-          boxShadow: active
-            ? "0 0 40px rgba(16,185,129,0.4)"
-            : "0 0 40px rgba(99,102,241,0.3)",
-        }}
-        animate={active ? { scale: [1, 1.02, 1] } : {}}
-        transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-      >
-        <span className="text-6xl select-none">🤖</span>
-      </motion.div>
-
-      {/* Status dot */}
-      <motion.div
-        className={cn("absolute bottom-3 right-3 w-5 h-5 rounded-full border-2 border-[#0f0a1e]", STATUS_COLOR[status])}
-        animate={{ scale: [1, 1.3, 1] }}
-        transition={{ duration: 2, repeat: Infinity }}
-      />
-    </div>
-  );
-}
-
-// ── Sound wave indicator (active call) ─────────────────────────────────────
-function SoundWave() {
-  return (
-    <div className="flex items-center gap-1 h-8">
-      {[0.4, 0.8, 1.0, 0.7, 0.5, 0.9, 0.6].map((scale, i) => (
-        <motion.div
-          key={i}
-          className="w-1 rounded-full bg-emerald-400"
-          animate={{ scaleY: [0.3, scale, 0.3] }}
-          transition={{
-            duration: 0.6,
-            delay: i * 0.08,
-            repeat: Infinity,
-            ease: "easeInOut",
-          }}
-          style={{ height: 28 }}
-        />
-      ))}
-    </div>
-  );
-}
-
-// ── Settings panel ─────────────────────────────────────────────────────────
-function SettingsPanel({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
-  return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          className="fixed inset-0 z-50 flex items-end justify-center p-4"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-        >
-          {/* Backdrop */}
-          <motion.div
-            className="absolute inset-0 bg-black/60"
-            onClick={onClose}
-          />
-
-          <motion.div
-            className="relative z-10 w-full max-w-sm glass glass-border rounded-3xl p-6"
-            initial={{ y: 40, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 40, opacity: 0 }}
-          >
-            <h2 className="text-white font-bold text-lg mb-4">Connection Settings</h2>
-            <div className="space-y-3 text-sm text-white/60">
-              <div>
-                <span className="text-white/40 text-xs uppercase tracking-wide">WebSocket</span>
-                <p className="text-white/80 font-mono text-xs mt-0.5 break-all">{SIP_CONFIG.wsUrl}</p>
-              </div>
-              <div>
-                <span className="text-white/40 text-xs uppercase tracking-wide">SIP Extension</span>
-                <p className="text-white/80 font-mono mt-0.5">{SIP_CONFIG.username}@{SIP_CONFIG.domain}</p>
-              </div>
-              <div>
-                <span className="text-white/40 text-xs uppercase tracking-wide">Monto Extension</span>
-                <p className="text-white/80 font-mono mt-0.5">{SIP_CONFIG.montoExtension}@{SIP_CONFIG.domain}</p>
-              </div>
-              <div>
-                <span className="text-white/40 text-xs uppercase tracking-wide">Monto API</span>
-                <p className="text-white/80 font-mono text-xs mt-0.5 break-all">{MONTO_API}</p>
-              </div>
-            </div>
-
-            <p className="text-white/30 text-xs mt-4">
-              Edit environment variables in <code className="text-indigo-400">.env.local</code> to change these settings.
-            </p>
-
-            <button
-              onClick={onClose}
-              className="mt-5 w-full py-2.5 rounded-xl glass glass-border text-white/70 text-sm font-medium hover:bg-white/10 transition"
-            >
-              Close
-            </button>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
-  );
-}
-
-// ── Main Page ────────────────────────────────────────────────────────────────
-export default function ParentApp() {
-  const { status, callDuration, incomingFrom, isMuted, answer, hangup, call, toggleMute, error } =
-    useSIP(SIP_CONFIG);
-
-  const [showSettings, setShowSettings] = useState(false);
-  const [montoOnline, setMontoOnline]   = useState<boolean | null>(null);
-
-  // Periodically check if Monto box is online via backend /call/status
   useEffect(() => {
-    const check = async () => {
-      try {
-        const res = await fetch(`${MONTO_API}/call/status`);
-        if (res.ok) {
-          const data = await res.json();
-          setMontoOnline(data.monto_online ?? false);
-        }
-      } catch {
-        setMontoOnline(false);
-      }
-    };
-    check();
-    const interval = setInterval(check, 15_000);
-    return () => clearInterval(interval);
+    setChild(loadChildProfile());
   }, []);
 
-  const isIdle    = status === "registered";
-  const isActive  = status === "in-call";
-  const isCalling = status === "calling" || status === "incoming";
-
-  const handlePrimaryBtn = useCallback(() => {
-    if (status === "incoming")  return answer();
-    if (status === "calling")   return hangup();
-    if (status === "in-call")   return hangup();
-    if (status === "registered") return call();
-  }, [status, answer, hangup, call]);
+  const total = usage.reduce((s, d) => s + d.hours, 0);
+  const avg = total / usage.length;
+  const childLabel = [child.age && `Age ${child.age}`, child.grade].filter(Boolean).join(" • ");
 
   return (
-    <div
-      className="min-h-dvh flex flex-col relative overflow-hidden"
-      style={{ background: "linear-gradient(160deg, #0f0a1e 0%, #1a0d35 50%, #0a1428 100%)" }}
-    >
-      {/* Stars */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        {Array.from({ length: 40 }, (_, i) => (
-          <motion.div
-            key={i}
-            className="absolute rounded-full bg-white"
-            style={{
-              left: `${Math.random() * 100}%`,
-              top:  `${Math.random() * 100}%`,
-              width:  Math.random() * 2 + 0.5,
-              height: Math.random() * 2 + 0.5,
-            }}
-            animate={{ opacity: [0.1, 0.7, 0.1] }}
-            transition={{
-              duration: Math.random() * 3 + 2,
-              delay:    Math.random() * 4,
-              repeat:   Infinity,
-            }}
-          />
-        ))}
-      </div>
-
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <header className="relative z-20 flex items-center justify-between px-5 pt-6 pb-2">
-        {/* Monto box status */}
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full glass glass-border">
-          <motion.div
-            className={cn(
-              "w-1.5 h-1.5 rounded-full",
-              montoOnline === null ? "bg-slate-400" :
-              montoOnline ? "bg-emerald-400" : "bg-red-400"
-            )}
-            animate={{ scale: [1, 1.4, 1] }}
-            transition={{ duration: 2, repeat: Infinity }}
-          />
-          <span className="text-[10px] text-white/50 font-semibold tracking-wide">
-            {montoOnline === null ? "CHECKING" : montoOnline ? "MONTO ONLINE" : "MONTO OFFLINE"}
-          </span>
-        </div>
-
-        {/* Title */}
-        <div className="text-center">
-          <div className="font-bold text-xl text-white tracking-tight">
-            <span className="text-indigo-400">M</span>onto Parent
-          </div>
-          <div className="text-[9px] tracking-[0.3em] text-white/30 uppercase">
-            Stay Connected ✦
-          </div>
-        </div>
-
-        {/* Settings */}
-        <motion.button
-          onClick={() => setShowSettings(true)}
-          className="w-9 h-9 rounded-full glass glass-border flex items-center justify-center"
-          whileTap={{ scale: 0.85 }}
+    <PhoneShell>
+      <header className="px-5 pt-5 pb-3 flex items-center justify-between bg-background sticky top-0 z-20">
+        <MontoLogo />
+        <Link
+          href="/profile"
+          className="size-10 rounded-full brand-gradient text-white flex items-center justify-center text-lg shadow-card"
         >
-          <Settings className="w-4 h-4 text-white/50" />
-        </motion.button>
+          {child.avatar || "👦"}
+        </Link>
       </header>
 
-      {/* ── Main ───────────────────────────────────────────────────────────── */}
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-center px-5 pb-10 max-w-sm mx-auto w-full">
-
-        {/* ── Avatar ──────────────────────────────────────────────────────── */}
-        <div className="mb-8">
-          <MontoAvatar status={status} />
-        </div>
-
-        {/* ── Status text ─────────────────────────────────────────────────── */}
-        <div className="text-center mb-8">
-          <AnimatePresence mode="wait">
-            <motion.div key={status}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2 }}
-            >
-              <div className="flex items-center justify-center gap-2 mb-1">
-                <motion.div
-                  className={cn("w-2 h-2 rounded-full", STATUS_COLOR[status])}
-                  animate={{ scale: [1, 1.3, 1] }}
-                  transition={{ duration: 1.5, repeat: Infinity }}
-                />
-                <span className="text-white font-semibold text-lg">
-                  {STATUS_LABEL[status]}
-                </span>
-              </div>
-
-              {/* In call: duration + sound wave */}
-              {isActive && (
-                <div className="flex flex-col items-center gap-2 mt-2">
-                  <SoundWave />
-                  <span className="text-emerald-400 font-mono text-sm">
-                    {formatDuration(callDuration)}
-                  </span>
-                </div>
-              )}
-
-              {/* Incoming: who's calling */}
-              {status === "incoming" && (
-                <p className="text-white/60 text-sm mt-1">
-                  from {incomingFrom}
-                </p>
-              )}
-
-              {/* Idle: connection guidance */}
-              {isIdle && (
-                <p className="text-white/40 text-sm mt-1">
-                  {montoOnline ? "Tap to call Monto 📞" : "Monto box is offline"}
-                </p>
-              )}
-            </motion.div>
-          </AnimatePresence>
-        </div>
-
-        {/* ── Error banner ─────────────────────────────────────────────────── */}
-        <AnimatePresence>
-          {error && (
-            <motion.div
-              className="w-full mb-6 px-4 py-3 rounded-2xl flex items-center gap-3 glass"
-              style={{ borderColor: "rgba(239,68,68,0.3)", border: "1px solid" }}
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-            >
-              <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
-              <p className="text-red-300 text-sm">{error}</p>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* ── Call controls ────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-center gap-5">
-          {/* Mute (only when in call) */}
-          <AnimatePresence>
-            {isActive && (
-              <motion.button
-                onClick={toggleMute}
-                className="w-14 h-14 rounded-full glass glass-border flex items-center justify-center"
-                whileTap={{ scale: 0.85 }}
-                initial={{ scale: 0, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0, opacity: 0 }}
-                transition={{ type: "spring", stiffness: 400 }}
-              >
-                {isMuted
-                  ? <MicOff className="w-6 h-6 text-red-400" />
-                  : <Mic    className="w-6 h-6 text-white/70" />}
-              </motion.button>
-            )}
-          </AnimatePresence>
-
-          {/* Primary call button */}
-          <motion.button
-            onClick={handlePrimaryBtn}
-            disabled={status === "disconnected" || status === "connecting" || status === "error"}
-            className="w-20 h-20 rounded-full flex items-center justify-center disabled:opacity-40 focus:outline-none"
-            style={{
-              background:
-                isActive || status === "calling"
-                  ? "linear-gradient(135deg, #ef4444, #dc2626)"
-                  : status === "incoming"
-                  ? "linear-gradient(135deg, #059669, #10b981)"
-                  : "linear-gradient(135deg, #4f46e5, #7c3aed)",
-              boxShadow:
-                isActive || status === "calling"
-                  ? "0 0 40px rgba(239,68,68,0.4), 0 8px 32px rgba(0,0,0,0.4)"
-                  : status === "incoming"
-                  ? "0 0 40px rgba(16,185,129,0.4), 0 8px 32px rgba(0,0,0,0.4)"
-                  : "0 0 40px rgba(99,102,241,0.4), 0 8px 32px rgba(0,0,0,0.4)",
-            }}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.9 }}
-          >
-            <AnimatePresence mode="wait">
-              {isActive || status === "calling" ? (
-                <motion.div key="hangup"
-                  initial={{ scale: 0, rotate: -90 }} animate={{ scale: 1, rotate: 0 }}
-                  exit={{ scale: 0 }} transition={{ type: "spring", stiffness: 400 }}>
-                  <PhoneOff className="w-9 h-9 text-white" />
-                </motion.div>
-              ) : status === "incoming" ? (
-                <motion.div key="answer"
-                  initial={{ scale: 0 }} animate={{ scale: 1 }}
-                  exit={{ scale: 0 }} transition={{ type: "spring", stiffness: 400 }}>
-                  <PhoneIncoming className="w-9 h-9 text-white" />
-                </motion.div>
-              ) : (
-                <motion.div key="call"
-                  initial={{ scale: 0 }} animate={{ scale: 1 }}
-                  exit={{ scale: 0 }} transition={{ type: "spring", stiffness: 400 }}>
-                  <Phone className="w-9 h-9 text-white" />
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </motion.button>
-
-          {/* Decline (only on incoming) */}
-          <AnimatePresence>
-            {status === "incoming" && (
-              <motion.button
-                onClick={hangup}
-                className="w-14 h-14 rounded-full flex items-center justify-center"
-                style={{
-                  background: "linear-gradient(135deg, #ef4444, #dc2626)",
-                  boxShadow: "0 0 20px rgba(239,68,68,0.3)",
-                }}
-                whileTap={{ scale: 0.85 }}
-                initial={{ scale: 0, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0, opacity: 0 }}
-                transition={{ type: "spring", stiffness: 400 }}
-              >
-                <PhoneOff className="w-6 h-6 text-white" />
-              </motion.button>
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* ── Info cards ───────────────────────────────────────────────────── */}
-        <div className="w-full mt-10 space-y-3">
-          {/* SIP registration status */}
-          <div className="px-4 py-3 rounded-2xl glass glass-border flex items-center gap-3">
-            {status === "registered" || status === "in-call" || status === "incoming" || status === "calling" ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-            ) : status === "connecting" ? (
-              <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-              >
-                <Wifi className="w-4 h-4 text-yellow-400 flex-shrink-0" />
-              </motion.div>
-            ) : (
-              <WifiOff className="w-4 h-4 text-slate-400 flex-shrink-0" />
-            )}
-            <div>
-              <p className="text-white/80 text-sm font-medium">
-                {status === "registered" ? "Registered with Asterisk" :
-                 status === "connecting" ? "Connecting to Asterisk..." :
-                 "Not registered"}
-              </p>
-              <p className="text-white/30 text-xs">
-                {SIP_CONFIG.username}@{SIP_CONFIG.domain}
-              </p>
+      <div className="flex-1 overflow-y-auto px-5 pb-6 space-y-5">
+        {/* Child status card */}
+        <div className="rounded-3xl brand-gradient text-white p-5 shadow-elevated relative overflow-hidden">
+          <div className="absolute -right-8 -top-8 size-32 rounded-full bg-white/10 blur-2xl" />
+          <div className="flex items-center gap-3 relative">
+            <div className="size-14 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center text-2xl">
+              {child.avatar || "👦"}
+            </div>
+            <div className="flex-1">
+              <p className="text-xs opacity-80">Active now</p>
+              <h2 className="text-lg font-bold leading-tight">{child.name || "Add your child's name"}</h2>
+              <p className="text-xs opacity-90">{childLabel || "Set up in Profile"}</p>
             </div>
           </div>
-
-          {/* Audio note */}
-          {isActive && (
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="px-4 py-3 rounded-2xl glass glass-border flex items-center gap-3"
-              style={{ borderColor: "rgba(16,185,129,0.3)" }}
-            >
-              <Volume2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-              <p className="text-emerald-300 text-sm">
-                {isMuted ? "Microphone muted — tap mic to unmute" : "Audio connected — speak normally"}
-              </p>
-            </motion.div>
-          )}
+          <div className="mt-4 grid grid-cols-3 gap-2 relative">
+            <Stat icon={Battery} label="Battery" value="82%" />
+            <Stat icon={Clock} label="Time" value="4:42 PM" />
+            <Stat icon={MapPin} label="Home" value="Living Rm" />
+          </div>
         </div>
 
-        {/* ── Footer ───────────────────────────────────────────────────────── */}
-        <div className="mt-8 flex items-center gap-1.5 text-white/20 text-xs">
-          <Heart className="w-3 h-3" />
-          <span>Made with love for Monto AI</span>
-        </div>
-      </main>
+        {/* Usage analytics */}
+        <Card>
+          <div className="flex items-center justify-between mb-1">
+            <div>
+              <h3 className="font-bold">AI Box Usage</h3>
+              <p className="text-xs text-muted-foreground">This week</p>
+            </div>
+            <span className="text-xs font-semibold text-success flex items-center gap-1">
+              <TrendingUp className="size-3" /> +12%
+            </span>
+          </div>
+          <div className="h-40 -mx-2 mt-3">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={usage} barCategoryGap={10}>
+                <defs>
+                  <linearGradient id="barFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="oklch(0.55 0.24 295)" />
+                    <stop offset="100%" stopColor="oklch(0.55 0.21 263)" />
+                  </linearGradient>
+                </defs>
+                <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "oklch(0.5 0.03 260)" }} />
+                <Tooltip cursor={{ fill: "oklch(0.55 0.21 263 / 0.08)" }} contentStyle={{ borderRadius: 12, border: "none", boxShadow: "0 4px 24px rgba(0,0,0,0.1)", fontSize: 12 }} />
+                <Bar dataKey="hours" fill="url(#barFill)" radius={[8, 8, 4, 4]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="grid grid-cols-2 gap-3 mt-2">
+            <Mini label="Weekly total" value={`${total.toFixed(1)} h`} />
+            <Mini label="Daily avg" value={`${avg.toFixed(1)} h`} />
+          </div>
+        </Card>
 
-      <SettingsPanel open={showSettings} onClose={() => setShowSettings(false)} />
+        {/* Questions */}
+        <Card>
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold">Questions Asked</h3>
+            <button className="text-xs text-primary font-semibold">View all</button>
+          </div>
+          <div className="relative mt-3">
+            <Search className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+            <Input placeholder="Search questions…" className="pl-9 h-10 rounded-xl bg-muted border-0" />
+          </div>
+          <ul className="mt-3 space-y-2">
+            {questions.map((q) => (
+              <li key={q.q} className="flex items-start gap-3 p-3 rounded-2xl bg-muted/50 hover:bg-muted transition">
+                <div className="size-9 rounded-xl bg-card flex items-center justify-center shrink-0 shadow-card">
+                  <MessageCircleQuestion className="size-4 text-secondary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium leading-snug">{q.q}</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">{q.date} • {q.time}</p>
+                </div>
+                <ChevronRight className="size-4 text-muted-foreground mt-2" />
+              </li>
+            ))}
+          </ul>
+        </Card>
+
+        {/* Quick actions */}
+        <div>
+          <h3 className="font-bold mb-3 px-1">Quick Actions</h3>
+          <div className="grid grid-cols-3 gap-3">
+            {actions.map(({ to, label, icon: Icon, color, bg }) => (
+              <Link key={label} href={to} className="rounded-2xl bg-card border p-3 shadow-card flex flex-col items-center gap-2 hover:shadow-elevated transition">
+                <div className={`size-10 rounded-xl ${bg} ${color} flex items-center justify-center`}>
+                  <Icon className="size-5" />
+                </div>
+                <span className="text-xs font-semibold text-center">{label}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <BottomNav />
+    </PhoneShell>
+  );
+}
+
+function Card({ children }: { children: React.ReactNode }) {
+  return <div className="rounded-3xl bg-card border p-5 shadow-card">{children}</div>;
+}
+
+function Stat({ icon: Icon, label, value }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string }) {
+  return (
+    <div className="rounded-2xl bg-white/15 backdrop-blur p-2.5">
+      <Icon className="size-4 opacity-90" />
+      <p className="text-[10px] opacity-80 mt-1">{label}</p>
+      <p className="text-sm font-bold leading-tight">{value}</p>
+    </div>
+  );
+}
+
+function Mini({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl bg-muted/60 p-3">
+      <p className="text-[11px] text-muted-foreground">{label}</p>
+      <p className="text-lg font-bold mt-0.5">{value}</p>
     </div>
   );
 }

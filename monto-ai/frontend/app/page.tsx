@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Volume2, VolumeX, Mic, Sparkles, MessageCircle, X, ChevronRight } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
+import { CallScreen } from "@/components/CallScreen";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 import { useTTS } from "@/hooks/useTTS";
 import { useConversation } from "@/hooks/useConversation";
@@ -28,38 +29,6 @@ const GREETING_MESSAGES = [
   "Let's learn something fun today! 🚀",
   "What's on your mind? I'm listening! 💭",
 ];
-
-// ── Star background ───────────────────────────────────────────────────────────
-const StarField = () => {
-  const stars = useMemo(() => Array.from({ length: 50 }, (_, i) => ({
-    id: i,
-    x: Math.random() * 100,
-    y: Math.random() * 100,
-    size: Math.random() * 2.5 + 0.5,
-    duration: Math.random() * 3 + 2,
-    delay: Math.random() * 4,
-  })), []);
-
-  return (
-    <div className="fixed inset-0 pointer-events-none">
-      {stars.map(s => (
-        <motion.div key={s.id}
-          className="absolute rounded-full bg-white"
-          style={{ left: `${s.x}%`, top: `${s.y}%`, width: s.size, height: s.size }}
-          animate={{ opacity: [0.1, 0.9, 0.1], scale: [0.8, 1.3, 0.8] }}
-          transition={{ duration: s.duration, repeat: Infinity, delay: s.delay, ease: "easeInOut" }}
-        />
-      ))}
-      {/* Nebula blobs */}
-      <div className="absolute top-10 left-10 w-64 h-64 rounded-full opacity-10"
-           style={{ background: "radial-gradient(circle, #7C3AED, transparent)" }} />
-      <div className="absolute bottom-20 right-5 w-48 h-48 rounded-full opacity-10"
-           style={{ background: "radial-gradient(circle, #EC4899, transparent)" }} />
-      <div className="absolute top-1/2 left-1/3 w-32 h-32 rounded-full opacity-8"
-           style={{ background: "radial-gradient(circle, #3B82F6, transparent)" }} />
-    </div>
-  );
-};
 
 // ── Floating emoji burst ──────────────────────────────────────────────────────
 const EmojiBurst = ({ emotion, trigger }: { emotion: string; trigger: number }) => {
@@ -114,8 +83,19 @@ export default function Home() {
   const [showChat, setShowChat]       = useState(false);
   const [emojiBurst, setEmojiBurst]   = useState(0);
   const [lang, setLang]               = useState<"english" | "nepali">("english");
-  const [greeting]                    = useState(() =>
-    GREETING_MESSAGES[Math.floor(Math.random() * GREETING_MESSAGES.length)]);
+  const [greeting, setGreeting] = useState(GREETING_MESSAGES[0]);
+
+  useEffect(() => {
+    // Pick random greeting client-side only — avoids hydration mismatch
+    setGreeting(GREETING_MESSAGES[Math.floor(Math.random() * GREETING_MESSAGES.length)]);
+  }, []);
+
+  // ── Call state ─────────────────────────────────────────────────────────
+  const [calling, setCalling]         = useState<"mom" | "dad" | null>(null);
+
+  // ── Water reminder ─────────────────────────────────────────────────────
+  const [showWater, setShowWater]     = useState(false);
+  const waterTimerRef                 = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const busyRef          = useRef(false);
   const silenceTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -129,6 +109,34 @@ export default function Home() {
   const cfg = EMOTION_CONFIG[emotion] ?? EMOTION_CONFIG.neutral;
 
   useEffect(() => { checkHealth().then(setOnline); }, []);
+
+  // ── Water reminder every 30 minutes ──────────────────────────────────────
+  useEffect(() => {
+    const INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+    const waterMessages = [
+      "Hey! 💧 Time to drink some water! Staying hydrated keeps you super strong!",
+      "Water break time! 💦 Drink a glass of water — your body will thank you!",
+      "Hey friend! 🥤 It's been a while — go grab some water right now!",
+      "Hydration check! 💧 A healthy hero always drinks water. Go drink some!",
+      "Water time! 🌊 Even Spider-Man drinks water to stay strong. Your turn!",
+    ];
+
+    waterTimerRef.current = setInterval(() => {
+      const msg = waterMessages[Math.floor(Math.random() * waterMessages.length)];
+      setShowWater(true);
+      // Speak it out loud
+      speak(msg, "happy", { language: "english", voice: "female", autoSpeak: true, darkMode: true },
+        () => {},
+        () => {}
+      );
+      // Hide card after 12 seconds
+      setTimeout(() => setShowWater(false), 12000);
+    }, INTERVAL_MS);
+
+    return () => {
+      if (waterTimerRef.current) clearInterval(waterTimerRef.current);
+    };
+  }, [speak]);
 
   // ── Process ───────────────────────────────────────────────────────────────
   const processAudio = useCallback(async (blob: Blob) => {
@@ -145,6 +153,13 @@ export default function Home() {
       conversation.addUserMessage(result.transcript);
       conversation.addAssistantMessage(result);
       setEmojiBurst(b => b + 1);
+
+      // ── Call detection ──────────────────────────────────────────────────
+      const lower = result.transcript.toLowerCase();
+      const callMom = /call\s+(mom|mum|mama|mother|मम्मी|आमा)/i.test(lower);
+      const callDad = /call\s+(dad|daddy|papa|father|बुबा|बाबा)/i.test(lower);
+      if (callMom) { setRS("idle"); busyRef.current = false; setCalling("mom"); return; }
+      if (callDad) { setRS("idle"); busyRef.current = false; setCalling("dad"); return; }
 
       if (autoSpeak && result.response) {
         setRS("speaking");
@@ -255,18 +270,75 @@ export default function Home() {
   }, [recordingState, apiError, wakeListen]);
 
   return (
-    <div className="min-h-dvh flex flex-col relative overflow-hidden select-none"
-         style={{ background: `linear-gradient(160deg, #0D0820 0%, #180D3A 45%, #0A1428 100%)` }}>
+    <div className="min-h-dvh flex flex-col relative overflow-hidden select-none bg-black">
 
-      <StarField />
       <EmojiBurst emotion={emotion} trigger={emojiBurst} />
 
-      {/* Emotion ambient glow */}
-      <motion.div className="fixed inset-0 pointer-events-none"
-        animate={{ opacity: [0.08, 0.14, 0.08] }}
-        transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-        style={{ background: `radial-gradient(ellipse 60% 50% at 50% 40%, ${cfg.glow}55, transparent)` }}
-      />
+      {/* ── Calling overlay ─────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {calling && (
+          <CallScreen
+            callee={calling}
+            onEnd={() => setCalling(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── Water reminder toast ─────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showWater && (
+          <motion.div
+            className="fixed top-6 left-1/2 z-40 w-[90vw] max-w-sm -translate-x-1/2"
+            initial={{ opacity: 0, y: -40, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0,   scale: 1   }}
+            exit={{   opacity: 0, y: -30,  scale: 0.95 }}
+            transition={{ type: "spring", stiffness: 300, damping: 22 }}
+          >
+            <div className="rounded-3xl px-5 py-4 flex items-center gap-4"
+              style={{
+                background: "linear-gradient(135deg, #0EA5E9, #38BDF8, #7DD3FC)",
+                boxShadow: "0 0 40px rgba(14,165,233,0.5), 0 8px 32px rgba(0,0,0,0.4)",
+              }}
+            >
+              {/* Animated water drop */}
+              <motion.div
+                className="text-4xl flex-shrink-0"
+                animate={{ y: [0, -6, 0], scale: [1, 1.15, 1] }}
+                transition={{ duration: 1, repeat: Infinity, ease: "easeInOut" }}
+              >
+                💧
+              </motion.div>
+
+              <div className="flex-1">
+                <p className="text-white font-bold text-sm leading-snug">
+                  Time to drink water!
+                </p>
+                <p className="text-white/80 text-xs mt-0.5">
+                  Stay hydrated — your body needs it! 🌊
+                </p>
+              </div>
+
+              {/* Close button */}
+              <motion.button
+                onClick={() => setShowWater(false)}
+                className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0"
+                whileTap={{ scale: 0.85 }}
+              >
+                <X className="w-3.5 h-3.5 text-white" />
+              </motion.button>
+            </div>
+
+            {/* Progress bar — drains over 12s */}
+            <motion.div
+              className="h-1 rounded-full mt-1.5 mx-1"
+              initial={{ scaleX: 1 }}
+              animate={{ scaleX: 0 }}
+              transition={{ duration: 12, ease: "linear" }}
+              style={{ transformOrigin: "left", background: "rgba(255,255,255,0.6)" }}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <header className="relative z-20 flex items-center justify-between px-5 pt-safe pt-4 pb-2">
@@ -311,60 +383,14 @@ export default function Home() {
 
               {/* ── Avatar area ──────────────────────────────────────── */}
               <div className="relative flex items-center justify-center mt-2 mb-2">
-                {/* Outer orbit ring */}
-                <motion.div className="absolute rounded-full border"
-                  style={{
-                    width: 250, height: 250,
-                    borderColor: `${cfg.color}25`,
-                    boxShadow: `0 0 60px ${cfg.glow}20`,
-                  }}
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-                >
-                  {/* Orbit dots */}
-                  {[0, 90, 180, 270].map((deg, i) => (
-                    <div key={i} className="absolute w-2 h-2 rounded-full"
-                         style={{
-                           background: cfg.color,
-                           top: "50%", left: "50%",
-                           transform: `rotate(${deg}deg) translateX(123px) translateY(-50%)`,
-                           opacity: 0.6,
-                         }} />
-                  ))}
-                </motion.div>
-
-                {/* Inner glow */}
-                <motion.div className="absolute rounded-full"
-                  style={{ width: 200, height: 200, background: `radial-gradient(circle, ${cfg.glow}30, transparent)` }}
-                  animate={{ scale: [1, 1.12, 1], opacity: [0.6, 1, 0.6] }}
-                  transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
-                />
-
                 {/* Avatar */}
                 <motion.div
-                  className="float relative z-10"
+                  className="relative z-10"
                   animate={isRec ? { scale: [1, 1.03, 1] } : {}}
                   transition={{ duration: 0.3, repeat: Infinity }}
                 >
-                  <Avatar emotion={emotion} size={190} />
+                  <Avatar emotion={isSpeaking ? "talking" : emotion} size={220} />
                 </motion.div>
-
-                {/* Speaking arcs */}
-                <AnimatePresence>
-                  {isSpeaking && (
-                    <div className="absolute right-0 top-1/2 -translate-y-1/2">
-                      {[0,1,2].map(i => (
-                        <motion.div key={i}
-                          className="absolute rounded-full border-2"
-                          style={{ borderColor: cfg.color + "70", right: -4 - i * 14, top: "50%", transform: "translateY(-50%)" }}
-                          initial={{ width: 16, height: 16, opacity: 0.9 }}
-                          animate={{ width: 16 + i * 18, height: 16 + i * 18, opacity: 0 }}
-                          transition={{ duration: 1, delay: i * 0.25, repeat: Infinity }}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </AnimatePresence>
               </div>
 
               {/* ── Status / greeting ────────────────────────────────── */}

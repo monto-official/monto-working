@@ -1,221 +1,332 @@
 "use client";
 /**
- * useSIP — JsSIP WebRTC SIP client hook for the Monto Parent App.
+ * useSIP — JsSIP-based SIP hook for the Monto Parent App.
  *
  * Handles:
- *  - Registration with Asterisk over WebSocket
- *  - Incoming calls from the Monto box
- *  - Outgoing calls to the Monto box extension
- *  - Media stream (audio) management
- *  - Clean teardown on unmount
+ *  - UA registration with Asterisk via WebSocket
+ *  - Outbound calls  → callMonto()
+ *  - Inbound calls   → auto-surfaces via onIncomingCall callback + answerCall()
+ *  - Hang up         → hangUp()
+ *  - Audio routing   → remote audio piped to a hidden <audio> element
  */
-import { useEffect, useRef, useCallback, useState } from "react";
 
-// ── Types ──────────────────────────────────────────────────────────────────────
-export type SIPStatus =
-  | "disconnected"
-  | "connecting"
-  | "registered"
-  | "incoming"
-  | "calling"
-  | "in-call"
-  | "error";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { CallState, CallDirection, CallLogEntry, SIPConfig } from "@/types";
 
-export interface SIPConfig {
-  wsUrl:          string;   // e.g. "ws://192.168.1.100:8088/ws"
-  username:       string;   // e.g. "parent"
-  password:       string;
-  domain:         string;   // e.g. "192.168.1.100"
-  montoExtension: string;   // e.g. "monto"
-}
+// JsSIP is loaded dynamically to avoid SSR issues (it uses browser APIs)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type JsSIPType = typeof import("jssip");
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type UAType = InstanceType<JsSIPType["UA"]>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type RTCSessionType = any;
 
-export interface UseSIPReturn {
-  status:       SIPStatus;
-  callDuration: number;      // seconds since call connected
-  incomingFrom: string | null;
-  isMuted:      boolean;
-  answer:       () => void;
-  hangup:       () => void;
-  call:         () => void;  // call the Monto box
-  toggleMute:   () => void;
-  error:        string | null;
+function generateId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
-export function useSIP(config: SIPConfig): UseSIPReturn {
-  const [status, setStatus]           = useState<SIPStatus>("disconnected");
-  const [incomingFrom, setIncomingFrom] = useState<string | null>(null);
-  const [isMuted, setIsMuted]         = useState(false);
-  const [error, setError]             = useState<string | null>(null);
-  const [callDuration, setCallDuration] = useState(0);
 
-  const uaRef           = useRef<any>(null);
-  const sessionRef      = useRef<any>(null);
-  const remoteAudioRef  = useRef<HTMLAudioElement | null>(null);
-  const timerRef        = useRef<NodeJS.Timeout | null>(null);
-  const callStartRef    = useRef<number>(0);
+export interface UseSIPReturn {
+  callState: CallState;
+  callDirection: CallDirection | null;
+  callDuration: number;         // seconds, counts up while in-call
+  callLog: CallLogEntry[];
+  remoteAudioRef: React.RefObject<HTMLAudioElement | null>;
+  isMuted: boolean;
+
+  callMonto: () => void;
+  answerCall: () => void;
+  declineCall: () => void;
+  hangUp: () => void;
+  toggleMute: () => void;
+  reconnect: () => void;
+  clearLog: () => void;
+}
+
+export function useSIP(config: SIPConfig): UseSIPReturn {
+  const [callState, setCallState]           = useState<CallState>("unregistered");
+  const [callDirection, setCallDirection]   = useState<CallDirection | null>(null);
+  const [callDuration, setCallDuration]     = useState(0);
+  const [callLog, setCallLog]               = useState<CallLogEntry[]>([]);
+  const [isMuted, setIsMuted]               = useState(false);
+
+  const uaRef              = useRef<UAType | null>(null);
+  const sessionRef         = useRef<RTCSessionType | null>(null);
+  const remoteAudioRef     = useRef<HTMLAudioElement | null>(null);
+  const durationTimerRef   = useRef<ReturnType<typeof setInterval> | null>(null);
+  const callStartTimeRef   = useRef<Date | null>(null);
+  const currentLogIdRef    = useRef<string | null>(null);
+  const incomingSessionRef = useRef<RTCSessionType | null>(null);
 
   // ── Duration timer ─────────────────────────────────────────────────────────
+
   const startTimer = useCallback(() => {
-    callStartRef.current = Date.now();
-    timerRef.current = setInterval(() => {
-      setCallDuration(Math.floor((Date.now() - callStartRef.current) / 1000));
+    callStartTimeRef.current = new Date();
+    setCallDuration(0);
+    durationTimerRef.current = setInterval(() => {
+      if (callStartTimeRef.current) {
+        const secs = Math.floor(
+          (Date.now() - callStartTimeRef.current.getTime()) / 1000
+        );
+        setCallDuration(secs);
+      }
     }, 1000);
   }, []);
 
   const stopTimer = useCallback(() => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    setCallDuration(0);
-  }, []);
-
-  // ── Attach remote audio stream to <audio> element ─────────────────────────
-  const attachAudio = useCallback((stream: MediaStream) => {
-    if (!remoteAudioRef.current) {
-      const audio = new Audio();
-      audio.autoplay = true;
-      audio.controls = false;
-      remoteAudioRef.current = audio;
-    }
-    remoteAudioRef.current.srcObject = stream;
-    remoteAudioRef.current.play().catch(() => {});
-  }, []);
-
-  const detachAudio = useCallback(() => {
-    if (remoteAudioRef.current) {
-      remoteAudioRef.current.srcObject = null;
+    if (durationTimerRef.current) {
+      clearInterval(durationTimerRef.current);
+      durationTimerRef.current = null;
     }
   }, []);
 
-  // ── Session event wiring ──────────────────────────────────────────────────
-  const wireSession = useCallback((session: any) => {
-    sessionRef.current = session;
+  // ── Call log helpers ───────────────────────────────────────────────────────
 
-    session.on("confirmed", () => {
-      setStatus("in-call");
-      startTimer();
-    });
-
-    session.on("ended", () => {
-      setStatus("registered");
-      setIncomingFrom(null);
-      setIsMuted(false);
-      stopTimer();
-      detachAudio();
-      sessionRef.current = null;
-    });
-
-    session.on("failed", (e: any) => {
-      const cause = e?.cause || "Unknown error";
-      setError(`Call failed: ${cause}`);
-      setStatus("registered");
-      setIncomingFrom(null);
-      stopTimer();
-      detachAudio();
-      sessionRef.current = null;
-      setTimeout(() => setError(null), 5000);
-    });
-
-    session.on("peerconnection", (e: any) => {
-      const pc: RTCPeerConnection = e.peerconnection;
-      pc.ontrack = (event) => {
-        if (event.streams?.[0]) {
-          attachAudio(event.streams[0]);
-        }
+  const addLogEntry = useCallback(
+    (direction: CallDirection): string => {
+      const id = generateId();
+      currentLogIdRef.current = id;
+      const entry: CallLogEntry = {
+        id,
+        direction,
+        startedAt: new Date(),
+        status: "answered",
       };
+      setCallLog((prev) => [entry, ...prev].slice(0, 50)); // keep last 50
+      return id;
+    },
+    []
+  );
+
+  const finaliseLogEntry = useCallback(
+    (
+      id: string,
+      status: CallLogEntry["status"],
+      endedAt: Date,
+      startedAt?: Date
+    ) => {
+      setCallLog((prev) =>
+        prev.map((e) => {
+          if (e.id !== id) return e;
+          const started = startedAt ?? e.startedAt;
+          return {
+            ...e,
+            status,
+            endedAt,
+            durationSeconds: Math.floor(
+              (endedAt.getTime() - started.getTime()) / 1000
+            ),
+          };
+        })
+      );
+    },
+    []
+  );
+
+  // ── Remote audio routing ───────────────────────────────────────────────────
+
+  const attachRemoteAudio = useCallback((session: RTCSessionType) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    session.connection.addEventListener("addstream", (e: any) => {
+      if (remoteAudioRef.current && e.stream) {
+        remoteAudioRef.current.srcObject = e.stream;
+        remoteAudioRef.current.play().catch(() => {
+          // autoplay policy — user gesture already occurred for a call so this
+          // should succeed, but we swallow the error gracefully
+        });
+      }
     });
-  }, [startTimer, stopTimer, attachAudio, detachAudio]);
 
-  // ── JsSIP init ─────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (typeof window === "undefined") return;
+    // Modern API (replaces deprecated addstream)
+    session.connection.addEventListener("track", (e: RTCTrackEvent) => {
+      if (remoteAudioRef.current && e.streams && e.streams[0]) {
+        remoteAudioRef.current.srcObject = e.streams[0];
+        remoteAudioRef.current.play().catch(() => {});
+      }
+    });
+  }, []);
 
-    let ua: any;
+  // ── Session event wiring ───────────────────────────────────────────────────
 
-    const init = async () => {
-      // Dynamic import — JsSIP uses browser globals, must be client-side only
-      const JsSIP = (await import("jssip")).default;
+  const wireSessionEvents = useCallback(
+    (session: RTCSessionType, direction: CallDirection, logId: string) => {
+      sessionRef.current = session;
 
-      // Suppress JsSIP internal logs in production
-      JsSIP.debug.disable("JsSIP:*");
-
-      const socket = new JsSIP.WebSocketInterface(config.wsUrl);
-
-      ua = new JsSIP.UA({
-        sockets:              [socket],
-        uri:                  `sip:${config.username}@${config.domain}`,
-        password:             config.password,
-        register:             true,
-        register_expires:     120,
-        connection_recovery_min_interval: 2,
-        connection_recovery_max_interval: 30,
+      session.on("confirmed", () => {
+        setCallState("in-call");
+        startTimer();
+        attachRemoteAudio(session);
       });
 
-      ua.on("connecting", () => setStatus("connecting"));
-
-      ua.on("connected", () => {
-        setError(null);
+      session.on("failed", (e: { cause: string }) => {
+        const endedAt = new Date();
+        stopTimer();
+        finaliseLogEntry(logId, "failed", endedAt, callStartTimeRef.current ?? undefined);
+        sessionRef.current = null;
+        setCallState("registered");
+        setCallDirection(null);
+        setCallDuration(0);
+        console.warn("[SIP] Call failed:", e.cause);
       });
 
-      ua.on("disconnected", () => {
-        if (status !== "error") setStatus("disconnected");
-      });
-
-      ua.on("registered", () => {
-        setStatus("registered");
-        setError(null);
-      });
-
-      ua.on("unregistered", () => {
-        setStatus("disconnected");
-      });
-
-      ua.on("registrationFailed", (e: any) => {
-        setStatus("error");
-        setError(`Registration failed: ${e?.cause || "unknown"}`);
-      });
-
-      // ── Incoming call ────────────────────────────────────────────────────
-      ua.on("newRTCSession", (e: any) => {
-        const session = e.session;
-        if (session.direction === "incoming") {
-          const from = session.remote_identity?.display_name ||
-                       session.remote_identity?.uri?.user ||
-                       "Monto Box";
-          setIncomingFrom(from);
-          setStatus("incoming");
-          wireSession(session);
+      session.on("ended", () => {
+        const endedAt = new Date();
+        stopTimer();
+        if (currentLogIdRef.current) {
+          finaliseLogEntry(
+            currentLogIdRef.current,
+            "answered",
+            endedAt,
+            callStartTimeRef.current ?? undefined
+          );
         }
-        // outgoing sessions are wired in call()
+        sessionRef.current = null;
+        setCallState("registered");
+        setCallDirection(null);
+        setCallDuration(0);
+        if (remoteAudioRef.current) {
+          remoteAudioRef.current.srcObject = null;
+        }
       });
+    },
+    [attachRemoteAudio, finaliseLogEntry, startTimer, stopTimer]
+  );
 
-      setStatus("connecting");
-      ua.start();
-      uaRef.current = ua;
-    };
+  // ── UA initialisation ──────────────────────────────────────────────────────
 
-    init().catch((err) => {
-      setStatus("error");
-      setError(`Failed to initialise SIP: ${err.message}`);
+  const initUA = useCallback(async () => {
+    if (uaRef.current) {
+      try { uaRef.current.stop(); } catch { /* ignore */ }
+      uaRef.current = null;
+    }
+
+    setCallState("registering");
+
+    let JsSIP: JsSIPType;
+    try {
+      JsSIP = await import("jssip");
+    } catch (err) {
+      console.error("[SIP] Failed to load JsSIP:", err);
+      setCallState("error");
+      return;
+    }
+
+    // Suppress JsSIP debug noise
+    JsSIP.debug.disable("JsSIP:*");
+
+    const socket = new JsSIP.WebSocketInterface(config.wsUrl);
+
+    const ua = new JsSIP.UA({
+      sockets:            [socket],
+      uri:                `sip:${config.username}@${config.domain}`,
+      password:           config.password,
+      register:           true,
+      register_expires:   120,
+      // Keep the WebSocket alive
+      connection_recovery_min_interval: 2,
+      connection_recovery_max_interval: 30,
     });
 
+    uaRef.current = ua;
+
+    ua.on("registered", () => {
+      setCallState("registered");
+    });
+
+    ua.on("unregistered", () => {
+      setCallState("unregistered");
+    });
+
+    ua.on("registrationFailed", (e: { cause?: string }) => {
+      console.error("[SIP] Registration failed:", e.cause);
+      setCallState("error");
+    });
+
+    // ── Incoming call ────────────────────────────────────────────────────────
+    ua.on("newRTCSession", (data: { originator: string; session: RTCSessionType }) => {
+      const { originator, session } = data;
+
+      if (originator === "remote") {
+        // Incoming call
+        if (sessionRef.current) {
+          // Already in a call — reject the new one
+          session.terminate();
+          return;
+        }
+
+        incomingSessionRef.current = session;
+        setCallState("incoming");
+        setCallDirection("inbound");
+
+        const logId = addLogEntry("inbound");
+        // Update status to missed if they don't answer within 60s
+        const missedTimer = setTimeout(() => {
+          if (callState === "incoming") {
+            finaliseLogEntry(logId, "missed", new Date());
+            incomingSessionRef.current?.terminate();
+            incomingSessionRef.current = null;
+            setCallState("registered");
+            setCallDirection(null);
+          }
+        }, 60_000);
+
+        session.on("ended",  () => clearTimeout(missedTimer));
+        session.on("failed", () => {
+          clearTimeout(missedTimer);
+          finaliseLogEntry(logId, "missed", new Date());
+          incomingSessionRef.current = null;
+          setCallState("registered");
+          setCallDirection(null);
+        });
+      }
+    });
+
+    ua.start();
+  }, [addLogEntry, config, finaliseLogEntry]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Mount / config change
+  useEffect(() => {
+    initUA();
     return () => {
       stopTimer();
-      if (ua) {
-        try { ua.stop(); } catch {}
+      if (uaRef.current) {
+        try { uaRef.current.stop(); } catch { /* ignore */ }
       }
     };
-    // Only re-run when config changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.wsUrl, config.username, config.password, config.domain]);
+  }, [initUA, stopTimer]);
 
-  // ── Actions ───────────────────────────────────────────────────────────────
+  // ── Public actions ─────────────────────────────────────────────────────────
 
-  const answer = useCallback(() => {
-    const session = sessionRef.current;
+  /** Place an outbound call to the Monto box extension */
+  const callMonto = useCallback(() => {
+    const ua = uaRef.current;
+    if (!ua || callState !== "registered") return;
+
+    const montoExt =
+      process.env.NEXT_PUBLIC_MONTO_BOX_EXTENSION || "monto";
+
+    const logId = addLogEntry("outbound");
+    setCallState("calling");
+    setCallDirection("outbound");
+
+    const session = ua.call(`sip:${montoExt}@${config.domain}`, {
+      mediaConstraints:  { audio: true, video: false },
+      pcConfig: {
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      },
+    });
+
+    wireSessionEvents(session, "outbound", logId);
+  }, [addLogEntry, callState, config.domain, wireSessionEvents]);
+
+  /** Answer an incoming call */
+  const answerCall = useCallback(() => {
+    const session = incomingSessionRef.current;
     if (!session) return;
+
+    sessionRef.current = session;
+    incomingSessionRef.current = null;
 
     session.answer({
       mediaConstraints: { audio: true, video: false },
@@ -223,73 +334,79 @@ export function useSIP(config: SIPConfig): UseSIPReturn {
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
       },
     });
-    setStatus("in-call");
-  }, []);
 
-  const hangup = useCallback(() => {
-    const session = sessionRef.current;
+    const logId = currentLogIdRef.current ?? generateId();
+    wireSessionEvents(session, "inbound", logId);
+  }, [wireSessionEvents]);
+
+  /** Decline / reject incoming call */
+  const declineCall = useCallback(() => {
+    const session = incomingSessionRef.current;
     if (session) {
-      try { session.terminate(); } catch {}
+      session.terminate({ status_code: 486, reason_phrase: "Busy Here" });
+      incomingSessionRef.current = null;
     }
-    setStatus("registered");
-    setIncomingFrom(null);
+    if (currentLogIdRef.current) {
+      finaliseLogEntry(currentLogIdRef.current, "declined", new Date());
+    }
+    setCallState("registered");
+    setCallDirection(null);
+  }, [finaliseLogEntry]);
+
+  /** Hang up active or outgoing call */
+  const hangUp = useCallback(() => {
+    const session = sessionRef.current ?? incomingSessionRef.current;
+    if (session) {
+      try {
+        session.terminate();
+      } catch { /* ignore if already ended */ }
+    }
     stopTimer();
-    detachAudio();
-    sessionRef.current = null;
-  }, [stopTimer, detachAudio]);
-
-  const call = useCallback(async () => {
-    const ua = uaRef.current;
-    if (!ua || status !== "registered") return;
-
-    try {
-      const JsSIP = (await import("jssip")).default;
-      const target = `sip:${config.montoExtension}@${config.domain}`;
-
-      const session = ua.call(target, {
-        mediaConstraints: { audio: true, video: false },
-        pcConfig: {
-          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-        },
-        eventHandlers: {
-          peerconnection: (e: any) => {
-            const pc: RTCPeerConnection = e.peerconnection;
-            pc.ontrack = (event) => {
-              if (event.streams?.[0]) attachAudio(event.streams[0]);
-            };
-          },
-        },
-      });
-
-      wireSession(session);
-      setStatus("calling");
-    } catch (err: any) {
-      setError(`Call error: ${err.message}`);
-      setTimeout(() => setError(null), 5000);
+    if (currentLogIdRef.current) {
+      finaliseLogEntry(currentLogIdRef.current, "answered", new Date());
     }
-  }, [status, config.montoExtension, config.domain, wireSession, attachAudio]);
+    sessionRef.current = null;
+    incomingSessionRef.current = null;
+    setCallState("registered");
+    setCallDirection(null);
+    setCallDuration(0);
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = null;
+    }
+  }, [finaliseLogEntry, stopTimer]);
 
+  /** Toggle microphone mute */
   const toggleMute = useCallback(() => {
     const session = sessionRef.current;
     if (!session) return;
-
     if (isMuted) {
       session.unmute({ audio: true });
     } else {
       session.mute({ audio: true });
     }
-    setIsMuted((m) => !m);
+    setIsMuted((prev) => !prev);
   }, [isMuted]);
 
+  /** Force re-register (e.g. after network interruption) */
+  const reconnect = useCallback(() => {
+    initUA();
+  }, [initUA]);
+
+  const clearLog = useCallback(() => setCallLog([]), []);
+
   return {
-    status,
+    callState,
+    callDirection,
     callDuration,
-    incomingFrom,
+    callLog,
+    remoteAudioRef,
     isMuted,
-    answer,
-    hangup,
-    call,
+    callMonto,
+    answerCall,
+    declineCall,
+    hangUp,
     toggleMute,
-    error,
+    reconnect,
+    clearLog,
   };
 }

@@ -17,7 +17,7 @@ interface UseWakeWordOptions {
   language?: string;
 }
 
-const TM_MODEL_URL = "https://teachablemachine.withgoogle.com/models/oej33d7Yu/";
+const TM_MODEL_URL = "https://teachablemachine.withgoogle.com/models/oqRJLabu4/";
 const WAKE_LABEL   = "Hey Monto";
 const THRESHOLD    = 0.82;
 const COOLDOWN_MS  = 3000;
@@ -39,6 +39,21 @@ function loadScript(src: string): Promise<void> {
 async function loadTMLibs() {
   await loadScript("https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js");
   await loadScript("https://cdn.jsdelivr.net/npm/@tensorflow-models/speech-commands@0.5.4/dist/speech-commands.min.js");
+  // Fall back to CPU if WebGL is unavailable (avoids "WebGL not supported" error)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tf = (window as any).tf;
+  if (tf) {
+    try {
+      await tf.setBackend("webgl");
+      await tf.ready();
+    } catch {
+      try {
+        await tf.setBackend("cpu");
+        await tf.ready();
+        console.log("[TM] WebGL unavailable — using CPU backend");
+      } catch { /* ignore */ }
+    }
+  }
 }
 
 // ── Teachable Machine wake word ───────────────────────────────────────────────
