@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Volume2, VolumeX, Mic, Sparkles, MessageCircle, X, ChevronRight } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { CallScreen } from "@/components/CallScreen";
+import { SongsScreen } from "@/components/SongsScreen";
+import { StoriesScreen } from "@/components/StoriesScreen";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 import { useTTS } from "@/hooks/useTTS";
 import { useConversation } from "@/hooks/useConversation";
@@ -93,6 +95,10 @@ export default function Home() {
   // ── Call state ─────────────────────────────────────────────────────────
   const [calling, setCalling]         = useState<"mom" | "dad" | null>(null);
 
+  // ── Media screens ──────────────────────────────────────────────────────
+  const [showSongs, setShowSongs]     = useState(false);
+  const [showStories, setShowStories] = useState(false);
+
   // ── Water reminder ─────────────────────────────────────────────────────
   const [showWater, setShowWater]     = useState(false);
   const waterTimerRef                 = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -160,6 +166,12 @@ export default function Home() {
       const callDad = /call\s+(dad|daddy|papa|father|बुबा|बाबा)/i.test(lower);
       if (callMom) { setRS("idle"); busyRef.current = false; setCalling("mom"); return; }
       if (callDad) { setRS("idle"); busyRef.current = false; setCalling("dad"); return; }
+
+      // ── Media detection ─────────────────────────────────────────────────
+      const playSongs   = /play\s+(song|songs|music|tune)/i.test(lower);
+      const playStories = /play\s+(story|stories|bedtime|tale)/i.test(lower);
+      if (playSongs)   { setRS("idle"); busyRef.current = false; setShowSongs(true);   return; }
+      if (playStories) { setRS("idle"); busyRef.current = false; setShowStories(true); return; }
 
       if (autoSpeak && result.response) {
         setRS("speaking");
@@ -282,6 +294,16 @@ export default function Home() {
             onEnd={() => setCalling(null)}
           />
         )}
+      </AnimatePresence>
+
+      {/* ── Songs screen ────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showSongs && <SongsScreen onClose={() => setShowSongs(false)} />}
+      </AnimatePresence>
+
+      {/* ── Stories screen ──────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showStories && <StoriesScreen onClose={() => setShowStories(false)} />}
       </AnimatePresence>
 
       {/* ── Water reminder toast ─────────────────────────────────────────── */}

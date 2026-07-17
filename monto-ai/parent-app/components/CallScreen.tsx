@@ -1,245 +1,146 @@
 "use client";
-/**
- * CallScreen — real calling interface between parent and the Monto AI box,
- * styled to match the rest of the app's dashboard look. VoIP is handled by
- * Asterisk + JsSIP (WebRTC over WebSocket) via useSIP.
- */
-import { useCallback, useEffect, useState } from "react";
-import { Mic, MicOff, Phone, PhoneIncoming, PhoneOff, Clock, RefreshCw } from "lucide-react";
+import { useEffect } from "react";
+import { PhoneOff, PhoneIncoming, Mic, MicOff, Phone, Clock } from "lucide-react";
 import { PhoneShell } from "@/components/PhoneShell";
 import { PageHeader } from "@/components/AppHeader";
 import { BottomNav } from "@/components/BottomNav";
-import { SIPSettingsModal } from "@/components/SIPSettingsModal";
-import { useSIP } from "@/hooks/useSIP";
-import { formatDate, formatDuration } from "@/lib/utils";
+import { useWebRTCCall } from "@/hooks/useWebRTCCall";
 import { loadChildProfile, DEFAULT_CHILD } from "@/lib/profile-storage";
-import type { ChildProfile, SIPConfig } from "@/types";
+import { useState } from "react";
+import type { ChildProfile } from "@/types";
 
-const DEFAULT_CONFIG: SIPConfig = {
-  wsUrl: process.env.NEXT_PUBLIC_ASTERISK_WS_URL || "ws://localhost:8088/ws",
-  username: process.env.NEXT_PUBLIC_SIP_USERNAME || "parent",
-  password: process.env.NEXT_PUBLIC_SIP_PASSWORD || "parentpass123",
-  domain: process.env.NEXT_PUBLIC_SIP_DOMAIN || "localhost",
-};
+const SIGNALING_URL =
+  (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000")
+    .replace(/^http/, "ws") + "/ws/call";
 
-const CONFIG_STORAGE_KEY = "monto_sip_config";
-
-function loadConfig(): SIPConfig {
-  if (typeof window === "undefined") return DEFAULT_CONFIG;
-  try {
-    const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
-    if (raw) return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
-  } catch {
-    /* ignore */
-  }
-  return DEFAULT_CONFIG;
-}
-
-function saveConfig(cfg: SIPConfig) {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(cfg));
-  } catch {
-    /* ignore */
-  }
-}
-
-const STATE_LABEL: Record<string, string> = {
-  unregistered: "Disconnected",
-  registering: "Connecting…",
-  registered: "Ready to Call",
-  calling: "Calling…",
-  incoming: "Incoming Call",
-  "in-call": "Connected",
-  ending: "Ending…",
-  error: "Connection Error",
+const STATUS_LABEL: Record<string, string> = {
+  idle:            "Starting...",
+  "connecting-ws": "Connecting...",
+  ready:           "Waiting for child to call",
+  ringing:         "Ringing...",
+  incoming:        "Incoming call from child!",
+  connecting:      "Connecting...",
+  "in-call":       "Connected",
+  ended:           "Call ended",
+  error:           "Connection error",
 };
 
 export function CallScreen() {
-  const [sipConfig, setSipConfig] = useState<SIPConfig>(DEFAULT_CONFIG);
   const [child, setChild] = useState<ChildProfile>(DEFAULT_CHILD);
 
-  useEffect(() => {
-    setSipConfig(loadConfig());
-    setChild(loadChildProfile());
-  }, []);
+  useEffect(() => { setChild(loadChildProfile()); }, []);
 
-  const {
-    callState,
-    callDuration,
-    callLog,
-    remoteAudioRef,
-    isMuted,
-    callMonto,
-    answerCall,
-    declineCall,
-    hangUp,
-    toggleMute,
-    reconnect,
-  } = useSIP(sipConfig);
+  const { status, isMuted, durationFormatted, peerOnline, error,
+          acceptCall, rejectCall, hangUp, toggleMute } = useWebRTCCall({
+    role: "parent",
+    signalingUrl: SIGNALING_URL,
+  });
 
-  const handleSaveConfig = useCallback(
-    (cfg: SIPConfig) => {
-      setSipConfig(cfg);
-      saveConfig(cfg);
-      reconnect();
-    },
-    [reconnect]
-  );
-
-  const label = STATE_LABEL[callState] ?? callState;
-  const sub =
-    callState === "in-call"
-      ? formatDuration(callDuration)
-      : callState === "calling"
-        ? "Connecting to AI Box"
-        : callState === "incoming"
-          ? "Tap answer to pick up"
-          : callState === "registered"
-            ? "Tap to start a call"
-            : callState === "registering"
-              ? "Connecting to Asterisk…"
-              : "Check SIP settings";
-
-  const canCall = callState === "registered";
-  const isIncoming = callState === "incoming";
-  const isActive = callState === "in-call";
-  const isDialing = callState === "calling";
+  const isIncoming  = status === "incoming";
+  const isActive    = status === "in-call";
+  const isConnecting = status === "connecting";
+  const label = error || STATUS_LABEL[status] || status;
 
   return (
     <PhoneShell>
-      <PageHeader
-        title="Call AI Box"
-        right={
-          <div className="flex items-center gap-1">
-            {callState === "error" && (
-              <button
-                onClick={reconnect}
-                aria-label="Retry connection"
-                className="size-9 rounded-full bg-muted flex items-center justify-center text-destructive"
-              >
-                <RefreshCw size={16} />
-              </button>
-            )}
-            <SIPSettingsModal config={sipConfig} onSave={handleSaveConfig} />
-          </div>
-        }
-      />
-      <div className="flex-1 overflow-y-auto px-5 py-6 flex flex-col">
+      <PageHeader title="Call Monto Box" />
+
+      <div className="flex-1 overflow-y-auto px-5 py-6 flex flex-col gap-6">
+
+        {/* Status card */}
         <div className="rounded-3xl soft-gradient p-8 flex flex-col items-center text-center relative overflow-hidden">
           <div className="absolute inset-0 brand-gradient opacity-10" />
-          <div className="size-24 rounded-full brand-gradient text-white flex items-center justify-center text-3xl shadow-elevated relative">
+
+          {/* Avatar */}
+          <div className={`size-24 rounded-full brand-gradient text-white flex items-center justify-center text-3xl shadow-elevated relative ${isIncoming ? "animate-pulse" : ""}`}>
             {child.avatar || "👦"}
             {isActive && (
-              <span className="absolute -bottom-1 -right-1 size-5 rounded-full bg-success border-2 border-white" />
+              <span className="absolute -bottom-1 -right-1 size-5 rounded-full bg-green-400 border-2 border-white" />
             )}
           </div>
+
           <h2 className="mt-4 text-xl font-bold relative">
-            {child.name ? `${child.name}'s Monto Box` : "Monto Box"}
+            {child.name ? `${child.name}'s Monto` : "Monto Box"}
           </h2>
-          <p className="text-sm text-muted-foreground relative">{label}</p>
-          <p
-            className={`mt-1 text-sm font-mono font-semibold relative ${
-              isActive ? "text-primary" : "text-muted-foreground"
-            }`}
-          >
-            {sub}
+
+          <p className={`text-sm font-semibold mt-1 relative ${
+            isActive ? "text-green-500" :
+            isIncoming ? "text-purple-500" :
+            status === "error" ? "text-red-500" :
+            "text-muted-foreground"
+          }`}>
+            {label}
           </p>
 
-          {isDialing && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="size-48 rounded-full border-2 border-primary/30 animate-ping" />
-            </div>
+          {isActive && (
+            <p className="text-sm font-mono font-bold text-primary mt-1 relative">
+              {durationFormatted}
+            </p>
           )}
+
+          {/* Peer status */}
+          <div className={`mt-3 flex items-center gap-1.5 text-xs relative ${peerOnline ? "text-green-500" : "text-muted-foreground"}`}>
+            <span className={`size-2 rounded-full ${peerOnline ? "bg-green-500" : "bg-gray-400"}`} />
+            {peerOnline ? "Child device online" : "Child device offline"}
+          </div>
         </div>
 
-        <div className="flex-1 flex items-center justify-center py-8">
+        {/* Call controls */}
+        <div className="flex items-center justify-center gap-6 py-4">
           {isIncoming ? (
-            <div className="flex items-center gap-8">
-              <button
-                onClick={declineCall}
-                className="size-16 rounded-full bg-destructive text-white shadow-elevated flex items-center justify-center active:scale-95 transition"
-                aria-label="Decline"
-              >
+            <>
+              {/* Reject */}
+              <button onClick={rejectCall}
+                className="size-16 rounded-full bg-red-500 text-white shadow-elevated flex items-center justify-center active:scale-95 transition"
+                aria-label="Reject">
                 <PhoneOff className="size-6" />
               </button>
-              <button
-                onClick={answerCall}
-                className="size-20 rounded-full brand-gradient text-white shadow-elevated flex items-center justify-center active:scale-95 transition animate-pulse"
-                aria-label="Answer"
-              >
+              {/* Accept */}
+              <button onClick={acceptCall}
+                className="size-20 rounded-full brand-gradient text-white shadow-elevated flex items-center justify-center active:scale-95 transition animate-bounce"
+                aria-label="Accept">
                 <PhoneIncoming className="size-8" />
               </button>
-            </div>
-          ) : isActive || isDialing ? (
-            <div className="flex items-center gap-5">
+            </>
+          ) : (isActive || isConnecting) ? (
+            <>
               {isActive && (
-                <button
-                  onClick={toggleMute}
-                  className={`size-14 rounded-full border-2 flex items-center justify-center ${
-                    isMuted ? "bg-muted" : "bg-card"
-                  }`}
-                  aria-label={isMuted ? "Unmute" : "Mute"}
-                >
+                <button onClick={toggleMute}
+                  className={`size-14 rounded-full border-2 flex items-center justify-center ${isMuted ? "bg-muted" : "bg-card"}`}
+                  aria-label={isMuted ? "Unmute" : "Mute"}>
                   {isMuted ? <MicOff className="size-5" /> : <Mic className="size-5" />}
                 </button>
               )}
-              <button
-                onClick={hangUp}
-                className="size-20 rounded-full bg-destructive text-white shadow-elevated flex items-center justify-center active:scale-95 transition"
-                aria-label={isDialing ? "Cancel" : "Hang Up"}
-              >
+              <button onClick={hangUp}
+                className="size-20 rounded-full bg-red-500 text-white shadow-elevated flex items-center justify-center active:scale-95 transition"
+                aria-label="Hang Up">
                 <PhoneOff className="size-7" />
               </button>
-            </div>
+            </>
           ) : (
-            <button
-              onClick={callMonto}
-              disabled={!canCall}
-              className="size-24 rounded-full brand-gradient text-white shadow-elevated flex items-center justify-center active:scale-95 transition disabled:opacity-40 disabled:pointer-events-none"
-              aria-label="Call Monto"
-            >
-              <Phone className="size-8" />
-            </button>
+            <div className="flex flex-col items-center gap-2 text-center">
+              <div className="size-20 rounded-full bg-muted flex items-center justify-center">
+                <Phone className="size-8 text-muted-foreground" />
+              </div>
+              <p className="text-xs text-muted-foreground max-w-xs">
+                Keep this page open. When your child says "call mom" or "call dad",
+                you'll receive the call here.
+              </p>
+            </div>
           )}
         </div>
 
-        <div>
-          <h3 className="font-bold mb-3 px-1 flex items-center gap-2">
-            <Clock className="size-4 text-muted-foreground" /> Recent Calls
-          </h3>
-          {callLog.length === 0 ? (
-            <p className="text-center text-sm text-muted-foreground py-6">No calls yet.</p>
-          ) : (
-            <div className="space-y-2">
-              {callLog.map((c) => (
-                <div key={c.id} className="rounded-2xl bg-card border p-3 flex items-center gap-3 shadow-card">
-                  <div className="size-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-                    <Phone className="size-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold">
-                      {c.direction === "inbound" ? "From Monto" : "To Monto"}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground">
-                      {formatDate(c.startedAt)} • {c.status}
-                    </p>
-                  </div>
-                  {c.durationSeconds !== undefined && c.durationSeconds > 0 && (
-                    <span className="text-xs font-medium text-muted-foreground">
-                      {formatDuration(c.durationSeconds)}
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+        {/* Instructions */}
+        <div className="rounded-2xl bg-muted/50 p-4 text-sm text-muted-foreground space-y-2">
+          <p className="font-semibold text-foreground flex items-center gap-2">
+            <Clock className="size-4" /> How it works
+          </p>
+          <p>1. Keep this page open on your phone or browser.</p>
+          <p>2. Your child says <strong>"Hey Monto, call mom"</strong> or <strong>"call dad"</strong>.</p>
+          <p>3. You'll see an incoming call here — tap the green button to answer.</p>
+          <p>4. Both sides can speak and hear each other in real time.</p>
         </div>
       </div>
-
-      {/* Hidden audio element — receives remote (Monto) audio stream */}
-      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-      <audio ref={remoteAudioRef} autoPlay playsInline aria-hidden="true" />
 
       <BottomNav />
     </PhoneShell>
