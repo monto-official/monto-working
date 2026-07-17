@@ -1,11 +1,10 @@
 "use client";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Volume2, VolumeX, Mic, Sparkles, MessageCircle, X, ChevronRight } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { CallScreen } from "@/components/CallScreen";
-import { SongsScreen } from "@/components/SongsScreen";
-import { StoriesScreen } from "@/components/StoriesScreen";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 import { useTTS } from "@/hooks/useTTS";
 import { useConversation } from "@/hooks/useConversation";
@@ -95,18 +94,15 @@ export default function Home() {
   // ── Call state ─────────────────────────────────────────────────────────
   const [calling, setCalling]         = useState<"mom" | "dad" | null>(null);
 
-  // ── Media screens ──────────────────────────────────────────────────────
-  const [showSongs, setShowSongs]     = useState(false);
-  const [showStories, setShowStories] = useState(false);
-
   // ── Water reminder ─────────────────────────────────────────────────────
   const [showWater, setShowWater]     = useState(false);
   const waterTimerRef                 = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const busyRef          = useRef(false);
   const silenceTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hasSpokenRef     = useRef(false);   // true once audio level crossed threshold
-  const recordingStateRef = useRef<RecordingState>("idle"); // always-current copy
+  const hasSpokenRef     = useRef(false);
+  const recordingStateRef = useRef<RecordingState>("idle");
+  const router           = useRouter();
   const recorder = useAudioRecorder();
   const { speak, cancel: cancelTTS } = useTTS();
   const conversation = useConversation();
@@ -170,8 +166,8 @@ export default function Home() {
       // ── Media detection ─────────────────────────────────────────────────
       const playSongs   = /play\s+(song|songs|music|tune)/i.test(lower);
       const playStories = /play\s+(story|stories|bedtime|tale)/i.test(lower);
-      if (playSongs)   { setRS("idle"); busyRef.current = false; setShowSongs(true);   return; }
-      if (playStories) { setRS("idle"); busyRef.current = false; setShowStories(true); return; }
+      if (playSongs)   { setRS("idle"); busyRef.current = false; router.push("/songs");   return; }
+      if (playStories) { setRS("idle"); busyRef.current = false; router.push("/stories"); return; }
 
       if (autoSpeak && result.response) {
         setRS("speaking");
@@ -294,16 +290,6 @@ export default function Home() {
             onEnd={() => setCalling(null)}
           />
         )}
-      </AnimatePresence>
-
-      {/* ── Songs screen ────────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {showSongs && <SongsScreen onClose={() => setShowSongs(false)} />}
-      </AnimatePresence>
-
-      {/* ── Stories screen ──────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {showStories && <StoriesScreen onClose={() => setShowStories(false)} />}
       </AnimatePresence>
 
       {/* ── Water reminder toast ─────────────────────────────────────────── */}
