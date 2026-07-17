@@ -95,3 +95,76 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
 * { -webkit-tap-highlight-color: transparent; }
+
+/* ═══════════════════════════════════════════════════════════
+   Spider Web Overlay — Premium procedural SVG animations
+   GPU-friendly: transform + opacity only. 60 FPS.
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Corner sway groups ──────────────────────────────────── */
+@keyframes web-sway-tl {
+  0%,100% { transform: rotate(0deg)    skew(0deg)     translateZ(0); }
+  25%     { transform: rotate(1.2deg)  skew(0.3deg)   translateZ(0); }
+  75%     { transform: rotate(-0.8deg) skew(-0.2deg)  translateZ(0); }
+}
+@keyframes web-sway-tr {
+  0%,100% { transform: rotate(0deg)    skew(0deg)     translateZ(0); }
+  25%     { transform: rotate(-1.2deg) skew(-0.3deg)  translateZ(0); }
+  75%     { transform: rotate(0.8deg)  skew(0.2deg)   translateZ(0); }
+}
+@keyframes web-sway-bl {
+  0%,100% { transform: rotate(0deg)    skew(0deg)     translateZ(0); }
+  30%     { transform: rotate(-1.4deg) skew(0.2deg)   translateZ(0); }
+  70%     { transform: rotate(0.9deg)  skew(-0.2deg)  translateZ(0); }
+}
+@keyframes web-sway-br {
+  0%,100% { transform: rotate(0deg)    skew(0deg)     translateZ(0); }
+  30%     { transform: rotate(1.4deg)  skew(-0.2deg)  translateZ(0); }
+  70%     { transform: rotate(-0.9deg) skew(0.2deg)   translateZ(0); }
+}
+
+/* ── Individual strand oscillation variants ─────────────── */
+@keyframes strand-oscillate-0 {
+  0%,100% { transform: translateX(0)    translateY(0)    translateZ(0); opacity: 1; }
+  50%     { transform: translateX(2px)  translateY(1px)  translateZ(0); opacity: 0.85; }
+}
+@keyframes strand-oscillate-1 {
+  0%,100% { transform: translateX(0)    translateY(0)    translateZ(0); opacity: 1; }
+  40%     { transform: translateX(-2px) translateY(2px)  translateZ(0); opacity: 0.9; }
+  80%     { transform: translateX(1px)  translateY(-1px) translateZ(0); opacity: 0.8; }
+}
+@keyframes strand-oscillate-2 {
+  0%,100% { transform: translateX(0)    translateY(0)    translateZ(0); }
+  33%     { transform: translateX(3px)  translateY(-2px) translateZ(0); }
+  66%     { transform: translateX(-1px) translateY(2px)  translateZ(0); }
+}
+@keyframes strand-oscillate-3 {
+  0%,100% { transform: scaleX(1)    translateZ(0); opacity: 1; }
+  50%     { transform: scaleX(1.01) translateZ(0); opacity: 0.88; }
+}
+@keyframes strand-oscillate-4 {
+  0%,100% { transform: translateX(0)    translateY(0)    translateZ(0); }
+  45%     { transform: translateX(-3px) translateY(-1px) translateZ(0); }
+}
+@keyframes strand-oscillate-5 {
+  0%,100% { transform: translateX(0)   translateY(0)   translateZ(0); opacity: 1; }
+  60%     { transform: translateX(2px) translateY(3px) translateZ(0); opacity: 0.75; }
+}
+
+/* ── Particle travelling along path ─────────────────────── */
+@keyframes travel-particle {
+  0%   { offset-distance: 0%;   opacity: 0; }
+  10%  { opacity: 0.9; }
+  90%  { opacity: 0.7; }
+  100% { offset-distance: 100%; opacity: 0; }
+}
+
+/* ── Dust particles float ────────────────────────────────── */
+@keyframes dust-float {
+  0%   { transform: translateY(0)    translateX(0)    scale(1)   translateZ(0); opacity: 0; }
+  20%  { opacity: 0.15; }
+  50%  { transform: translateY(-18px) translateX(6px) scale(1.1) translateZ(0); opacity: 0.12; }
+  80%  { opacity: 0.08; }
+  100% { transform: translateY(-36px) translateX(-4px) scale(0.8) translateZ(0); opacity: 0; }
+}
+.dust-float { animation: dust-float linear infinite; will-change: transform, opacity; }

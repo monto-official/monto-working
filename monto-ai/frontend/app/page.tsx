@@ -4,7 +4,9 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Volume2, VolumeX, Mic, Sparkles, MessageCircle, X, ChevronRight } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
+import { HangingAvatar } from "@/components/HangingAvatar";
 import { CallScreen } from "@/components/CallScreen";
+import { SpiderWebOverlay } from "@/components/SpiderWebOverlay";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 import { useTTS } from "@/hooks/useTTS";
 import { useConversation } from "@/hooks/useConversation";
@@ -282,6 +284,9 @@ export default function Home() {
 
       <EmojiBurst emotion={emotion} trigger={emojiBurst} />
 
+      {/* ── Spider web overlay ───────────────────────────────────────────── */}
+      <SpiderWebOverlay isListening={isRec} isSpeaking={isSpeaking} />
+
       {/* ── Calling overlay ─────────────────────────────────────────────── */}
       <AnimatePresence>
         {calling && (
@@ -391,13 +396,17 @@ export default function Home() {
 
               {/* ── Avatar area ──────────────────────────────────────── */}
               <div className="relative flex items-center justify-center mt-2 mb-2">
-                {/* Avatar */}
                 <motion.div
                   className="relative z-10"
                   animate={isRec ? { scale: [1, 1.03, 1] } : {}}
                   transition={{ duration: 0.3, repeat: Infinity }}
                 >
-                  <Avatar emotion={isSpeaking ? "talking" : emotion} size={220} />
+                  <HangingAvatar
+                    emotion={isSpeaking ? "talking" : emotion}
+                    size={220}
+                    isListening={isRec}
+                    isSpeaking={isSpeaking}
+                  />
                 </motion.div>
               </div>
 
@@ -496,6 +505,7 @@ export default function Home() {
               <div className="flex flex-col items-center gap-4 mt-5 w-full">
                 {/* Mic button */}
                 <div className="relative flex items-center justify-center">
+
                   {/* Pulse rings */}
                   <AnimatePresence>
                     {isRec && [0,1,2].map(i => (
@@ -551,6 +561,7 @@ export default function Home() {
 
                 {/* Bottom row */}
                 <div className="flex items-center gap-3">
+
                   {/* Volume */}
                   <motion.button onClick={() => setAutoSpeak(v => !v)}
                     className="w-11 h-11 rounded-2xl glass glass-border flex items-center justify-center"

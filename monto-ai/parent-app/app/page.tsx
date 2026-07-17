@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Battery, Clock, MapPin, Search, ChevronRight, Activity,
-  MessageCircleQuestion, Bell, Phone, Music, Mic, TrendingUp, BookOpen, User,
+  MessageCircleQuestion, Bell, Phone, Music, TrendingUp, BookOpen, User,
 } from "lucide-react";
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
 import { PhoneShell } from "@/components/PhoneShell";
@@ -36,9 +36,8 @@ const actions = [
   { to: "/reminders", label: "Reminders", icon: Bell, color: "text-warning", bg: "bg-warning/15" },
   { to: "/call", label: "Call", icon: Phone, color: "text-success", bg: "bg-success/15" },
   { to: "/music", label: "Music", icon: Music, color: "text-secondary", bg: "bg-secondary/10" },
-  { to: "/recordings", label: "Recordings", icon: Mic, color: "text-destructive", bg: "bg-destructive/10" },
+  { to: "/profile", label: "Parent Profile", icon: User, color: "text-destructive", bg: "bg-destructive/10" },
   { to: "/stories", label: "Bedtime Stories", icon: BookOpen, color: "text-primary", bg: "bg-primary/10" },
-  { to: "/profile", label: "Profile", icon: User, color: "text-secondary", bg: "bg-secondary/10" },
 ] as const;
 
 export default function Dashboard() {
