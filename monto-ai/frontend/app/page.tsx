@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { motion, AnimatePresence, useSpring, useTransform } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { Volume2, VolumeX, Mic, Sparkles, MessageCircle, X, ChevronRight } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
@@ -111,14 +111,16 @@ export default function Home() {
   const [isSpeaking, setIsSpeaking]   = useState(false);
   const [online, setOnline]           = useState<boolean | null>(null);
   const [autoSpeak, setAutoSpeak]     = useState(true);
-  const [wakeOn, setWakeOn]           = useState(false);
   const [showChat, setShowChat]       = useState(false);
   const [emojiBurst, setEmojiBurst]   = useState(0);
   const [lang, setLang]               = useState<"english" | "nepali">("english");
   const [greeting]                    = useState(() =>
     GREETING_MESSAGES[Math.floor(Math.random() * GREETING_MESSAGES.length)]);
 
-  const busyRef  = useRef(false);
+  const busyRef          = useRef(false);
+  const silenceTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasSpokenRef     = useRef(false);   // true once audio level crossed threshold
+  const recordingStateRef = useRef<RecordingState>("idle"); // always-current copy
   const recorder = useAudioRecorder();
   const { speak, cancel: cancelTTS } = useTTS();
   const conversation = useConversation();
@@ -165,8 +167,39 @@ export default function Home() {
     }
   }, [autoSpeak, settings, speak, cancelTTS, conversation]);
 
-  const handleMic = useCallback(async () => {
-    if (busyRef.current) return;
+  // ── Silence detection — auto-stop after 1.5s of silence post-speech ────────
+  useEffect(() => {
+    if (recordingState !== "recording") {
+      if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+      hasSpokenRef.current = false;
+      return;
+    }
+    const level = recorder.audioLevel;
+    const SPEECH_THRESHOLD = 0.08;
+    const SILENCE_MS       = 1500;
+
+    if (level > SPEECH_THRESHOLD) {
+      hasSpokenRef.current = true;
+      if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+    } else if (hasSpokenRef.current && !silenceTimerRef.current) {
+      silenceTimerRef.current = setTimeout(async () => {
+        silenceTimerRef.current = null;
+        if (recorder.recordingState === "recording") {
+          const blob = await recorder.stopRecording();
+          if (blob && blob.size >= 800) {
+            await processAudio(blob);
+          } else {
+            setRS("idle");
+          }
+        }
+      }, SILENCE_MS);
+    }
+  }, [recorder.audioLevel, recorder.recordingState, recordingState, recorder, processAudio]);
+
+  // Use a ref for handleMic so the wake word callback never goes stale
+  const handleMicRef = useRef<() => Promise<void>>(async () => {});
+
+  const handleMic = useCallback(async () => {    if (busyRef.current) return;
     setApiError(null);
     if (recorder.recordingState === "recording") {
       const blob = await recorder.stopRecording();
@@ -184,33 +217,42 @@ export default function Home() {
     }
   }, [recorder, processAudio]);
 
+  // Keep ref in sync so wake word always calls latest handleMic
+  useEffect(() => { handleMicRef.current = handleMic; }, [handleMic]);
+
   useEffect(() => {
     if (recorder.recordingState === "requesting") setRS("requesting");
     if (recorder.recordingState === "recording")  setRS("recording");
     if (recorder.recordingState === "error") { setApiError(recorder.error); setRS("error"); }
   }, [recorder.recordingState, recorder.error]);
 
-  const { supported: wakeOk, listening: wakeListen } = useWakeWord({
-    onDetected: () => { if (recordingState === "idle" && online) handleMic(); },
-    enabled: wakeOn && recordingState === "idle",
-    keywords: ["monto", "hey monto", "hi monto", "मन्टो", "हे मन्टो"],
+  // Keep recordingStateRef current so wake word callback reads live value
+  useEffect(() => { recordingStateRef.current = recordingState; }, [recordingState]);
+
+  const { listening: wakeListen } = useWakeWord({
+    onDetected: () => {
+      console.log("[page] wake detected, state:", recordingStateRef.current, "online:", online);
+      if (recordingStateRef.current === "idle" && online !== false) {
+        handleMicRef.current();
+      }
+    },
+    enabled: recordingState === "idle" && !isSpeaking && online !== false,
+    keywords: ["monto", "hey monto", "hi monto", "montu", "hey montu", "hi montu", "मन्टो", "हे मन्टो"],
     language: lang === "nepali" ? "ne-NP" : "en-US",
   });
 
   const isRec    = recordingState === "recording";
   const isProc   = recordingState === "processing" || recordingState === "requesting";
-  const isBusy   = isRec || isProc || isSpeaking;
 
   // Status text
   const statusText = useMemo(() => {
     if (apiError) return apiError;
-    if (recordingState === "recording")  return "🔴 Listening... tap to stop";
+    if (recordingState === "recording")  return "🔴 Listening... speak now";
     if (recordingState === "processing") return "💭 Thinking...";
     if (recordingState === "speaking")   return "🔊 Monto is speaking...";
-    if (wakeOn && wakeListen)            return "👂 Listening for 'Monto'...";
-    if (wakeOn)                          return "Wake word active";
-    return "Tap mic or say 'Monto'";
-  }, [recordingState, apiError, wakeOn, wakeListen]);
+    if (wakeListen)                      return "👂 Say \"Hey Monto\" to start";
+    return "Tap anywhere, then say \"Hey Monto\"";
+  }, [recordingState, apiError, wakeListen]);
 
   return (
     <div className="min-h-dvh flex flex-col relative overflow-hidden select-none"
@@ -494,25 +536,6 @@ export default function Home() {
                     <span className="text-sm">{lang === "nepali" ? "🇳🇵" : "🇺🇸"}</span>
                     <span>{lang === "nepali" ? "नेपाली" : "EN"}</span>
                   </motion.button>
-
-                  {/* Wake word */}
-                  {wakeOk && (
-                    <motion.button onClick={() => setWakeOn(v => !v)}
-                      className="h-11 px-4 rounded-2xl flex items-center gap-2 font-bold text-xs"
-                      style={{
-                        background: wakeOn ? `${cfg.color}25` : "rgba(255,255,255,0.06)",
-                        border: `1px solid ${wakeOn ? cfg.color + "60" : "rgba(255,255,255,0.12)"}`,
-                        color: wakeOn ? cfg.color : "rgba(255,255,255,0.4)",
-                      }}
-                      whileTap={{ scale: 0.9 }}>
-                      <motion.div className="w-2 h-2 rounded-full"
-                        style={{ background: wakeOn && wakeListen ? cfg.color : "rgba(255,255,255,0.2)" }}
-                        animate={wakeOn && wakeListen ? { scale: [1, 1.6, 1] } : {}}
-                        transition={{ duration: 1, repeat: Infinity }}
-                      />
-                      {wakeOn ? (wakeListen ? "Listening..." : "Wake On") : "Say Monto"}
-                    </motion.button>
-                  )}
 
                   {/* New chat */}
                   <motion.button
