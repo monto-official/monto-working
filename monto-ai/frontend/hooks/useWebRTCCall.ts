@@ -59,6 +59,7 @@ export function useWebRTCCall({
   const remoteAudio = useRef<HTMLAudioElement | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const disconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const statusRef = useRef<CallStatus>("idle");
   const pendingIceCandidates = useRef<RTCIceCandidateInit[]>([]);
 
@@ -101,6 +102,10 @@ export function useWebRTCCall({
   }, []);
 
   const cleanupPeer = useCallback(() => {
+    if (disconnectTimerRef.current) {
+      clearTimeout(disconnectTimerRef.current);
+      disconnectTimerRef.current = null;
+    }
     localStream.current?.getTracks().forEach((track) => track.stop());
     localStream.current = null;
     pendingIceCandidates.current = [];
@@ -143,18 +148,35 @@ export function useWebRTCCall({
 
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "connected") {
+        if (disconnectTimerRef.current) {
+          clearTimeout(disconnectTimerRef.current);
+          disconnectTimerRef.current = null;
+        }
         updateStatus("in-call");
         startTimer();
         return;
       }
 
-      if (["disconnected", "failed", "closed"].includes(pc.connectionState)) {
-        if (statusRef.current === "in-call" || statusRef.current === "connecting") {
-          cleanupPeer();
-          updateStatus("ended");
-          onCallEnded?.();
-          setTimeout(() => updateStatus("ready"), 2000);
+      if (pc.connectionState === "disconnected") {
+        if (!disconnectTimerRef.current) {
+          disconnectTimerRef.current = setTimeout(() => {
+            disconnectTimerRef.current = null;
+            if (pc.connectionState !== "disconnected" || pcRef.current !== pc) return;
+            updateStatus("ended");
+            cleanupPeer();
+            onCallEnded?.();
+            setTimeout(() => updateStatus("ready"), 2000);
+          }, 15000);
         }
+        return;
+      }
+
+      if (pc.connectionState === "failed" &&
+          (statusRef.current === "in-call" || statusRef.current === "connecting")) {
+        updateStatus("ended");
+        cleanupPeer();
+        onCallEnded?.();
+        setTimeout(() => updateStatus("ready"), 2000);
       }
     };
 

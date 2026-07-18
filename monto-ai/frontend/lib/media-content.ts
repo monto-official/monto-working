@@ -30,6 +30,27 @@ export const SONGS: Song[] = [
   { id: "s11", title: "Aaha Tamatar Badi Mazedaar (आह टमाटर)",         lang: "hi", emoji: "🍅", color: "#EF4444", file: "आह टमटर बड मजदर  New Hindi Kids Song 2026  Aaha Tamatar Nursery Rhyme #lallupallurhymes.mp3" },
 ];
 
+export interface YogaPose {
+  id: string;
+  name: string;
+  sanskrit: string;
+  emoji: string;
+  color: string;
+  instruction: string;
+  durationSec: number; // how long this pose is held before auto-advancing
+}
+
+export const YOGA_POSES: YogaPose[] = [
+  { id: "mountain",  name: "Mountain Pose",   sanskrit: "Tadasana",         emoji: "🏔️", color: "#38BDF8", instruction: "Stand tall, feet together, arms relaxed by your sides. Breathe deeply and feel strong like a mountain!", durationSec: 30 },
+  { id: "tree",      name: "Tree Pose",       sanskrit: "Vrikshasana",      emoji: "🌳", color: "#22C55E", instruction: "Balance on one foot, press the other foot to your inner leg, and bring your palms together above your head.", durationSec: 30 },
+  { id: "cat",       name: "Cat Pose",        sanskrit: "Marjaryasana",     emoji: "🐱", color: "#F97316", instruction: "On hands and knees, round your back up to the sky like a scared kitty. Tuck your chin to your chest.", durationSec: 30 },
+  { id: "cow",       name: "Cow Pose",        sanskrit: "Bitilasana",       emoji: "🐄", color: "#FBBF24", instruction: "On hands and knees, let your belly sink down, lift your chest and tailbone up, and look gently forward.", durationSec: 30 },
+  { id: "downdog",   name: "Downward Dog",    sanskrit: "Adho Mukha Svanasana", emoji: "🐶", color: "#A78BFA", instruction: "Push your hips up and back to make an upside-down V shape, like a happy puppy stretching.", durationSec: 30 },
+  { id: "cobra",     name: "Cobra Pose",      sanskrit: "Bhujangasana",     emoji: "🐍", color: "#EF4444", instruction: "Lie on your tummy, place your hands under your shoulders, and gently lift your chest like a cobra rising up.", durationSec: 30 },
+  { id: "butterfly", name: "Butterfly Pose",  sanskrit: "Baddha Konasana",  emoji: "🦋", color: "#EC4899", instruction: "Sit down, bring the soles of your feet together, and gently flap your knees like butterfly wings.", durationSec: 30 },
+  { id: "childpose", name: "Child's Pose",    sanskrit: "Balasana",         emoji: "🧘", color: "#06B6D4", instruction: "Kneel down, sit back on your heels, and stretch your arms forward on the floor. Rest and breathe.", durationSec: 30 },
+];
+
 export const STORIES: Story[] = [
   { id: "st1",  title: "कमिला र फट्याङग्रा — Ant & Grasshopper", lang: "ne", emoji: "🐜", color: "#10B981", file: "कमल अन फटयडगर कथ Ant & Grasshopper - Story In Nepali  Nepali Fairy Tales  Nepali Cartoons.mp3" },
   { id: "st2",  title: "कमिला र परेवा — Ant and Pigeon",          lang: "ne", emoji: "🕊️", color: "#3B82F6", file: "कमल र परव  नपल कथ  Ant and Pigeon Moral Story  Nepali Story.mp3" },

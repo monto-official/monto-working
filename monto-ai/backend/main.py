@@ -103,6 +103,13 @@ async def health_check():
     return HealthResponse(status="ok", version="2.0.0")
 
 
+@app.post("/debug/log")
+async def debug_log(payload: dict):
+    """Temporary diagnostic sink — logs whatever the client posts."""
+    logger.info(f"[CLIENT DEBUG] {payload}")
+    return {"ok": True}
+
+
 @app.get("/")
 async def root():
     mode = "local GPU" if USE_LOCAL else "Groq cloud"

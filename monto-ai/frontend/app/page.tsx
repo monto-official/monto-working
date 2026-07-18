@@ -186,8 +186,10 @@ export default function Home() {
       // ── Media detection ─────────────────────────────────────────────────
       const playSongs   = /play\s+(song|songs|music|tune)/i.test(lower);
       const playStories = /play\s+(story|stories|bedtime|tale)/i.test(lower);
+      const doYoga      = /(do|start|let'?s do)\s+yoga|yoga\s+time/i.test(lower);
       if (playSongs)   { setRS("idle"); busyRef.current = false; router.push("/songs");   return; }
       if (playStories) { setRS("idle"); busyRef.current = false; router.push("/stories"); return; }
+      if (doYoga)      { setRS("idle"); busyRef.current = false; router.push("/yoga");    return; }
 
       // ── Explore mode detection ──────────────────────────────────────────
       const scene = detectExploreScene(result.transcript);
