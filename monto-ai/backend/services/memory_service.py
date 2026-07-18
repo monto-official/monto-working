@@ -1,254 +1,236 @@
 """
 Persistent Conversation Memory Service
 ---------------------------------------
-Stores all conversations in Supabase (Postgres) so Monto remembers
-everything even after server restarts or Pi reboots — and so memory is
-shared across every machine hitting the same Supabase project, not just
-whichever disk the SQLite file happened to live on.
-
-What is stored per session:
-  - Every message (user + Monto)
-  - Timestamp of each message
-  - Child's name (extracted automatically)
-  - Any key facts Monto should always remember
-
-Two layers of memory:
-  1. RECENT CONTEXT  — last N messages sent to LLM every time (for flow)
-  2. LONG-TERM FACTS — child's name, age, interests, extracted and injected
-                       into every prompt so Monto always knows who it's talking to
+Uses Supabase (Postgres) when SUPABASE_URL + SUPABASE_SERVICE_KEY are set.
+Falls back automatically to local SQLite when they are not — so local
+development works without a Supabase project.
 """
-import re
-import json
-import logging
-from typing import List
-
-from services.supabase_client import get_supabase
+import os, re, json, time, sqlite3, logging, threading
+from pathlib import Path
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
 MAX_RECENT_MESSAGES = 20
-# MAX_STORED_MESSAGES pruning to 500 per session is enforced by a DB trigger
-# (see backend/supabase/schema.sql) rather than in application code.
+DB_PATH = os.getenv("MEMORY_DB_PATH", "monto_memory.db")
+
+# ── Detect which backend to use ───────────────────────────────────────────────
+def _use_supabase() -> bool:
+    return bool(os.getenv("SUPABASE_URL")) and bool(os.getenv("SUPABASE_SERVICE_KEY"))
 
 
-class PersistentMemory:
+# ══════════════════════════════════════════════════════════════════════════════
+# SQLite backend (local fallback)
+# ══════════════════════════════════════════════════════════════════════════════
+class _SQLiteMemory:
     def __init__(self):
-        logger.info("✅ Persistent memory ready → Supabase (memory_messages)")
+        self._lock = threading.Lock()
+        self._init_db()
+        logger.info(f"✅ Persistent memory ready → SQLite ({DB_PATH})")
 
-    # ── PUBLIC API ────────────────────────────────────────────────────────────
+    def _conn(self):
+        c = sqlite3.connect(DB_PATH, check_same_thread=False)
+        c.row_factory = sqlite3.Row
+        return c
+
+    def _init_db(self):
+        with self._conn() as c:
+            c.executescript("""
+                CREATE TABLE IF NOT EXISTS messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    timestamp REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS session_facts (
+                    session_id TEXT PRIMARY KEY,
+                    facts_json TEXT NOT NULL DEFAULT '{}',
+                    updated_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_msg_session ON messages(session_id, timestamp);
+            """)
 
     def get_history(self, session_id: str) -> List[dict]:
-        """
-        Returns the last MAX_RECENT_MESSAGES messages for this session.
-        Used as context window sent to the LLM.
-        """
-        db = get_supabase()
-        res = (
-            db.table("memory_messages")
-            .select("role, content")
-            .eq("session_id", session_id)
-            .order("created_at", desc=True)
-            .limit(MAX_RECENT_MESSAGES)
-            .execute()
-        )
-        rows = res.data or []
-        # Reverse to chronological order
+        with self._lock:
+            with self._conn() as c:
+                rows = c.execute(
+                    "SELECT role, content FROM messages WHERE session_id=? ORDER BY timestamp DESC LIMIT ?",
+                    (session_id, MAX_RECENT_MESSAGES)
+                ).fetchall()
         return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
 
     def add_turn(self, session_id: str, user_text: str, assistant_text: str):
-        """Save one user + assistant exchange to the database.
-        assistant_text must be plain readable text — never raw JSON.
-        """
-        # Guard: if assistant_text is JSON, extract the response field
-        clean_text = self._ensure_plain_text(assistant_text)
-
-        db = get_supabase()
-        db.table("memory_messages").insert([
-            {"session_id": session_id, "role": "user", "content": user_text},
-            {"session_id": session_id, "role": "assistant", "content": clean_text},
-        ]).execute()
-
-        # Extract and save any new facts (name, age, etc.)
+        clean = self._plain(assistant_text)
+        now   = time.time()
+        with self._lock:
+            with self._conn() as c:
+                c.executemany(
+                    "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?,?,?,?)",
+                    [(session_id, "user", user_text, now),
+                     (session_id, "assistant", clean, now + 0.001)]
+                )
+                c.execute("""DELETE FROM messages WHERE session_id=? AND id NOT IN (
+                    SELECT id FROM messages WHERE session_id=? ORDER BY timestamp DESC LIMIT 500)""",
+                    (session_id, session_id))
         self._extract_facts(session_id, user_text, assistant_text)
 
-        logger.debug(f"Memory [{session_id}]: turn saved")
-
     def get_facts(self, session_id: str) -> dict:
-        """Return known facts about the child for this session."""
-        db = get_supabase()
-        res = (
-            db.table("session_facts")
-            .select("facts")
-            .eq("session_id", session_id)
-            .limit(1)
-            .execute()
-        )
-        if res.data:
-            return res.data[0]["facts"] or {}
-        return {}
+        with self._lock:
+            with self._conn() as c:
+                row = c.execute("SELECT facts_json FROM session_facts WHERE session_id=?", (session_id,)).fetchone()
+        return json.loads(row["facts_json"]) if row else {}
 
     def get_facts_prompt(self, session_id: str) -> str:
-        """
-        Returns a short string injected into the system prompt so Monto
-        always remembers key facts about the child, even across restarts.
-        """
         facts = self.get_facts(session_id)
-        if not facts:
-            return ""
-
+        if not facts: return ""
         lines = []
-        if facts.get("name"):
-            lines.append(f"- The child's name is {facts['name']}. Always use their name warmly.")
-        if facts.get("age"):
-            lines.append(f"- They are {facts['age']} years old.")
-        if facts.get("grade"):
-            lines.append(f"- They are in grade/class {facts['grade']}.")
-        if facts.get("interests"):
-            interests = ", ".join(facts["interests"])
-            lines.append(f"- Their interests include: {interests}.")
-        if facts.get("last_topic"):
-            lines.append(f"- Last time they talked about: {facts['last_topic']}.")
-
-        if not lines:
-            return ""
-
-        return (
-            "\n\nWHAT YOU KNOW ABOUT THIS CHILD (remember this always):\n"
-            + "\n".join(lines)
-        )
+        if facts.get("name"):      lines.append(f"- The child's name is {facts['name']}.")
+        if facts.get("age"):       lines.append(f"- They are {facts['age']} years old.")
+        if facts.get("grade"):     lines.append(f"- They are in grade {facts['grade']}.")
+        if facts.get("interests"): lines.append(f"- Their interests: {', '.join(facts['interests'])}.")
+        if facts.get("last_topic"):lines.append(f"- Last topic: {facts['last_topic']}.")
+        return ("\n\nWHAT YOU KNOW ABOUT THIS CHILD:\n" + "\n".join(lines)) if lines else ""
 
     def clear(self, session_id: str):
-        """Clear all memory for a session."""
-        db = get_supabase()
-        db.table("memory_messages").delete().eq("session_id", session_id).execute()
-        db.table("session_facts").delete().eq("session_id", session_id).execute()
-        logger.info(f"Memory [{session_id}]: cleared")
+        with self._lock:
+            with self._conn() as c:
+                c.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
+                c.execute("DELETE FROM session_facts WHERE session_id=?", (session_id,))
 
     def get_all_sessions(self) -> List[str]:
-        """List all session IDs that have stored messages."""
-        db = get_supabase()
-        res = db.table("memory_messages").select("session_id").execute()
-        return sorted({r["session_id"] for r in (res.data or [])})
+        with self._lock:
+            with self._conn() as c:
+                rows = c.execute("SELECT DISTINCT session_id FROM messages").fetchall()
+        return [r["session_id"] for r in rows]
 
     def get_session_summary(self, session_id: str) -> dict:
-        """Stats about a session — useful for debugging."""
-        db = get_supabase()
-        count_res = (
-            db.table("memory_messages")
-            .select("id", count="exact")
-            .eq("session_id", session_id)
-            .execute()
-        )
-        first_res = (
-            db.table("memory_messages")
-            .select("created_at")
-            .eq("session_id", session_id)
-            .order("created_at", desc=False)
-            .limit(1)
-            .execute()
-        )
-        last_res = (
-            db.table("memory_messages")
-            .select("created_at")
-            .eq("session_id", session_id)
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        return {
-            "session_id":      session_id,
-            "total_messages":  count_res.count or 0,
-            "first_message":   first_res.data[0]["created_at"] if first_res.data else None,
-            "last_message":    last_res.data[0]["created_at"] if last_res.data else None,
-            "facts":           self.get_facts(session_id),
-        }
-
-    # ── FACT EXTRACTION ───────────────────────────────────────────────────────
+        with self._lock:
+            with self._conn() as c:
+                cnt   = c.execute("SELECT COUNT(*) as c FROM messages WHERE session_id=?", (session_id,)).fetchone()["c"]
+                first = c.execute("SELECT timestamp FROM messages WHERE session_id=? ORDER BY timestamp ASC  LIMIT 1", (session_id,)).fetchone()
+                last  = c.execute("SELECT timestamp FROM messages WHERE session_id=? ORDER BY timestamp DESC LIMIT 1", (session_id,)).fetchone()
+        return {"session_id": session_id, "total_messages": cnt,
+                "first_message": first["timestamp"] if first else None,
+                "last_message":  last["timestamp"]  if last  else None,
+                "facts": self.get_facts(session_id)}
 
     @staticmethod
-    def _ensure_plain_text(text: str) -> str:
-        """
-        If text is JSON (old bug where raw JSON was stored), extract response field.
-        Otherwise return as-is.
-        """
-        stripped = text.strip() if text else ""
-        if stripped.startswith("{"):
+    def _plain(text: str) -> str:
+        if text and text.strip().startswith("{"):
             try:
-                data = json.loads(stripped)
-                if isinstance(data, dict) and "response" in data:
-                    return data["response"]
-            except (json.JSONDecodeError, ValueError):
+                d = json.loads(text.strip())
+                if isinstance(d, dict) and "response" in d:
+                    return d["response"]
+            except Exception:
                 pass
         return text
 
-    def _extract_facts(self, session_id: str, user_text: str, assistant_text: str):
-        """
-        Automatically extract key facts from conversation and store them.
-        Simple rule-based extraction — no extra LLM call needed.
-        """
-        facts = self.get_facts(session_id)
+    def _extract_facts(self, session_id: str, user_text: str, _assistant: str):
+        facts   = self.get_facts(session_id)
         changed = False
+        tl      = user_text.lower()
 
-        text_lower = user_text.lower()
+        m = re.search(r"(?:my name is|i am|i'm|call me)\s+([a-zA-Z]{2,20})", tl)
+        if m and not facts.get("name"):
+            n = m.group(1).capitalize()
+            if n.lower() not in ("here","okay","good","fine","back"):
+                facts["name"] = n; changed = True
 
-        # Extract name — "my name is X" / "I am X" / "call me X"
-        name_match = re.search(
-            r"(?:my name is|i am|i'm|call me)\s+([a-zA-Z]{2,20})",
-            text_lower
-        )
-        if name_match and not facts.get("name"):
-            name = name_match.group(1).strip().capitalize()
-            # Filter out common false positives
-            if name.lower() not in ("here", "okay", "good", "fine", "back", "home"):
-                facts["name"] = name
-                changed = True
-                logger.info(f"Memory [{session_id}]: learned name = {name}")
+        m = re.search(r"(?:i am|i'm)\s+(\d{1,2})\s*(?:years old|yrs|year)", tl)
+        if m and not facts.get("age"):
+            facts["age"] = int(m.group(1)); changed = True
 
-        # Extract age — "I am X years old" / "I'm X"
-        age_match = re.search(
-            r"(?:i am|i'm)\s+(\d{1,2})\s*(?:years old|yrs|year)",
-            text_lower
-        )
-        if age_match and not facts.get("age"):
-            facts["age"] = int(age_match.group(1))
-            changed = True
-            logger.info(f"Memory [{session_id}]: learned age = {facts['age']}")
+        m = re.search(r"(?:class|grade|standard)\s*(\d{1,2})", tl)
+        if m and not facts.get("grade"):
+            facts["grade"] = m.group(1); changed = True
 
-        # Extract grade/class — "I'm in class 5" / "grade 3"
-        grade_match = re.search(
-            r"(?:class|grade|standard)\s*(\d{1,2})",
-            text_lower
-        )
-        if grade_match and not facts.get("grade"):
-            facts["grade"] = grade_match.group(1)
-            changed = True
+        m = re.search(r"(?:i like|i love|i enjoy|my favourite is)\s+([a-zA-Z\s]{3,30})", tl)
+        if m:
+            interest = m.group(1).strip().rstrip(".,!")
+            interests = facts.get("interests", [])
+            if interest and interest not in interests:
+                interests.append(interest); facts["interests"] = interests[-5:]; changed = True
 
-        # Extract interests — "I like/love X"
-        interest_match = re.search(
-            r"(?:i like|i love|i enjoy|my favourite is|i'm interested in)\s+([a-zA-Z\s]{3,30})",
-            text_lower
-        )
-        if interest_match:
-            interest = interest_match.group(1).strip().rstrip(".,!")
-            if interest and len(interest) > 2:
-                interests = facts.get("interests", [])
-                if interest not in interests:
-                    interests.append(interest)
-                    facts["interests"] = interests[-5:]  # keep last 5
-                    changed = True
-
-        # Track last topic (simple — first noun phrase from user message)
         if len(user_text) > 10:
-            facts["last_topic"] = user_text[:60].strip()
-            changed = True
+            facts["last_topic"] = user_text[:60].strip(); changed = True
 
         if changed:
-            db = get_supabase()
-            db.table("session_facts").upsert({
-                "session_id": session_id,
-                "facts": facts,
-            }).execute()
+            with self._lock:
+                with self._conn() as c:
+                    c.execute("""INSERT INTO session_facts (session_id, facts_json, updated_at) VALUES (?,?,?)
+                        ON CONFLICT(session_id) DO UPDATE SET facts_json=excluded.facts_json, updated_at=excluded.updated_at""",
+                        (session_id, json.dumps(facts), time.time()))
 
 
-# ── GLOBAL INSTANCE ───────────────────────────────────────────────────────────
-memory = PersistentMemory()
+# ══════════════════════════════════════════════════════════════════════════════
+# Supabase backend
+# ══════════════════════════════════════════════════════════════════════════════
+class _SupabaseMemory:
+    def __init__(self):
+        logger.info("✅ Persistent memory ready → Supabase (memory_messages)")
+
+    def _db(self):
+        from services.supabase_client import get_supabase
+        return get_supabase()
+
+    def get_history(self, session_id: str) -> List[dict]:
+        res = (self._db().table("memory_messages")
+               .select("role, content")
+               .eq("session_id", session_id)
+               .order("created_at", desc=True)
+               .limit(MAX_RECENT_MESSAGES)
+               .execute())
+        return [{"role": r["role"], "content": r["content"]} for r in reversed(res.data or [])]
+
+    def add_turn(self, session_id: str, user_text: str, assistant_text: str):
+        self._db().table("memory_messages").insert([
+            {"session_id": session_id, "role": "user",      "content": user_text},
+            {"session_id": session_id, "role": "assistant",  "content": assistant_text},
+        ]).execute()
+
+    def get_facts(self, session_id: str) -> dict:
+        res = (self._db().table("session_facts")
+               .select("facts_json").eq("session_id", session_id).maybe_single().execute())
+        if res and res.data:
+            return json.loads(res.data.get("facts_json", "{}"))
+        return {}
+
+    def get_facts_prompt(self, session_id: str) -> str:
+        facts = self.get_facts(session_id)
+        if not facts: return ""
+        lines = []
+        if facts.get("name"):      lines.append(f"- The child's name is {facts['name']}.")
+        if facts.get("age"):       lines.append(f"- They are {facts['age']} years old.")
+        if facts.get("interests"): lines.append(f"- Their interests: {', '.join(facts['interests'])}.")
+        return ("\n\nWHAT YOU KNOW ABOUT THIS CHILD:\n" + "\n".join(lines)) if lines else ""
+
+    def clear(self, session_id: str):
+        self._db().table("memory_messages").delete().eq("session_id", session_id).execute()
+        self._db().table("session_facts").delete().eq("session_id", session_id).execute()
+
+    def get_all_sessions(self) -> List[str]:
+        res = self._db().table("memory_messages").select("session_id").execute()
+        seen = set(); out = []
+        for r in (res.data or []):
+            if r["session_id"] not in seen:
+                seen.add(r["session_id"]); out.append(r["session_id"])
+        return out
+
+    def get_session_summary(self, session_id: str) -> dict:
+        cnt = len(self.get_history(session_id))
+        return {"session_id": session_id, "total_messages": cnt,
+                "first_message": None, "last_message": None,
+                "facts": self.get_facts(session_id)}
+
+
+# ── Global singleton ──────────────────────────────────────────────────────────
+def _make_memory():
+    if _use_supabase():
+        try:
+            return _SupabaseMemory()
+        except Exception as e:
+            logger.warning(f"Supabase init failed ({e}), falling back to SQLite")
+    return _SQLiteMemory()
+
+memory = _make_memory()

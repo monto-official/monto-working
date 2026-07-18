@@ -2,18 +2,20 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Volume2, VolumeX, Mic, Sparkles, MessageCircle, X, ChevronRight } from "lucide-react";
+import { Volume2, VolumeX, Mic, Sparkles, MessageCircle, X, ChevronRight, Settings as SettingsIcon } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { HangingAvatar } from "@/components/HangingAvatar";
 import { CallScreen } from "@/components/CallScreen";
+import { SettingsModal } from "@/components/SettingsModal";
 import { SpiderWebOverlay } from "@/components/SpiderWebOverlay";
 import { ExplorePanel, detectExploreScene, isExploreIntent, type ExploreScene } from "@/components/ExplorePanel";
+import { PairingQRModal } from "@/components/PairingQRModal";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 import { useTTS } from "@/hooks/useTTS";
 import { useConversation } from "@/hooks/useConversation";
 import { useWakeWord } from "@/hooks/useWakeWord";
 import { sendVoiceQuery, checkHealth, APIError } from "@/lib/api";
-import { Emotion, RecordingState, Settings, VoiceQueryResponse } from "@/types";
+import { Emotion, RecordingState, Settings, VoiceQueryResponse, Character } from "@/types";
 import { cn } from "@/lib/utils";
 
 // ── Emotion config ────────────────────────────────────────────────────────────
@@ -87,6 +89,8 @@ export default function Home() {
   const [showChat, setShowChat]       = useState(false);
   const [emojiBurst, setEmojiBurst]   = useState(0);
   const [lang, setLang]               = useState<"english" | "nepali">("english");
+  const [character, setCharacter]     = useState<Character>("spiderman");
+  const [showSettings, setShowSettings] = useState(false);
   const [greeting, setGreeting] = useState(GREETING_MESSAGES[0]);
 
   useEffect(() => {
@@ -96,6 +100,9 @@ export default function Home() {
 
   // ── Call state ─────────────────────────────────────────────────────────
   const [calling, setCalling]         = useState<"mom" | "dad" | null>(null);
+
+  // ── Pairing QR modal ────────────────────────────────────────────────────
+  const [showPairing, setShowPairing] = useState(false);
 
   // ── Explore mode ────────────────────────────────────────────────────────
   const [exploreScene, setExploreScene] = useState<ExploreScene>(null);
@@ -113,7 +120,13 @@ export default function Home() {
   const recorder = useAudioRecorder();
   const { speak, cancel: cancelTTS } = useTTS();
   const conversation = useConversation();
-  const settings: Settings = { language: lang, voice: "female", autoSpeak, darkMode: true };
+  const settings: Settings = { language: lang, voice: "female", character, autoSpeak, darkMode: true };
+
+  const handleSettingsChange = (s: Partial<Settings>) => {
+    if (s.language !== undefined) setLang(s.language);
+    if (s.character !== undefined) setCharacter(s.character);
+    if (s.autoSpeak !== undefined) setAutoSpeak(s.autoSpeak);
+  };
 
   const cfg = EMOTION_CONFIG[emotion] ?? EMOTION_CONFIG.neutral;
 
@@ -412,17 +425,28 @@ export default function Home() {
           <div className="text-[9px] tracking-[0.3em] text-white/40 uppercase mt-0.5">Kids · AI Sathi ✦</div>
         </motion.div>
 
-        {/* Chat toggle */}
-        <motion.button
-          onClick={() => setShowChat(v => !v)}
-          className="w-9 h-9 rounded-full glass glass-border flex items-center justify-center"
-          whileTap={{ scale: 0.85 }}
-          initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}
-        >
-          {showChat
-            ? <X className="w-4 h-4 text-white/70" />
-            : <MessageCircle className="w-4 h-4 text-white/70" />}
-        </motion.button>
+        {/* Right side: Settings + Chat toggle */}
+        <div className="flex items-center gap-2">
+          <motion.button
+            onClick={() => setShowSettings(true)}
+            className="w-9 h-9 rounded-full glass glass-border flex items-center justify-center"
+            whileTap={{ scale: 0.85 }}
+            initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}
+            aria-label="Open settings"
+          >
+            <SettingsIcon className="w-4 h-4 text-white/70" />
+          </motion.button>
+          <motion.button
+            onClick={() => setShowChat(v => !v)}
+            className="w-9 h-9 rounded-full glass glass-border flex items-center justify-center"
+            whileTap={{ scale: 0.85 }}
+            initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}
+          >
+            {showChat
+              ? <X className="w-4 h-4 text-white/70" />
+              : <MessageCircle className="w-4 h-4 text-white/70" />}
+          </motion.button>
+        </div>
       </header>
 
       {/* ── Main ────────────────────────────────────────────────────────── */}
@@ -441,6 +465,7 @@ export default function Home() {
                 >
                   <HangingAvatar
                     emotion={isSpeaking ? "talking" : emotion}
+                    character={character}
                     size={220}
                     isListening={isRec}
                     isSpeaking={isSpeaking}
@@ -691,6 +716,14 @@ export default function Home() {
           )}
         </AnimatePresence>
       </main>
+
+      {/* ── Settings Modal ───────────────────────────────────────────── */}
+      <SettingsModal
+        isOpen={showSettings}
+        settings={settings}
+        onClose={() => setShowSettings(false)}
+        onChange={handleSettingsChange}
+      />
     </div>
   );
 }
