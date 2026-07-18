@@ -1,18 +1,19 @@
 """
 Monto AI — Content Filter Service
-Multi-layer kids safety filter:
-  Layer 1: Fast keyword/pattern check (no LLM needed)
-  Layer 2: Context analysis for subtle harmful content
-  Layer 3: Graceful redirection responses
-
+Multi-layer kids safety filter.
 Handles both English and Nepali content.
+Custom words managed from admin panel (blocked_words.json).
 """
 import re
+import json
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+BLOCKED_WORDS_FILE = Path(__file__).parent.parent / "blocked_words.json"
 
 
 @dataclass
@@ -54,6 +55,35 @@ _BAD_WORDS_NE = [
 # Compiled patterns
 _PATTERNS_EN = [re.compile(p, re.IGNORECASE) for p in _BAD_WORDS_EN]
 _PATTERNS_NE = [re.compile(p) for p in _BAD_WORDS_NE]
+
+# ── Custom words (admin-managed) ──────────────────────────────────────────────
+_custom_patterns: list = []
+
+def _load_custom_words():
+    global _custom_patterns
+    if not BLOCKED_WORDS_FILE.exists():
+        _custom_patterns = []
+        return
+    try:
+        data = json.loads(BLOCKED_WORDS_FILE.read_text(encoding="utf-8"))
+        patterns = []
+        for category, words in data.items():
+            for word in words:
+                w = word.strip()
+                if w:
+                    patterns.append((re.compile(rf"\b{re.escape(w)}\b", re.IGNORECASE), category))
+        _custom_patterns = patterns
+        logger.info(f"Content filter: loaded {len(patterns)} custom blocked words")
+    except Exception as e:
+        logger.warning(f"Could not load custom blocked words: {e}")
+        _custom_patterns = []
+
+def reload_custom_words():
+    """Called by moderation route when words are added/removed."""
+    _load_custom_words()
+
+# Load on startup
+_load_custom_words()
 
 
 # ── REDIRECT RESPONSES ────────────────────────────────────────────────────────

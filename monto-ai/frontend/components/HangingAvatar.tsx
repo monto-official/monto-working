@@ -32,6 +32,7 @@ export function HangingAvatar({ emotion, size = 220, isListening, isSpeaking }: 
   const [eyesBlink,  setEyesBlink]  = useState(false);
   const [peekEyes,   setPeekEyes]   = useState(false);
   const [webPulse,   setWebPulse]   = useState(false);
+  const [mounted,    setMounted]    = useState(false);
 
   const idleTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const bodyCtrl   = useAnimation();
@@ -96,6 +97,7 @@ export function HangingAvatar({ emotion, size = 220, isListening, isSpeaking }: 
 
   // ── Initial idle ───────────────────────────────────────────────────────────
   useEffect(() => {
+    setMounted(true);
     startIdleSwing();
     scheduleIdleBehaviors();
     return clearIdleTimers;
@@ -165,6 +167,14 @@ export function HangingAvatar({ emotion, size = 220, isListening, isSpeaking }: 
   const dynamicThread = Math.min(threadLen + Math.abs(swing) * 0.8, 140);
 
   const isHidden = hangState === "hidden" || hangState === "speaking" || hangState === "climbing-up";
+
+  if (!mounted) return (
+    <div style={{ width: size, minHeight: size + 160 }} className="relative flex flex-col items-center">
+      <div style={{ marginTop: 120 }}>
+        <Avatar emotion={emotion} size={size} />
+      </div>
+    </div>
+  );
 
   return (
     <div className="relative flex flex-col items-center" style={{ width: size, minHeight: size + 160 }}>

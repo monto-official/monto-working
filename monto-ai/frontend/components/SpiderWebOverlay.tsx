@@ -1,8 +1,7 @@
 "use client";
 /**
  * SpiderWebOverlay — Premium procedural SVG spider web system
- * Inspired by Spider-Man movie UI. No PNG images, pure SVG + CSS.
- * GPU-friendly: transform + opacity only. 60 FPS.
+ * SSR-safe: all random values generated client-side only in useEffect.
  */
 import { useEffect, useRef, useState, useCallback } from "react";
 
@@ -11,25 +10,15 @@ interface Props {
   isSpeaking:  boolean;
 }
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 interface Strand {
-  id:     number;
-  d:      string;   // SVG path data
-  corner: "tl" | "tr" | "bl" | "br";
-  delay:  number;
-  dur:    number;
+  id:      number;
+  d:       string;
+  corner:  "tl" | "tr" | "bl" | "br";
+  delay:   number;
+  dur:     number;
   opacity: number;
 }
 
-interface Particle {
-  id:       number;
-  strandId: number;
-  offset:   number; // 0–1 along path
-  speed:    number;
-  size:     number;
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 const rand  = (min: number, max: number) => min + Math.random() * (max - min);
 const randI = (min: number, max: number) => Math.floor(rand(min, max));
 
@@ -207,17 +196,19 @@ function CuteSpider({
 
 // ─── Main overlay ─────────────────────────────────────────────────────────────
 export function SpiderWebOverlay({ isListening, isSpeaking }: Props) {
-  const [dims,     setDims]     = useState({ W: 390, H: 844 });
-  const [strands,  setStrands]  = useState<Strand[]>([]);
-  const [nextId,   setNextId]   = useState(0);
-  const [spiderPos, setSpiderPos] = useState({ x: 40, y: 120 });
+  const [mounted,      setMounted]      = useState(false);
+  const [dims,         setDims]         = useState({ W: 390, H: 844 });
+  const [strands,      setStrands]      = useState<Strand[]>([]);
+  const [nextId,       setNextId]       = useState(0);
+  const [spiderPos,    setSpiderPos]    = useState({ x: 40, y: 120 });
   const [spiderHidden, setSpiderHidden] = useState(false);
-  const [blinkOpen, setBlinkOpen] = useState(true);
+  const [blinkOpen,    setBlinkOpen]    = useState(true);
   const strandIdRef = useRef(0);
   const cycleRef    = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // Init on mount — measure actual screen size
   useEffect(() => {
+    setMounted(true);
     const W = window.innerWidth;
     const H = window.innerHeight;
     setDims({ W, H });
@@ -287,6 +278,9 @@ export function SpiderWebOverlay({ isListening, isSpeaking }: Props) {
   }, [isListening, isSpeaking, wander]);
 
   const { W, H } = dims;
+
+  // Don't render anything server-side — all random values are client-only
+  if (!mounted) return null;
 
   // Group strands by corner for transform-origin sway
   const byCorner = strands.reduce((acc, s) => {

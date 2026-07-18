@@ -7,6 +7,7 @@ import { Avatar } from "@/components/Avatar";
 import { HangingAvatar } from "@/components/HangingAvatar";
 import { CallScreen } from "@/components/CallScreen";
 import { SpiderWebOverlay } from "@/components/SpiderWebOverlay";
+import { ExplorePanel, detectExploreScene, isExploreIntent, type ExploreScene } from "@/components/ExplorePanel";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 import { useTTS } from "@/hooks/useTTS";
 import { useConversation } from "@/hooks/useConversation";
@@ -96,6 +97,10 @@ export default function Home() {
   // ── Call state ─────────────────────────────────────────────────────────
   const [calling, setCalling]         = useState<"mom" | "dad" | null>(null);
 
+  // ── Explore mode ────────────────────────────────────────────────────────
+  const [exploreScene, setExploreScene] = useState<ExploreScene>(null);
+  const [exploreTranscript, setExploreTranscript] = useState("");
+
   // ── Water reminder ─────────────────────────────────────────────────────
   const [showWater, setShowWater]     = useState(false);
   const waterTimerRef                 = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -170,6 +175,20 @@ export default function Home() {
       const playStories = /play\s+(story|stories|bedtime|tale)/i.test(lower);
       if (playSongs)   { setRS("idle"); busyRef.current = false; router.push("/songs");   return; }
       if (playStories) { setRS("idle"); busyRef.current = false; router.push("/stories"); return; }
+
+      // ── Explore mode detection ──────────────────────────────────────────
+      const scene = detectExploreScene(result.transcript);
+      if (scene) {
+        setExploreScene(scene);
+        setExploreTranscript(result.transcript);
+        setRS("idle");
+        busyRef.current = false;
+        // Also speak the first narration via Monto
+        if (autoSpeak && result.response) {
+          speak(result.response, result.emotion, settings, () => {}, () => { setIsSpeaking(false); setRS("idle"); });
+        }
+        return;
+      }
 
       if (autoSpeak && result.response) {
         setRS("speaking");
@@ -261,7 +280,7 @@ export default function Home() {
         handleMicRef.current();
       }
     },
-    enabled: recordingState === "idle" && !isSpeaking && online !== false,
+    enabled: recordingState === "idle" && !isSpeaking && online !== false && !exploreScene,
     keywords: ["monto", "hey monto", "hi monto", "montu", "hey montu", "hi montu", "मन्टो", "हे मन्टो"],
     language: lang === "nepali" ? "ne-NP" : "en-US",
   });
@@ -286,6 +305,25 @@ export default function Home() {
 
       {/* ── Spider web overlay ───────────────────────────────────────────── */}
       <SpiderWebOverlay isListening={isRec} isSpeaking={isSpeaking} />
+
+      {/* ── Explore Mode Panel ───────────────────────────────────────────── */}
+      <ExplorePanel
+        scene={exploreScene}
+        transcript={exploreTranscript}
+        onClose={() => { setExploreScene(null); setIsSpeaking(false); cancelTTS(); }}
+        onNarrate={(text, onDone) => {
+          // Cancel any previous speech first, then speak new step
+          cancelTTS();
+          speak(
+            text,
+            "excited",
+            { language: lang, voice: "female", autoSpeak: true, darkMode: true },
+            () => setIsSpeaking(true),
+            () => { setIsSpeaking(false); onDone(); }, // advance step after speech ends
+          );
+        }}
+        isSpeaking={isSpeaking}
+      />
 
       {/* ── Calling overlay ─────────────────────────────────────────────── */}
       <AnimatePresence>

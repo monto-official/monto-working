@@ -22,10 +22,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 from models.schemas import HealthResponse
-from routes.voice  import router as voice_router
-from routes.tts    import router as tts_router
-from routes.call   import router as call_router
-from routes.signaling import router as signaling_router
+from routes.voice      import router as voice_router
+from routes.tts        import router as tts_router
+from routes.call       import router as call_router
+from routes.signaling  import router as signaling_router
+from routes.settings   import router as settings_router
+from routes.moderation import router as moderation_router
 from services.stt_service import STTService
 from services.llm_service import LLMService
 from services.tts_service import TTSService
@@ -79,7 +81,7 @@ app = FastAPI(
 )
 
 # CORS
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001,http://localhost:3002").split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -92,6 +94,8 @@ app.include_router(voice_router)
 app.include_router(tts_router)
 app.include_router(call_router)
 app.include_router(signaling_router)
+app.include_router(settings_router)
+app.include_router(moderation_router)
 
 
 @app.get("/health", response_model=HealthResponse)
