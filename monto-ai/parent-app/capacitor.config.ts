@@ -5,6 +5,13 @@ const config: CapacitorConfig = {
   appName: "Monto Parent",
   webDir: "out",
 
+  // Default Android WebView origin is https://localhost, which makes fetches
+  // to a plain http:// backend fail as mixed content — switch it to http so
+  // both sides match (this app talks to a local dev backend, not TLS).
+  server: {
+    androidScheme: "http",
+  },
+
   plugins: {
     SplashScreen: {
       launchShowDuration: 1500,

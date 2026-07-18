@@ -1,17 +1,20 @@
 "use client";
-import { useEffect } from "react";
-import { PhoneOff, PhoneIncoming, Mic, MicOff, Phone, Clock } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { PhoneOff, PhoneIncoming, Mic, MicOff, Phone, Clock, QrCode, RefreshCw } from "lucide-react";
 import { PhoneShell } from "@/components/PhoneShell";
 import { PageHeader } from "@/components/AppHeader";
 import { BottomNav } from "@/components/BottomNav";
 import { useWebRTCCall } from "@/hooks/useWebRTCCall";
 import { loadChildProfile, DEFAULT_CHILD } from "@/lib/profile-storage";
-import { useState } from "react";
+import {
+  loadPairing,
+  savePairing,
+  clearPairing,
+  redeemPairingCode,
+  type PairingData,
+} from "@/lib/pairing-storage";
+import { PairingScanner } from "@/components/PairingScanner";
 import type { ChildProfile } from "@/types";
-
-const SIGNALING_URL =
-  (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000")
-    .replace(/^http/, "ws") + "/ws/call";
 
 const STATUS_LABEL: Record<string, string> = {
   idle:            "Starting...",
@@ -26,14 +29,136 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export function CallScreen() {
+  // undefined = pairing not checked yet, null = checked and none saved
+  const [pairing, setPairing] = useState<PairingData | null | undefined>(undefined);
+
+  useEffect(() => {
+    setPairing(loadPairing());
+  }, []);
+
+  if (pairing === undefined) {
+    return (
+      <PhoneShell>
+        <PageHeader title="Call Monto Box" />
+        <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+          Loading...
+        </div>
+        <BottomNav />
+      </PhoneShell>
+    );
+  }
+
+  if (pairing === null) {
+    return <PairingPrompt onPaired={setPairing} />;
+  }
+
+  return (
+    <ActiveCallScreen
+      pairing={pairing}
+      onRepair={() => {
+        clearPairing();
+        setPairing(null);
+      }}
+    />
+  );
+}
+
+// ── Not paired yet — scan the child device's QR code ─────────────────────────
+
+function PairingPrompt({ onPaired }: { onPaired: (data: PairingData) => void }) {
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [redeeming, setRedeeming] = useState(false);
+
+  const handleDetected = useCallback(
+    async (raw: string) => {
+      setRedeeming(true);
+      setScanError(null);
+      try {
+        const data = await redeemPairingCode(raw);
+        savePairing(data);
+        setScanning(false);
+        onPaired(data);
+      } catch (err) {
+        setScanError(err instanceof Error ? err.message : "Pairing failed — try again.");
+        setScanning(false);
+      } finally {
+        setRedeeming(false);
+      }
+    },
+    [onPaired]
+  );
+
+  return (
+    <PhoneShell>
+      <PageHeader title="Call Monto Box" />
+
+      <div className="flex-1 flex flex-col items-center justify-center gap-5 px-8 text-center">
+        <div className="size-20 rounded-full bg-muted flex items-center justify-center">
+          <QrCode className="size-9 text-muted-foreground" />
+        </div>
+
+        <div>
+          <h2 className="text-lg font-bold">Pair with your Monto box</h2>
+          <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
+            Open the Monto app on your child's device, tap the QR icon at the
+            top, and scan it here — you only need to do this once.
+          </p>
+        </div>
+
+        {scanError && <p className="text-sm text-red-500">{scanError}</p>}
+
+        <button
+          onClick={() => {
+            setScanError(null);
+            setScanning(true);
+          }}
+          disabled={redeeming}
+          className="h-12 px-6 rounded-2xl brand-gradient text-white font-semibold flex items-center gap-2 disabled:opacity-60"
+        >
+          <QrCode className="size-5" /> {redeeming ? "Pairing..." : "Scan QR Code"}
+        </button>
+      </div>
+
+      <BottomNav />
+
+      {scanning && (
+        <PairingScanner onDetected={handleDetected} onClose={() => setScanning(false)} />
+      )}
+    </PhoneShell>
+  );
+}
+
+// ── Paired — the actual call screen ───────────────────────────────────────────
+
+function ActiveCallScreen({
+  pairing,
+  onRepair,
+}: {
+  pairing: PairingData;
+  onRepair: () => void;
+}) {
   const [child, setChild] = useState<ChildProfile>(DEFAULT_CHILD);
 
-  useEffect(() => { setChild(loadChildProfile()); }, []);
+  useEffect(() => {
+    setChild(loadChildProfile());
+  }, []);
+
+  const signalingUrl = pairing.apiUrl.replace(/^http/, "ws") + "/ws/call";
+  const iceServers: RTCIceServer[] = [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+    ...(pairing.turnUrl
+      ? [{ urls: pairing.turnUrl, username: pairing.turnUsername, credential: pairing.turnPassword }]
+      : []),
+  ];
 
   const { status, isMuted, durationFormatted, peerOnline, error,
           acceptCall, rejectCall, hangUp, toggleMute } = useWebRTCCall({
     role: "parent",
-    signalingUrl: SIGNALING_URL,
+    signalingUrl,
+    room: pairing.deviceId,
+    iceServers,
   });
 
   const isIncoming  = status === "incoming";
@@ -43,7 +168,14 @@ export function CallScreen() {
 
   return (
     <PhoneShell>
-      <PageHeader title="Call Monto Box" />
+      <PageHeader
+        title="Call Monto Box"
+        right={
+          <button onClick={onRepair} aria-label="Pair with a different Monto box">
+            <RefreshCw className="size-4 text-muted-foreground" />
+          </button>
+        }
+      />
 
       <div className="flex-1 overflow-y-auto px-5 py-6 flex flex-col gap-6">
 

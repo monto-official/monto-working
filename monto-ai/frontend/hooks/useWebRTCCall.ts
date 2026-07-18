@@ -1,120 +1,143 @@
 "use client";
-/**
- * useWebRTCCall — WebRTC peer-to-peer audio call via backend signaling
- *
- * role="child"  → child app (initiates calls)
- * role="parent" → parent app (receives calls)
- *
- * Flow:
- *   child: ring → offer → [ICE] ←→ [ICE] → answer → in-call
- *   parent: ring notification → accept → answer → in-call
- */
-import { useEffect, useRef, useCallback, useState } from "react";
+
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type CallStatus =
   | "idle"
   | "connecting-ws"
   | "ready"
-  | "ringing"       // child sent ring, waiting for parent to accept
-  | "incoming"      // parent received ring
-  | "connecting"    // WebRTC negotiating
+  | "ringing"
+  | "incoming"
+  | "connecting"
   | "in-call"
   | "ended"
   | "error";
 
 interface UseWebRTCCallOptions {
   role: "child" | "parent";
-  signalingUrl: string;    // ws://host:8000/ws/call?role=child
+  signalingUrl: string;
+  // Pairing/sync ID shared with the other side (see NEXT_PUBLIC_DEVICE_ID) —
+  // isolates this family's calls when a backend hosts more than one pair.
+  room?: string;
   onIncomingCall?: () => void;
   onCallEnded?: () => void;
 }
 
-const ICE_SERVERS = [
+const ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
+  // TURN — required when child + parent are on different networks and a
+  // direct peer-to-peer path can't be found (mobile data, symmetric NAT,
+  // strict firewalls). Falls back to STUN-only if not configured.
+  ...(process.env.NEXT_PUBLIC_TURN_URL
+    ? [
+        {
+          urls: process.env.NEXT_PUBLIC_TURN_URL,
+          username: process.env.NEXT_PUBLIC_TURN_USERNAME,
+          credential: process.env.NEXT_PUBLIC_TURN_PASSWORD,
+        },
+      ]
+    : []),
 ];
 
 export function useWebRTCCall({
   role,
   signalingUrl,
+  room = "monto-room",
   onIncomingCall,
   onCallEnded,
 }: UseWebRTCCallOptions) {
-  const [status, setStatus]     = useState<CallStatus>("idle");
-  const [isMuted, setIsMuted]   = useState(false);
+  const [status, setStatus] = useState<CallStatus>("idle");
+  const [isMuted, setIsMuted] = useState(false);
   const [duration, setDuration] = useState(0);
   const [peerOnline, setPeerOnline] = useState(false);
-  const [error, setError]       = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const wsRef       = useRef<WebSocket | null>(null);
-  const pcRef       = useRef<RTCPeerConnection | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStream = useRef<MediaStream | null>(null);
   const remoteAudio = useRef<HTMLAudioElement | null>(null);
-  const timerRef    = useRef<ReturnType<typeof setInterval> | null>(null);
-  const statusRef   = useRef<CallStatus>("idle");
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const statusRef = useRef<CallStatus>("idle");
+  const pendingIceCandidates = useRef<RTCIceCandidateInit[]>([]);
 
-  const updateStatus = useCallback((s: CallStatus) => {
-    statusRef.current = s;
-    setStatus(s);
+  const updateStatus = useCallback((nextStatus: CallStatus) => {
+    statusRef.current = nextStatus;
+    setStatus(nextStatus);
   }, []);
 
-  // ── Start call duration timer ────────────────────────────────────────────
   const startTimer = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
     setDuration(0);
-    timerRef.current = setInterval(() => setDuration(d => d + 1), 1000);
+    timerRef.current = setInterval(() => setDuration((value) => value + 1), 1000);
   }, []);
 
   const stopTimer = useCallback(() => {
-    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
   }, []);
 
-  // ── Cleanup WebRTC resources ─────────────────────────────────────────────
+  const sendSignal = useCallback((message: object) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(message));
+    }
+  }, []);
+
+  const flushPendingIceCandidates = useCallback(async () => {
+    const pc = pcRef.current;
+    if (!pc?.remoteDescription) return;
+
+    const candidates = pendingIceCandidates.current.splice(0);
+    for (const candidate of candidates) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch {
+        // Ignore stale candidates from an older negotiation.
+      }
+    }
+  }, []);
+
   const cleanupPeer = useCallback(() => {
-    localStream.current?.getTracks().forEach(t => t.stop());
+    localStream.current?.getTracks().forEach((track) => track.stop());
     localStream.current = null;
+    pendingIceCandidates.current = [];
+
     if (pcRef.current) {
       pcRef.current.close();
       pcRef.current = null;
     }
+
     stopTimer();
   }, [stopTimer]);
 
-  // ── Send message via signaling WS ────────────────────────────────────────
-  const sendSignal = useCallback((msg: object) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(msg));
-    }
-  }, []);
-
-  // ── Create RTCPeerConnection ─────────────────────────────────────────────
   const createPeer = useCallback((): RTCPeerConnection => {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     pcRef.current = pc;
 
-    pc.onicecandidate = (e) => {
-      if (e.candidate) {
-        sendSignal({ type: "ice-candidate", candidate: e.candidate });
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        sendSignal({ type: "ice-candidate", candidate: event.candidate });
       }
     };
 
-    pc.ontrack = (e) => {
-      if (remoteAudio.current && e.streams[0]) {
-        remoteAudio.current.srcObject = e.streams[0];
-        // Resume AudioContext if suspended (browser autoplay policy)
-        const playPromise = remoteAudio.current.play();
-        if (playPromise) {
-          playPromise.catch(() => {
-            // Retry on next user interaction
-            const unlock = () => {
-              remoteAudio.current?.play().catch(() => {});
-              document.removeEventListener("click", unlock);
-              document.removeEventListener("touchstart", unlock);
-            };
-            document.addEventListener("click", unlock, { once: true });
-            document.addEventListener("touchstart", unlock, { once: true });
-          });
-        }
+    pc.ontrack = (event) => {
+      if (!remoteAudio.current || !event.streams[0]) return;
+
+      remoteAudio.current.srcObject = event.streams[0];
+      const playPromise = remoteAudio.current.play();
+      if (playPromise) {
+        playPromise.catch(() => {
+          const unlockAudio = () => {
+            remoteAudio.current?.play().catch(() => {});
+            document.removeEventListener("click", unlockAudio);
+            document.removeEventListener("touchstart", unlockAudio);
+          };
+          document.addEventListener("click", unlockAudio, { once: true });
+          document.addEventListener("touchstart", unlockAudio, { once: true });
+        });
       }
     };
 
@@ -122,7 +145,10 @@ export function useWebRTCCall({
       if (pc.connectionState === "connected") {
         updateStatus("in-call");
         startTimer();
-      } else if (["disconnected", "failed", "closed"].includes(pc.connectionState)) {
+        return;
+      }
+
+      if (["disconnected", "failed", "closed"].includes(pc.connectionState)) {
         if (statusRef.current === "in-call" || statusRef.current === "connecting") {
           cleanupPeer();
           updateStatus("ended");
@@ -133,9 +159,8 @@ export function useWebRTCCall({
     };
 
     return pc;
-  }, [sendSignal, updateStatus, startTimer, cleanupPeer, onCallEnded]);
+  }, [cleanupPeer, onCallEnded, sendSignal, startTimer, updateStatus]);
 
-  // ── Get mic stream ────────────────────────────────────────────────────────
   const getMic = useCallback(async (): Promise<MediaStream> => {
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true },
@@ -144,12 +169,15 @@ export function useWebRTCCall({
     return stream;
   }, []);
 
-  // ── Handle incoming signaling messages ───────────────────────────────────
   const handleMessage = useCallback(async (raw: string) => {
-    let msg: Record<string, unknown>;
-    try { msg = JSON.parse(raw); } catch { return; }
+    let message: Record<string, unknown>;
+    try {
+      message = JSON.parse(raw);
+    } catch {
+      return;
+    }
 
-    const type = msg.type as string;
+    const type = message.type as string;
 
     switch (type) {
       case "peer-online":
@@ -174,12 +202,11 @@ export function useWebRTCCall({
         break;
 
       case "accept":
-        // Parent accepted — child creates and sends offer
         if (role === "child") {
           updateStatus("connecting");
           const stream = await getMic();
           const pc = createPeer();
-          stream.getTracks().forEach(t => pc.addTrack(t, stream));
+          stream.getTracks().forEach((track) => pc.addTrack(track, stream));
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
           sendSignal({ type: "offer", sdp: offer });
@@ -195,13 +222,13 @@ export function useWebRTCCall({
         break;
 
       case "offer":
-        // Parent receives offer → answer
         if (role === "parent") {
           updateStatus("connecting");
           const stream = await getMic();
           const pc = createPeer();
-          stream.getTracks().forEach(t => pc.addTrack(t, stream));
-          await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp as RTCSessionDescriptionInit));
+          stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+          await pc.setRemoteDescription(new RTCSessionDescription(message.sdp as RTCSessionDescriptionInit));
+          await flushPendingIceCandidates();
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           sendSignal({ type: "answer", sdp: answer });
@@ -209,21 +236,27 @@ export function useWebRTCCall({
         break;
 
       case "answer":
-        // Child receives answer
         if (role === "child" && pcRef.current) {
           await pcRef.current.setRemoteDescription(
-            new RTCSessionDescription(msg.sdp as RTCSessionDescriptionInit)
+            new RTCSessionDescription(message.sdp as RTCSessionDescriptionInit),
           );
+          await flushPendingIceCandidates();
         }
         break;
 
       case "ice-candidate":
-        if (pcRef.current && msg.candidate) {
+        if (message.candidate) {
+          const candidate = message.candidate as RTCIceCandidateInit;
+          if (!pcRef.current?.remoteDescription) {
+            pendingIceCandidates.current.push(candidate);
+            break;
+          }
+
           try {
-            await pcRef.current.addIceCandidate(
-              new RTCIceCandidate(msg.candidate as RTCIceCandidateInit)
-            );
-          } catch { /* ignore */ }
+            await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch {
+            // Ignore duplicate or stale ICE candidates.
+          }
         }
         break;
 
@@ -235,56 +268,76 @@ export function useWebRTCCall({
         break;
 
       case "error":
-        setError(msg.message as string);
+        setError(message.message as string);
         updateStatus("error");
-        setTimeout(() => { setError(null); updateStatus("ready"); }, 4000);
+        setTimeout(() => {
+          setError(null);
+          updateStatus("ready");
+        }, 4000);
         break;
     }
-  }, [role, getMic, createPeer, sendSignal, updateStatus, cleanupPeer, onIncomingCall, onCallEnded]);
+  }, [
+    cleanupPeer,
+    createPeer,
+    flushPendingIceCandidates,
+    getMic,
+    onCallEnded,
+    onIncomingCall,
+    role,
+    sendSignal,
+    updateStatus,
+  ]);
 
-  // ── Connect to signaling server ──────────────────────────────────────────
   const connect = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
     }
+
+    setPeerOnline(false);
     updateStatus("connecting-ws");
-    const ws = new WebSocket(`${signalingUrl}?role=${role}`);
+
+    const url = new URL(signalingUrl);
+    url.searchParams.set("role", role);
+    url.searchParams.set("room", room);
+    const ws = new WebSocket(url.toString());
     wsRef.current = ws;
 
-    ws.onopen = () => {
-      updateStatus("ready");
-      console.log(`[WebRTC] Connected to signaling as ${role}`);
-    };
-    ws.onmessage = (e) => handleMessage(e.data);
-    ws.onerror   = () => updateStatus("error");
-    ws.onclose   = () => {
+    ws.onopen = () => updateStatus("ready");
+    ws.onmessage = (event) => handleMessage(event.data);
+    ws.onerror = () => updateStatus("error");
+    ws.onclose = () => {
       if (statusRef.current !== "ended") {
         updateStatus("error");
-        // Reconnect after 3s
-        setTimeout(connect, 3000);
+        reconnectTimerRef.current = setTimeout(connect, 3000);
       }
     };
-  }, [signalingUrl, role, updateStatus, handleMessage]);
+  }, [handleMessage, role, room, signalingUrl, updateStatus]);
 
   useEffect(() => {
     connect();
     return () => {
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       wsRef.current?.close();
       cleanupPeer();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Create & attach remote audio element to DOM ─────────────────────────
   useEffect(() => {
     if (!remoteAudio.current) {
       const audio = document.createElement("audio");
       audio.autoplay = true;
-      audio.playsInline = true;
+      audio.setAttribute("playsinline", "true");
       audio.style.display = "none";
       document.body.appendChild(audio);
       remoteAudio.current = audio;
     }
+
     return () => {
       if (remoteAudio.current) {
         remoteAudio.current.srcObject = null;
@@ -293,8 +346,6 @@ export function useWebRTCCall({
       }
     };
   }, []);
-
-  // ── Public actions ────────────────────────────────────────────────────────
 
   const ringParent = useCallback(() => {
     if (statusRef.current !== "ready") return;
@@ -319,26 +370,24 @@ export function useWebRTCCall({
     updateStatus("ended");
     onCallEnded?.();
     setTimeout(() => updateStatus("ready"), 1500);
-  }, [sendSignal, cleanupPeer, updateStatus, onCallEnded]);
+  }, [cleanupPeer, onCallEnded, sendSignal, updateStatus]);
 
   const toggleMute = useCallback(() => {
-    localStream.current?.getAudioTracks().forEach(t => {
-      t.enabled = !t.enabled;
+    localStream.current?.getAudioTracks().forEach((track) => {
+      track.enabled = !track.enabled;
     });
-    setIsMuted(m => !m);
+    setIsMuted((muted) => !muted);
   }, []);
 
-  const formatDuration = (s: number) => {
-    const m = Math.floor(s / 60).toString().padStart(2, "0");
-    const sec = (s % 60).toString().padStart(2, "0");
-    return `${m}:${sec}`;
-  };
+  const durationFormatted = `${Math.floor(duration / 60).toString().padStart(2, "0")}:${(duration % 60)
+    .toString()
+    .padStart(2, "0")}`;
 
   return {
     status,
     isMuted,
     duration,
-    durationFormatted: formatDuration(duration),
+    durationFormatted,
     peerOnline,
     error,
     remoteAudioRef: remoteAudio,

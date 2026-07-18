@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PhoneOff, Mic, MicOff } from "lucide-react";
 import { useWebRTCCall } from "@/hooks/useWebRTCCall";
+import { getOrCreateDeviceId } from "@/lib/device-id";
 
 interface CallScreenProps {
   callee: "mom" | "dad";
@@ -10,17 +11,20 @@ interface CallScreenProps {
 }
 
 const SIGNALING_URL =
-  (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000")
+  (process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_MONTO_API_URL || "http://localhost:8000")
     .replace(/^http/, "ws") + "/ws/call";
 
 export function CallScreen({ callee, onEnd }: CallScreenProps) {
   const displayName = callee === "mom" ? "Mom 💜" : "Dad 💙";
   const avatar      = callee === "mom" ? "👩" : "👨";
 
+  const [deviceId] = useState(() => getOrCreateDeviceId());
+
   const { status, isMuted, durationFormatted, peerOnline, error,
           ringParent, hangUp, toggleMute } = useWebRTCCall({
     role: "child",
     signalingUrl: SIGNALING_URL,
+    room: deviceId,
     onCallEnded: onEnd,
   });
 
@@ -161,3 +165,4 @@ export function CallScreen({ callee, onEnd }: CallScreenProps) {
     </motion.div>
   );
 }
+

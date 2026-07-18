@@ -2,17 +2,18 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Volume2, VolumeX, Mic, Sparkles, MessageCircle, X, ChevronRight } from "lucide-react";
+import { Volume2, VolumeX, Mic, Sparkles, MessageCircle, X, ChevronRight, QrCode } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { HangingAvatar } from "@/components/HangingAvatar";
 import { CallScreen } from "@/components/CallScreen";
 import { SpiderWebOverlay } from "@/components/SpiderWebOverlay";
+import { PairingQRModal } from "@/components/PairingQRModal";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 import { useTTS } from "@/hooks/useTTS";
 import { useConversation } from "@/hooks/useConversation";
 import { useWakeWord } from "@/hooks/useWakeWord";
 import { sendVoiceQuery, checkHealth, APIError } from "@/lib/api";
-import { Emotion, RecordingState, Settings, VoiceQueryResponse } from "@/types";
+import { Character, Emotion, RecordingState, Settings, VoiceQueryResponse } from "@/types";
 import { cn } from "@/lib/utils";
 
 // ── Emotion config ────────────────────────────────────────────────────────────
@@ -84,13 +85,23 @@ export default function Home() {
   const [online, setOnline]           = useState<boolean | null>(null);
   const [autoSpeak, setAutoSpeak]     = useState(true);
   const [showChat, setShowChat]       = useState(false);
+  const [showPairing, setShowPairing] = useState(false);
   const [emojiBurst, setEmojiBurst]   = useState(0);
   const [lang, setLang]               = useState<"english" | "nepali">("english");
   const [greeting, setGreeting] = useState(GREETING_MESSAGES[0]);
+  const [character, setCharacter]     = useState<Character>("spiderman");
 
   useEffect(() => {
     // Pick random greeting client-side only — avoids hydration mismatch
     setGreeting(GREETING_MESSAGES[Math.floor(Math.random() * GREETING_MESSAGES.length)]);
+    // Restore last-chosen avatar
+    const saved = localStorage.getItem("monto_character");
+    if (saved === "spiderman" || saved === "messi") setCharacter(saved);
+  }, []);
+
+  const chooseCharacter = useCallback((c: Character) => {
+    setCharacter(c);
+    localStorage.setItem("monto_character", c);
   }, []);
 
   // ── Call state ─────────────────────────────────────────────────────────
@@ -374,18 +385,37 @@ export default function Home() {
           <div className="text-[9px] tracking-[0.3em] text-white/40 uppercase mt-0.5">Kids · AI Sathi ✦</div>
         </motion.div>
 
-        {/* Chat toggle */}
-        <motion.button
-          onClick={() => setShowChat(v => !v)}
-          className="w-9 h-9 rounded-full glass glass-border flex items-center justify-center"
-          whileTap={{ scale: 0.85 }}
-          initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}
-        >
-          {showChat
-            ? <X className="w-4 h-4 text-white/70" />
-            : <MessageCircle className="w-4 h-4 text-white/70" />}
-        </motion.button>
+        {/* Right-side actions */}
+        <div className="flex items-center gap-2">
+          {/* Pair with parent app (QR code) */}
+          <motion.button
+            onClick={() => setShowPairing(true)}
+            aria-label="Pair with parent app"
+            className="w-9 h-9 rounded-full glass glass-border flex items-center justify-center"
+            whileTap={{ scale: 0.85 }}
+            initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}
+          >
+            <QrCode className="w-4 h-4 text-white/70" />
+          </motion.button>
+
+          {/* Chat toggle */}
+          <motion.button
+            onClick={() => setShowChat(v => !v)}
+            className="w-9 h-9 rounded-full glass glass-border flex items-center justify-center"
+            whileTap={{ scale: 0.85 }}
+            initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}
+          >
+            {showChat
+              ? <X className="w-4 h-4 text-white/70" />
+              : <MessageCircle className="w-4 h-4 text-white/70" />}
+          </motion.button>
+        </div>
       </header>
+
+      {/* ── Pairing QR modal ────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showPairing && <PairingQRModal onClose={() => setShowPairing(false)} />}
+      </AnimatePresence>
 
       {/* ── Main ────────────────────────────────────────────────────────── */}
       <main className="relative z-10 flex-1 flex flex-col items-center px-5 pb-safe pb-6 max-w-md mx-auto w-full overflow-hidden">
@@ -394,6 +424,28 @@ export default function Home() {
             <motion.div key="voice" className="flex flex-col items-center w-full flex-1"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
 
+              {/* ── Character picker ─────────────────────────────────── */}
+              <div className="flex items-center gap-2 mt-1">
+                {([
+                  { id: "spiderman", label: "Spider-Man", emoji: "🕷️" },
+                  { id: "messi",     label: "Messi",      emoji: "⚽" },
+                ] as const).map((opt) => (
+                  <motion.button
+                    key={opt.id}
+                    onClick={() => chooseCharacter(opt.id)}
+                    className="h-9 px-3 rounded-2xl glass glass-border flex items-center gap-1.5 font-bold text-xs"
+                    style={{
+                      color: character === opt.id ? cfg.color : "rgba(255,255,255,0.4)",
+                      borderColor: character === opt.id ? `${cfg.color}60` : undefined,
+                    }}
+                    whileTap={{ scale: 0.9 }}
+                  >
+                    <span className="text-sm">{opt.emoji}</span>
+                    <span>{opt.label}</span>
+                  </motion.button>
+                ))}
+              </div>
+
               {/* ── Avatar area ──────────────────────────────────────── */}
               <div className="relative flex items-center justify-center mt-2 mb-2">
                 <motion.div
@@ -401,12 +453,16 @@ export default function Home() {
                   animate={isRec ? { scale: [1, 1.03, 1] } : {}}
                   transition={{ duration: 0.3, repeat: Infinity }}
                 >
-                  <HangingAvatar
-                    emotion={isSpeaking ? "talking" : emotion}
-                    size={220}
-                    isListening={isRec}
-                    isSpeaking={isSpeaking}
-                  />
+                  {character === "spiderman" ? (
+                    <HangingAvatar
+                      emotion={isSpeaking ? "talking" : emotion}
+                      size={220}
+                      isListening={isRec}
+                      isSpeaking={isSpeaking}
+                    />
+                  ) : (
+                    <Avatar emotion={isSpeaking ? "talking" : emotion} character={character} size={220} />
+                  )}
                 </motion.div>
               </div>
 

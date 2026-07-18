@@ -123,9 +123,16 @@ Or open `http://YOUR_SERVER_IP:3001` → click **SIP Settings** to update in the
 | 8088 | TCP | Asterisk WebSocket | Browser (JsSIP) |
 | 5038 | TCP | Asterisk AMI | Backend (internal) |
 | 10000–20000 | UDP | RTP audio | Both peers |
+| 3478 | UDP/TCP | Coturn STUN/TURN | Parent + child browsers (NAT traversal) |
+| 49152–49172 | UDP | Coturn relay range | Parent + child browsers (TURN fallback media) |
 | 8000 | TCP | Monto backend | Everything |
 | 3000 | TCP | Monto frontend | Child browser |
 | 3001 | TCP | Parent app | Parent browser |
+
+**Note:** the actual child↔parent calling feature (`/ws/call`) is a separate, simpler
+WebRTC + WebSocket signaling path (see `backend/routes/signaling.py`), not the
+Asterisk SIP stack described in the rest of this document — Asterisk is currently
+unused by the live call UI. The Coturn ports above matter for *that* calling path.
 
 ---
 

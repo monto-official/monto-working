@@ -26,6 +26,7 @@ from routes.voice  import router as voice_router
 from routes.tts    import router as tts_router
 from routes.call   import router as call_router
 from routes.signaling import router as signaling_router
+from routes.pairing import router as pairing_router
 from services.stt_service import STTService
 from services.llm_service import LLMService
 from services.tts_service import TTSService
@@ -92,6 +93,7 @@ app.include_router(voice_router)
 app.include_router(tts_router)
 app.include_router(call_router)
 app.include_router(signaling_router)
+app.include_router(pairing_router)
 
 
 @app.get("/health", response_model=HealthResponse)
