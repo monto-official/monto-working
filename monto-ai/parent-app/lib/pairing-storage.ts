@@ -1,0 +1,102 @@
+import { getOrCreateParentDeviceId } from "./device-id";
+
+const STORAGE_KEY = "monto_pairing";
+
+export interface PairingData {
+  deviceId: string;
+  apiUrl: string;
+  turnUrl?: string;
+  turnUsername?: string;
+  turnPassword?: string;
+}
+
+export function loadPairing(): PairingData | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (typeof data?.deviceId !== "string" || typeof data?.apiUrl !== "string") return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export function savePairing(data: PairingData): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+export function clearPairing(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(STORAGE_KEY);
+}
+
+/** Parses a legacy v1 QR payload (credentials embedded directly, no backend
+ * round trip). Kept only as a fallback for old child-app builds. */
+export function parsePairingPayload(raw: string): PairingData | null {
+  try {
+    const obj = JSON.parse(raw);
+    if (obj?.v === 1 && typeof obj.id === "string" && typeof obj.api === "string") {
+      return {
+        deviceId: obj.id,
+        apiUrl: obj.api,
+        turnUrl: typeof obj.turnUrl === "string" ? obj.turnUrl : undefined,
+        turnUsername: typeof obj.turnUsername === "string" ? obj.turnUsername : undefined,
+        turnPassword: typeof obj.turnPassword === "string" ? obj.turnPassword : undefined,
+      };
+    }
+  } catch {
+    /* not JSON, or not a Monto pairing code */
+  }
+  return null;
+}
+
+/**
+ * Redeems a scanned QR payload from the current child app (PairingQRModal),
+ * which carries only a short-lived code — this exchanges it with the backend
+ * (Supabase-backed /pairing/redeem) for the real connection info and records
+ * the pairing server-side. Falls back to the legacy v1 direct-embed format
+ * if present, with no server round trip.
+ */
+export async function redeemPairingCode(raw: string): Promise<PairingData> {
+  let obj: any;
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    throw new Error("That doesn't look like a Monto pairing code — try again.");
+  }
+
+  if (obj?.v === 1) {
+    const legacy = parsePairingPayload(raw);
+    if (!legacy) throw new Error("That doesn't look like a Monto pairing code — try again.");
+    return legacy;
+  }
+
+  if (obj?.v !== 2 || typeof obj.code !== "string" || typeof obj.api !== "string") {
+    throw new Error("That doesn't look like a Monto pairing code — try again.");
+  }
+
+  const res = await fetch(`${obj.api}/pairing/redeem`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      code: obj.code,
+      parent_device_id: getOrCreateParentDeviceId(),
+    }),
+  });
+
+  if (res.status === 404) throw new Error("Pairing code not found — ask the child app to show a fresh QR code.");
+  if (res.status === 410) throw new Error("That QR code expired — ask the child app to show a fresh one.");
+  if (!res.ok) throw new Error(`Couldn't reach the server (HTTP ${res.status}). Check your connection.`);
+
+  const data = await res.json();
+  return {
+    deviceId: data.child_device_id,
+    apiUrl: data.api_url,
+    turnUrl: data.turn_url ?? undefined,
+    turnUsername: data.turn_username ?? undefined,
+    turnPassword: data.turn_password ?? undefined,
+  };
+}

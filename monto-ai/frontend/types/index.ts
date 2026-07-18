@@ -7,6 +7,8 @@ export type Emotion =
   | "neutral"
   | "talking";
 
+export type Character = "spiderman" | "messi";
+
 export type Animation =
   | "smile"
   | "thinking"

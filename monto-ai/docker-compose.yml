@@ -3,6 +3,10 @@
 #
 # Services:
 #   asterisk   — Asterisk PBX (SIP server) — handles all VoIP routing
+#   coturn     — STUN/TURN server — lets calls connect when child + parent are
+#                on different networks (mobile data, different Wi-Fi, behind
+#                strict/symmetric NAT). Without this, calls only work when
+#                both sides can reach each other directly (same LAN).
 #   backend    — FastAPI AI backend (STT + LLM + TTS + call routes)
 #   frontend   — Monto AI chat UI (Next.js, port 3000)
 #   parent-app — Parent calling app  (Next.js, port 3001)
@@ -41,6 +45,29 @@ services:
       timeout: 10s
       retries: 5
       start_period: 15s
+
+  # ── Coturn (STUN/TURN — NAT traversal for cross-network calls) ──────────────
+  coturn:
+    image: coturn/coturn:latest
+    container_name: monto-coturn
+    restart: unless-stopped
+    # host networking so the relay port range doesn't need 100+ individual
+    # port mappings — same reasoning as the asterisk service above.
+    network_mode: host
+    command: >
+      -n
+      --listening-port=3478
+      --fingerprint
+      --lt-cred-mech
+      --user=${TURN_USERNAME:-montoturn}:${TURN_PASSWORD:-montoturnpass123}
+      --realm=${TURN_REALM:-monto.local}
+      --external-ip=${SERVER_IP:-127.0.0.1}
+      --min-port=49152
+      --max-port=49172
+      --no-cli
+      --no-tls
+      --no-dtls
+      --log-file=stdout
 
   # ── FastAPI Backend ──────────────────────────────────────────────────────────
   backend:
@@ -84,6 +111,12 @@ services:
       - "3000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://${SERVER_IP:-127.0.0.1}:8000
+      - NEXT_PUBLIC_TURN_URL=turn:${SERVER_IP:-127.0.0.1}:3478
+      - NEXT_PUBLIC_TURN_USERNAME=${TURN_USERNAME:-montoturn}
+      - NEXT_PUBLIC_TURN_PASSWORD=${TURN_PASSWORD:-montoturnpass123}
+      # Pairing/sync ID shared with parent-app so calls only connect to your
+      # own family's device (see MONTO_DEVICE_ID in .env).
+      - NEXT_PUBLIC_DEVICE_ID=${MONTO_DEVICE_ID:-monto-room}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000"]
       interval: 30s
@@ -108,6 +141,10 @@ services:
       - NEXT_PUBLIC_SIP_DOMAIN=${SERVER_IP:-127.0.0.1}
       - NEXT_PUBLIC_MONTO_BOX_EXTENSION=${MONTO_EXTENSION:-monto}
       - NEXT_PUBLIC_MONTO_API_URL=http://${SERVER_IP:-127.0.0.1}:8000
+      - NEXT_PUBLIC_TURN_URL=turn:${SERVER_IP:-127.0.0.1}:3478
+      - NEXT_PUBLIC_TURN_USERNAME=${TURN_USERNAME:-montoturn}
+      - NEXT_PUBLIC_TURN_PASSWORD=${TURN_PASSWORD:-montoturnpass123}
+      - NEXT_PUBLIC_DEVICE_ID=${MONTO_DEVICE_ID:-monto-room}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3001"]
       interval: 30s

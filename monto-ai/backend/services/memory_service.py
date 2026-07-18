@@ -1,8 +1,10 @@
 """
 Persistent Conversation Memory Service
 ---------------------------------------
-Stores all conversations in a SQLite database so Monto remembers
-everything even after server restarts or Pi reboots.
+Stores all conversations in Supabase (Postgres) so Monto remembers
+everything even after server restarts or Pi reboots — and so memory is
+shared across every machine hitting the same Supabase project, not just
+whichever disk the SQLite file happened to live on.
 
 What is stored per session:
   - Every message (user + Monto)
@@ -15,57 +17,23 @@ Two layers of memory:
   2. LONG-TERM FACTS — child's name, age, interests, extracted and injected
                        into every prompt so Monto always knows who it's talking to
 """
-import os
 import re
-import time
 import json
-import sqlite3
 import logging
-import threading
-from typing import List, Dict, Optional
+from typing import List
+
+from services.supabase_client import get_supabase
 
 logger = logging.getLogger(__name__)
 
-DB_PATH             = "monto_memory.db"   # overridden by MEMORY_DB_PATH env var
 MAX_RECENT_MESSAGES = 20
-MAX_STORED_MESSAGES = 500
+# MAX_STORED_MESSAGES pruning to 500 per session is enforced by a DB trigger
+# (see backend/supabase/schema.sql) rather than in application code.
 
 
 class PersistentMemory:
-    def __init__(self, db_path: str = None):
-        # Read env at init time (after load_dotenv has run in main.py)
-        self.db_path = db_path or os.getenv("MEMORY_DB_PATH", DB_PATH)
-        self._lock   = threading.Lock()
-        self._init_db()
-        logger.info(f"✅ Persistent memory ready → {self.db_path}")
-
-    # ── DB SETUP ──────────────────────────────────────────────────────────────
-
-    def _init_db(self):
-        with self._get_conn() as conn:
-            conn.executescript("""
-                CREATE TABLE IF NOT EXISTS messages (
-                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id  TEXT    NOT NULL,
-                    role        TEXT    NOT NULL,   -- 'user' or 'assistant'
-                    content     TEXT    NOT NULL,
-                    timestamp   REAL    NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS session_facts (
-                    session_id  TEXT PRIMARY KEY,
-                    facts_json  TEXT NOT NULL DEFAULT '{}',
-                    updated_at  REAL NOT NULL
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_messages_session
-                    ON messages(session_id, timestamp);
-            """)
-
-    def _get_conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def __init__(self):
+        logger.info("✅ Persistent memory ready → Supabase (memory_messages)")
 
     # ── PUBLIC API ────────────────────────────────────────────────────────────
 
@@ -74,15 +42,16 @@ class PersistentMemory:
         Returns the last MAX_RECENT_MESSAGES messages for this session.
         Used as context window sent to the LLM.
         """
-        with self._lock:
-            with self._get_conn() as conn:
-                rows = conn.execute("""
-                    SELECT role, content FROM messages
-                    WHERE session_id = ?
-                    ORDER BY timestamp DESC
-                    LIMIT ?
-                """, (session_id, MAX_RECENT_MESSAGES)).fetchall()
-
+        db = get_supabase()
+        res = (
+            db.table("memory_messages")
+            .select("role, content")
+            .eq("session_id", session_id)
+            .order("created_at", desc=True)
+            .limit(MAX_RECENT_MESSAGES)
+            .execute()
+        )
+        rows = res.data or []
         # Reverse to chronological order
         return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
 
@@ -93,26 +62,11 @@ class PersistentMemory:
         # Guard: if assistant_text is JSON, extract the response field
         clean_text = self._ensure_plain_text(assistant_text)
 
-        now = time.time()
-        with self._lock:
-            with self._get_conn() as conn:
-                conn.executemany(
-                    "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?,?,?,?)",
-                    [
-                        (session_id, "user",      user_text,   now),
-                        (session_id, "assistant",  clean_text,  now + 0.001),
-                    ]
-                )
-                # Prune oldest messages if session is too long
-                conn.execute("""
-                    DELETE FROM messages
-                    WHERE session_id = ? AND id NOT IN (
-                        SELECT id FROM messages
-                        WHERE session_id = ?
-                        ORDER BY timestamp DESC
-                        LIMIT ?
-                    )
-                """, (session_id, session_id, MAX_STORED_MESSAGES))
+        db = get_supabase()
+        db.table("memory_messages").insert([
+            {"session_id": session_id, "role": "user", "content": user_text},
+            {"session_id": session_id, "role": "assistant", "content": clean_text},
+        ]).execute()
 
         # Extract and save any new facts (name, age, etc.)
         self._extract_facts(session_id, user_text, assistant_text)
@@ -121,14 +75,16 @@ class PersistentMemory:
 
     def get_facts(self, session_id: str) -> dict:
         """Return known facts about the child for this session."""
-        with self._lock:
-            with self._get_conn() as conn:
-                row = conn.execute(
-                    "SELECT facts_json FROM session_facts WHERE session_id = ?",
-                    (session_id,)
-                ).fetchone()
-        if row:
-            return json.loads(row["facts_json"])
+        db = get_supabase()
+        res = (
+            db.table("session_facts")
+            .select("facts")
+            .eq("session_id", session_id)
+            .limit(1)
+            .execute()
+        )
+        if res.data:
+            return res.data[0]["facts"] or {}
         return {}
 
     def get_facts_prompt(self, session_id: str) -> str:
@@ -163,43 +119,48 @@ class PersistentMemory:
 
     def clear(self, session_id: str):
         """Clear all memory for a session."""
-        with self._lock:
-            with self._get_conn() as conn:
-                conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
-                conn.execute("DELETE FROM session_facts WHERE session_id = ?", (session_id,))
+        db = get_supabase()
+        db.table("memory_messages").delete().eq("session_id", session_id).execute()
+        db.table("session_facts").delete().eq("session_id", session_id).execute()
         logger.info(f"Memory [{session_id}]: cleared")
 
     def get_all_sessions(self) -> List[str]:
         """List all session IDs that have stored messages."""
-        with self._lock:
-            with self._get_conn() as conn:
-                rows = conn.execute(
-                    "SELECT DISTINCT session_id FROM messages"
-                ).fetchall()
-        return [r["session_id"] for r in rows]
+        db = get_supabase()
+        res = db.table("memory_messages").select("session_id").execute()
+        return sorted({r["session_id"] for r in (res.data or [])})
 
     def get_session_summary(self, session_id: str) -> dict:
         """Stats about a session — useful for debugging."""
-        with self._lock:
-            with self._get_conn() as conn:
-                count = conn.execute(
-                    "SELECT COUNT(*) as c FROM messages WHERE session_id = ?",
-                    (session_id,)
-                ).fetchone()["c"]
-                first = conn.execute(
-                    "SELECT timestamp FROM messages WHERE session_id = ? ORDER BY timestamp ASC LIMIT 1",
-                    (session_id,)
-                ).fetchone()
-                last = conn.execute(
-                    "SELECT timestamp FROM messages WHERE session_id = ? ORDER BY timestamp DESC LIMIT 1",
-                    (session_id,)
-                ).fetchone()
+        db = get_supabase()
+        count_res = (
+            db.table("memory_messages")
+            .select("id", count="exact")
+            .eq("session_id", session_id)
+            .execute()
+        )
+        first_res = (
+            db.table("memory_messages")
+            .select("created_at")
+            .eq("session_id", session_id)
+            .order("created_at", desc=False)
+            .limit(1)
+            .execute()
+        )
+        last_res = (
+            db.table("memory_messages")
+            .select("created_at")
+            .eq("session_id", session_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
         return {
-            "session_id":    session_id,
-            "total_messages": count,
-            "first_message":  first["timestamp"] if first else None,
-            "last_message":   last["timestamp"]  if last  else None,
-            "facts":          self.get_facts(session_id),
+            "session_id":      session_id,
+            "total_messages":  count_res.count or 0,
+            "first_message":   first_res.data[0]["created_at"] if first_res.data else None,
+            "last_message":    last_res.data[0]["created_at"] if last_res.data else None,
+            "facts":           self.get_facts(session_id),
         }
 
     # ── FACT EXTRACTION ───────────────────────────────────────────────────────
@@ -282,16 +243,11 @@ class PersistentMemory:
             changed = True
 
         if changed:
-            now = time.time()
-            with self._lock:
-                with self._get_conn() as conn:
-                    conn.execute("""
-                        INSERT INTO session_facts (session_id, facts_json, updated_at)
-                        VALUES (?, ?, ?)
-                        ON CONFLICT(session_id) DO UPDATE SET
-                            facts_json = excluded.facts_json,
-                            updated_at = excluded.updated_at
-                    """, (session_id, json.dumps(facts), now))
+            db = get_supabase()
+            db.table("session_facts").upsert({
+                "session_id": session_id,
+                "facts": facts,
+            }).execute()
 
 
 # ── GLOBAL INSTANCE ───────────────────────────────────────────────────────────

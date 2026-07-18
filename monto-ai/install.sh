@@ -83,9 +83,13 @@ if command -v ufw &>/dev/null; then
     ufw allow 3001/tcp   comment "Monto parent app"           2>/dev/null || true
     # RTP media range
     ufw allow 10000:20000/udp comment "Asterisk RTP"          2>/dev/null || true
+    # Coturn (STUN/TURN — required for calls across different networks)
+    ufw allow 3478/udp   comment "Coturn STUN/TURN"          2>/dev/null || true
+    ufw allow 3478/tcp   comment "Coturn STUN/TURN"          2>/dev/null || true
+    ufw allow 49152:49172/udp comment "Coturn relay range"   2>/dev/null || true
     success "Firewall rules added"
 else
-    warn "ufw not found — skipping firewall config. Open ports manually: 5060/udp, 8088/tcp, 8000/tcp, 3000/tcp, 3001/tcp, 10000-20000/udp"
+    warn "ufw not found — skipping firewall config. Open ports manually: 5060/udp, 8088/tcp, 8000/tcp, 3000/tcp, 3001/tcp, 10000-20000/udp, 3478/udp, 3478/tcp, 49152-49172/udp"
 fi
 
 # ── 6. Build and start containers ─────────────────────────────────────────────
