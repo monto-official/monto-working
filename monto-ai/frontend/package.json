@@ -20,6 +20,8 @@
     "@capacitor/status-bar": "^8.0.2",
     "@picovoice/porcupine-web": "^4.0.1",
     "@picovoice/web-voice-processor": "^4.0.10",
+    "@tensorflow-models/speech-commands": "^0.5.4",
+    "@tensorflow/tfjs": "^4.22.0",
     "clsx": "^2.1.1",
     "framer-motion": "^11.15.0",
     "lucide-react": "^0.475.0",

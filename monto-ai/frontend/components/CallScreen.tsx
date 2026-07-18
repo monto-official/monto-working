@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { PhoneOff, Mic, MicOff } from "lucide-react";
 import { useWebRTCCall } from "@/hooks/useWebRTCCall";
 import { getOrCreateDeviceId } from "@/lib/device-id";
+import { useCallCutDetector } from "@/hooks/useCallCutDetector";
 
 interface CallScreenProps {
   callee: "mom" | "dad";
@@ -26,6 +27,16 @@ export function CallScreen({ callee, onEnd }: CallScreenProps) {
     signalingUrl: SIGNALING_URL,
     room: deviceId,
     onCallEnded: onEnd,
+  });
+
+  // ── "Cut the call" voice command detector ────────────────────────────────
+  // Listens for the child saying "cut the call" and auto-hangs up
+  useCallCutDetector({
+    enabled: status === "connected" || status === "ringing",
+    onCut: () => {
+      console.log("[CallScreen] Voice command: cut the call");
+      hangUp();
+    },
   });
 
   // Auto-ring once ready
