@@ -19,7 +19,7 @@ export default function MonitorPage() {
       const id = `call-${++counter}`;
       const t = new Date(); const start = performance.now();
       try {
-        const res = await fetch(`http://localhost:8000${path}`, { cache: "no-store" });
+        const res = await fetch(`/api/backend${path}`, { cache: "no-store" });
         const dur = Math.round(performance.now() - start);
         if (path === "/health") { setBackendOnline(res.ok); setResponseTime(dur); if (res.ok) setHealthData(await res.json()); }
         callsRef.current = [{ id, timestamp: t, method: "GET", endpoint: path, status: res.status, duration: dur, error: null }, ...callsRef.current].slice(0, 50);

@@ -20,6 +20,8 @@ import os
 import io
 import asyncio
 import logging
+import re
+import unicodedata
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,23 @@ logger = logging.getLogger(__name__)
 def _is_nepali(text: str) -> bool:
     """Detect Devanagari script in text."""
     return any('\u0900' <= ch <= '\u097F' for ch in text)
+
+def _strip_voice_tag(text: str) -> str:
+    """Remove a leading Eleven v3 tag before non-v3 fallback synthesis."""
+    return re.sub(r"^\s*\[[a-zA-Z ]+\]\s*", "", text, count=1)
+
+
+def _prepare_spoken_text(text: str) -> str:
+    """Turn display-oriented AI text into clean text for speech."""
+    text = unicodedata.normalize("NFC", _strip_voice_tag(text))
+    text = re.sub(r"https?://\S+", " link ", text)
+    text = re.sub(r"[*_`#]+", "", text)
+    # Emoji and pictographs can be verbalized inconsistently by providers.
+    text = re.sub(r"[\U0001F000-\U0001FAFF\U00002600-\U000027BF]", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        raise ValueError("Text contains no speakable content")
+    return text
 
 
 class TTSService:
@@ -63,25 +82,26 @@ class TTSService:
                 logger.info(f"✅ TTS: ElevenLabs(EN) + Edge TTS(NE)")
 
     def _init_elevenlabs(self, api_key: str):
-        from elevenlabs.client import AsyncElevenLabs
         from elevenlabs import VoiceSettings
-        self._el          = AsyncElevenLabs(api_key=api_key)
-        self._model_id    = "eleven_turbo_v2_5"
-        self._voice_map   = {
+        from services.elevenlabs_manager import ElevenLabsManager
+
+        configured_keys = [api_key, *ElevenLabsManager.load_api_keys()]
+        self._elevenlabs = ElevenLabsManager(api_keys=configured_keys)
+        self._model_id = self._elevenlabs.model_id
+        self._voice_map = {
             "female": os.getenv("TTS_VOICE_FEMALE", "EXAVITQu4vr4xnSDxMaL"),
-            "male":   os.getenv("TTS_VOICE_MALE",   "TxGEqnHWrfWFTfGW9XjX"),
-            "monto":  os.getenv("TTS_VOICE_MONTO",  "EXAVITQu4vr4xnSDxMaL"),
+            "male": os.getenv("TTS_VOICE_MALE", "TxGEqnHWrfWFTfGW9XjX"),
+            "monto": os.getenv("TTS_VOICE_MONTO", os.getenv("ELEVENLABS_VOICE_ID", "Dk3lflqf310KiWVmwB9F")),
         }
         self._emotion_settings = {
-            "happy":     VoiceSettings(stability=0.45, similarity_boost=0.80, style=0.35, use_speaker_boost=True),
-            "excited":   VoiceSettings(stability=0.38, similarity_boost=0.78, style=0.50, use_speaker_boost=True),
-            "sad":       VoiceSettings(stability=0.70, similarity_boost=0.85, style=0.10, use_speaker_boost=True),
-            "thinking":  VoiceSettings(stability=0.60, similarity_boost=0.80, style=0.20, use_speaker_boost=True),
+            "happy": VoiceSettings(stability=0.45, similarity_boost=0.80, style=0.35, use_speaker_boost=True),
+            "excited": VoiceSettings(stability=0.38, similarity_boost=0.78, style=0.50, use_speaker_boost=True),
+            "sad": VoiceSettings(stability=0.70, similarity_boost=0.85, style=0.10, use_speaker_boost=True),
+            "thinking": VoiceSettings(stability=0.60, similarity_boost=0.80, style=0.20, use_speaker_boost=True),
             "surprised": VoiceSettings(stability=0.35, similarity_boost=0.78, style=0.55, use_speaker_boost=True),
-            "neutral":   VoiceSettings(stability=0.55, similarity_boost=0.80, style=0.20, use_speaker_boost=True),
+            "neutral": VoiceSettings(stability=0.55, similarity_boost=0.80, style=0.20, use_speaker_boost=True),
         }
-        self._has_elevenlabs = True
-
+        self._has_elevenlabs = self._elevenlabs.available
     # ── PUBLIC ────────────────────────────────────────────────────────────────
 
     async def synthesize(
@@ -94,22 +114,30 @@ class TTSService:
         if not text.strip():
             raise ValueError("Empty text")
 
-        # Gentle pause for calm emotions
-        if emotion in ("sad", "thinking"):
-            text = f"... {text}"
+        text = _prepare_spoken_text(text)
 
         # Detect language
         nepali = language == "nepali" or _is_nepali(text)
 
+        # ElevenLabs v3 is multilingual and understands expressive tags, so
+        # prefer it in cloud mode for both Nepali and English.
+        if nepali and not self.use_local and getattr(self, "_has_elevenlabs", False):
+            try:
+                result = await self._synthesize_elevenlabs(text, voice, emotion, "ne")
+                self.audio_format = "audio/mpeg"
+                return result
+            except Exception as exc:
+                logger.warning("ElevenLabs Nepali failed (%s) — using Nepali fallbacks", exc)
+
         if nepali:
             return await self._synthesize_nepali_with_fallback(text)
-        else:
-            return await self._synthesize_english(text, voice, emotion)
+        return await self._synthesize_english(text, voice, emotion)
 
     # ── NEPALI ────────────────────────────────────────────────────────────────
 
     async def _synthesize_nepali_with_fallback(self, text: str) -> bytes:
         """Nepali TTS: GPU server → Edge TTS → gTTS fallback."""
+        text = _strip_voice_tag(text)
 
         # 1. Try GPU Nepali server (has Edge TTS inside)
         if self.use_local:
@@ -188,7 +216,7 @@ class TTSService:
         # ElevenLabs
         if getattr(self, "_has_elevenlabs", False):
             try:
-                result = await self._synthesize_elevenlabs(text, voice, emotion)
+                result = await self._synthesize_elevenlabs(text, voice, emotion, "en")
                 self.audio_format = "audio/mpeg"
                 return result
             except Exception as e:
@@ -196,7 +224,7 @@ class TTSService:
 
         # Edge TTS English fallback
         try:
-            result = await self._synthesize_edge_tts(text, "en-US-AriaNeural")
+            result = await self._synthesize_edge_tts(_strip_voice_tag(text), "en-US-AriaNeural")
             self.audio_format = "audio/mpeg"
             logger.info(f"Edge TTS English fallback: {len(result)} bytes")
             return result
@@ -209,24 +237,22 @@ class TTSService:
             resp = await client.post(
                 f"{self.piper_url}/v1/tts/synthesize",
                 headers={"Authorization": f"Bearer {self.gpu_key}"},
-                json={"text": text, "voice": piper_voice, "emotion": emotion},
+                json={"text": _strip_voice_tag(text), "voice": piper_voice, "emotion": emotion},
             )
             resp.raise_for_status()
             logger.info(f"Piper TTS [{emotion}]: {len(resp.content)} bytes")
             return resp.content
 
-    async def _synthesize_elevenlabs(self, text: str, voice: str, emotion: str) -> bytes:
+    async def _synthesize_elevenlabs(
+        self, text: str, voice: str, emotion: str, language_code: str
+    ) -> bytes:
         voice_id = self._voice_map.get(voice, self._voice_map["monto"])
         settings = self._emotion_settings.get(emotion, self._emotion_settings["neutral"])
-        audio_bytes = b""
-        async for chunk in self._el.text_to_speech.convert(
+        audio_bytes = await self._elevenlabs.generate(
+            text,
             voice_id=voice_id,
-            text=text,
-            model_id=self._model_id,
             voice_settings=settings,
-            output_format="mp3_44100_128",
-        ):
-            if chunk:
-                audio_bytes += chunk
+            language_code=language_code,
+        )
         logger.info(f"ElevenLabs TTS [{emotion}]: {len(audio_bytes)} bytes")
         return audio_bytes

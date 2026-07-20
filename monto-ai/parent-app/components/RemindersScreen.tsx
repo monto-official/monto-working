@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, Sun, BookOpen, Brain, Moon, Droplets, Sparkles, Clock, MoreVertical } from "lucide-react";
 import { toast } from "sonner";
 import { PhoneShell } from "@/components/PhoneShell";
@@ -10,6 +10,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Modal } from "@/components/ui/modal";
+import { loadPairing, type PairingData } from "@/lib/pairing-storage";
+import {
+  listReminders,
+  createReminder,
+  updateReminder,
+  deleteReminder,
+  type Reminder as ApiReminder,
+} from "@/lib/api-client";
 
 const presets = [
   { label: "Wake Up", icon: Sun },
@@ -24,40 +32,109 @@ const presets = [
 
 const days = ["S", "M", "T", "W", "T", "F", "S"];
 
-type Reminder = { id: string; name: string; time: string; days: string; active: boolean; icon: typeof Sun };
+/** Best-effort preset icon lookup from a saved reminder's label, since the
+ * backend only stores plain fields (no icon). Falls back to a generic clock. */
+function iconForLabel(label: string) {
+  const preset = presets.find((p) => p.label === label);
+  return preset?.icon ?? Clock;
+}
 
-const initial: Reminder[] = [
-  { id: "1", name: "Wake Up", time: "07:00 AM", days: "Mon–Fri", active: true, icon: Sun },
-  { id: "2", name: "Homework Time", time: "04:30 PM", days: "Mon–Fri", active: true, icon: BookOpen },
-  { id: "3", name: "Reading Time", time: "07:00 PM", days: "Daily", active: false, icon: BookOpen },
-  { id: "4", name: "Bed Time", time: "09:30 PM", days: "Daily", active: true, icon: Moon },
-];
+function daysSummary(daysOfWeek: number[]): string {
+  if (daysOfWeek.length === 7) return "Daily";
+  if (
+    daysOfWeek.length === 5 &&
+    [1, 2, 3, 4, 5].every((d) => daysOfWeek.includes(d))
+  ) {
+    return "Mon–Fri";
+  }
+  return "Custom";
+}
 
 export function RemindersScreen() {
-  const [list, setList] = useState<Reminder[]>(initial);
+  // undefined = pairing not checked yet, null = checked and none saved
+  const [pairing, setPairing] = useState<PairingData | null | undefined>(undefined);
+  const [list, setList] = useState<ApiReminder[]>([]);
+  const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<(typeof presets)[number]["label"]>("Wake Up");
   const [name, setName] = useState("");
   const [time, setTime] = useState("07:00");
   const [picked, setPicked] = useState<number[]>([1, 2, 3, 4, 5]);
 
+  useEffect(() => {
+    setPairing(loadPairing());
+  }, []);
+
+  useEffect(() => {
+    if (!pairing) return;
+    let active = true;
+    setLoading(true);
+    listReminders(pairing)
+      .then((data) => {
+        if (active) setList(data);
+      })
+      .catch((err) => {
+        if (active) toast.error(err instanceof Error ? err.message : "Couldn't load reminders");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [pairing]);
+
   const togglePick = (i: number) => setPicked((p) => (p.includes(i) ? p.filter((x) => x !== i) : [...p, i]));
 
-  const save = () => {
-    setList((l) => [
-      {
-        id: String(l.length + 1),
-        name: name || selected,
+  const save = async () => {
+    if (!pairing) {
+      toast.error("Pair with your child's Monto box first.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const created = await createReminder(pairing, {
+        label: name || selected,
         time,
-        days: picked.length === 7 ? "Daily" : "Custom",
+        days_of_week: [...picked].sort((a, b) => a - b),
         active: true,
-        icon: presets.find((p) => p.label === selected)?.icon ?? Clock,
-      },
-      ...l,
-    ]);
-    toast.success("Reminder saved");
-    setOpen(false);
-    setName("");
+      });
+      setList((l) => [created, ...l]);
+      toast.success("Reminder saved");
+      setOpen(false);
+      setName("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't save reminder");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleActive = async (r: ApiReminder, v: boolean) => {
+    if (!pairing) return;
+    setList((l) => l.map((x) => (x.id === r.id ? { ...x, active: v } : x)));
+    try {
+      await updateReminder(pairing, r.id, { active: v });
+    } catch (err) {
+      // Revert on failure.
+      setList((l) => l.map((x) => (x.id === r.id ? { ...x, active: !v } : x)));
+      toast.error(err instanceof Error ? err.message : "Couldn't update reminder");
+    }
+  };
+
+  const remove = async (r: ApiReminder) => {
+    if (!pairing) return;
+    if (!window.confirm(`Delete "${r.label}"?`)) return;
+    const previous = list;
+    setList((l) => l.filter((x) => x.id !== r.id));
+    try {
+      await deleteReminder(pairing, r.id);
+      toast.success("Reminder deleted");
+    } catch (err) {
+      setList(previous);
+      toast.error(err instanceof Error ? err.message : "Couldn't delete reminder");
+    }
   };
 
   return (
@@ -131,8 +208,8 @@ export function RemindersScreen() {
               ))}
             </div>
           </div>
-          <Button onClick={save} className="w-full h-11 rounded-2xl">
-            Save Reminder
+          <Button onClick={save} disabled={saving} className="w-full h-11 rounded-2xl">
+            {saving ? "Saving..." : "Save Reminder"}
           </Button>
         </div>
       </Modal>
@@ -144,30 +221,42 @@ export function RemindersScreen() {
           <p className="text-xs text-muted-foreground mt-1">Keeping your child on track all day.</p>
         </div>
 
-        {list.map((r) => (
-          <div key={r.id} className="rounded-3xl bg-card border p-4 shadow-card flex items-center gap-3">
-            <div
-              className={`size-12 rounded-2xl flex items-center justify-center ${
-                r.active ? "brand-gradient text-white" : "bg-muted text-muted-foreground"
-              }`}
-            >
-              <r.icon className="size-5" />
+        {pairing === null && (
+          <p className="text-sm text-muted-foreground text-center py-6">
+            Pair with your child's Monto box to manage reminders.
+          </p>
+        )}
+        {pairing && loading && (
+          <p className="text-sm text-muted-foreground text-center py-6">Loading...</p>
+        )}
+
+        {list.map((r) => {
+          const Icon = iconForLabel(r.label);
+          return (
+            <div key={r.id} className="rounded-3xl bg-card border p-4 shadow-card flex items-center gap-3">
+              <div
+                className={`size-12 rounded-2xl flex items-center justify-center ${
+                  r.active ? "brand-gradient text-white" : "bg-muted text-muted-foreground"
+                }`}
+              >
+                <Icon className="size-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-sm">{r.label}</p>
+                <p className="text-xs text-muted-foreground">
+                  {r.time} • {daysSummary(r.days_of_week)}
+                </p>
+              </div>
+              <Switch checked={r.active} onCheckedChange={(v) => toggleActive(r, v)} />
+              <button
+                onClick={() => remove(r)}
+                className="size-8 rounded-full hover:bg-muted flex items-center justify-center"
+              >
+                <MoreVertical className="size-4 text-muted-foreground" />
+              </button>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-semibold text-sm">{r.name}</p>
-              <p className="text-xs text-muted-foreground">
-                {r.time} • {r.days}
-              </p>
-            </div>
-            <Switch
-              checked={r.active}
-              onCheckedChange={(v) => setList((l) => l.map((x) => (x.id === r.id ? { ...x, active: v } : x)))}
-            />
-            <button className="size-8 rounded-full hover:bg-muted flex items-center justify-center">
-              <MoreVertical className="size-4 text-muted-foreground" />
-            </button>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <BottomNav />
     </PhoneShell>

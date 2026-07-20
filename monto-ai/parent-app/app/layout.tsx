@@ -1,10 +1,12 @@
 import type { Metadata, Viewport } from "next";
 import { Toaster } from "sonner";
+import { BackButtonGuard } from "@/components/BackButtonGuard";
+import { AuthGate } from "@/components/AuthGate";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Monto Parent — AI Box Companion",
-  description: "Manage your child's Monto AI Box: usage, reminders, calls, music, recordings, and bedtime stories.",
+  description: "Manage your child's Monto AI Box: usage, reminders, calls, music, and bedtime stories.",
 };
 
 export const viewport: Viewport = {
@@ -27,8 +29,9 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased">
-        {children}
+        <AuthGate>{children}</AuthGate>
         <Toaster position="top-center" />
+        <BackButtonGuard />
       </body>
     </html>
   );

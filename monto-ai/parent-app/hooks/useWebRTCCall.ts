@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createFirebaseSignaling, isFirebaseSignalingConfigured, type FirebaseSignalingChannel } from "@/lib/firebase-signaling";
 
 export type CallStatus =
   | "idle"
@@ -15,27 +16,31 @@ export type CallStatus =
 
 interface UseWebRTCCallOptions {
   role: "child" | "parent";
-  signalingUrl: string;
-  // Pairing/sync ID shared with the other side (see NEXT_PUBLIC_DEVICE_ID) —
-  // isolates this family's calls when a backend hosts more than one pair.
+  // Plain http(s) backend base URL â€” signaling is HTTP polling now, not a
+  // persistent WebSocket (see routes/call_signal.py). Only the parent/child
+  // control channel (music/pairing notifications) still uses a WebSocket.
+  apiUrl: string;
+  // Pairing/sync ID shared with the other side â€” isolates this family's
+  // calls when a backend hosts more than one pair.
   room?: string;
-  // Overrides the env-derived default ICE servers — used when config comes
-  // from a scanned pairing QR code instead of build-time env vars.
   iceServers?: RTCIceServer[];
   onIncomingCall?: () => void;
   onCallEnded?: () => void;
 }
 
-const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
+const HAS_TURN = !!process.env.NEXT_PUBLIC_TURN_URL;
+
+const ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
-  // TURN — required when child + parent are on different networks and a
+  // TURN â€” required when child + parent are on different networks and a
   // direct peer-to-peer path can't be found (mobile data, symmetric NAT,
-  // strict firewalls). Falls back to STUN-only if not configured.
-  ...(process.env.NEXT_PUBLIC_TURN_URL
+  // strict firewalls, AP/client isolation). Falls back to STUN-only if not
+  // configured.
+  ...(HAS_TURN
     ? [
         {
-          urls: process.env.NEXT_PUBLIC_TURN_URL,
+          urls: process.env.NEXT_PUBLIC_TURN_URL!,
           username: process.env.NEXT_PUBLIC_TURN_USERNAME,
           credential: process.env.NEXT_PUBLIC_TURN_PASSWORD,
         },
@@ -43,29 +48,57 @@ const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
     : []),
 ];
 
+const POLL_INTERVAL_MS = 1000;
+
+// Best-effort diagnostic beacon to the backend's /debug/log sink â€” the only
+// way to see what's actually happening on a phone without plugging it into
+// devtools. Fire-and-forget; never blocks or throws into the caller.
+function debugBeacon(apiUrl: string, data: object) {
+  try {
+    fetch(`${apiUrl}/debug/log`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }).catch(() => {});
+  } catch {
+    /* ignore */
+  }
+}
+
 export function useWebRTCCall({
   role,
-  signalingUrl,
+  apiUrl,
   room = "monto-room",
   iceServers,
   onIncomingCall,
   onCallEnded,
 }: UseWebRTCCallOptions) {
+  const resolvedIceServers = iceServers ?? ICE_SERVERS;
+  const hasTurn = resolvedIceServers.some((server) => {
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    return urls.some((url) => url.startsWith("turn:" ) || url.startsWith("turns:"));
+  });
   const [status, setStatus] = useState<CallStatus>("idle");
   const [isMuted, setIsMuted] = useState(false);
   const [duration, setDuration] = useState(0);
   const [peerOnline, setPeerOnline] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStream = useRef<MediaStream | null>(null);
   const remoteAudio = useRef<HTMLAudioElement | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const disconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const statusRef = useRef<CallStatus>("idle");
   const pendingIceCandidates = useRef<RTCIceCandidateInit[]>([]);
+
+  const lastIdRef = useRef(0);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stoppedRef = useRef(false);
+  const peerOnlineRef = useRef(false);
+  const pollFailuresRef = useRef(0);
+  const firebaseChannelRef = useRef<FirebaseSignalingChannel | null>(null);
+  const POLL_FAILURE_THRESHOLD = 4;
 
   const updateStatus = useCallback((nextStatus: CallStatus) => {
     statusRef.current = nextStatus;
@@ -85,12 +118,21 @@ export function useWebRTCCall({
     }
   }, []);
 
-  const sendSignal = useCallback((message: object) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(message));
+  // Firebase RTDB is primary; HTTP is retained when Firebase isn't configured.
+  const sendSignal = useCallback((type: string, payload: Record<string, unknown> = {}) => {
+    if (firebaseChannelRef.current) {
+      void firebaseChannelRef.current.send(type, payload).catch((cause) => {
+        setError(cause instanceof Error ? cause.message : "Firebase signal failed");
+        updateStatus("error");
+      });
+      return;
     }
-  }, []);
-
+    fetch(`${apiUrl}/call/${room}/signal`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role, type, payload }),
+    }).catch(() => {});
+  }, [apiUrl, room, role, updateStatus]);
   const flushPendingIceCandidates = useCallback(async () => {
     const pc = pcRef.current;
     if (!pc?.remoteDescription) return;
@@ -123,13 +165,23 @@ export function useWebRTCCall({
   }, [stopTimer]);
 
   const createPeer = useCallback((): RTCPeerConnection => {
-    const pc = new RTCPeerConnection({ iceServers: iceServers ?? DEFAULT_ICE_SERVERS });
+    const pc = new RTCPeerConnection({
+      iceServers: resolvedIceServers,
+      // When a TURN server is configured, skip host/srflx candidates
+      // entirely and go straight through the relay â€” on a network with
+      // AP/client isolation, direct P2P candidates would only ever fail.
+      iceTransportPolicy: hasTurn ? "relay" : "all",
+    });
     pcRef.current = pc;
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        sendSignal({ type: "ice-candidate", candidate: event.candidate });
+        sendSignal("ice-candidate", { candidate: event.candidate });
       }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      debugBeacon(apiUrl, { role, room, event: "ice-state", iceConnectionState: pc.iceConnectionState });
     };
 
     pc.ontrack = (event) => {
@@ -151,6 +203,8 @@ export function useWebRTCCall({
     };
 
     pc.onconnectionstatechange = () => {
+      debugBeacon(apiUrl, { role, room, event: "connection-state", connectionState: pc.connectionState });
+
       if (pc.connectionState === "connected") {
         if (disconnectTimerRef.current) {
           clearTimeout(disconnectTimerRef.current);
@@ -185,7 +239,7 @@ export function useWebRTCCall({
     };
 
     return pc;
-  }, [cleanupPeer, iceServers, onCallEnded, sendSignal, startTimer, updateStatus]);
+  }, [cleanupPeer, resolvedIceServers, hasTurn, onCallEnded, sendSignal, startTimer, updateStatus, apiUrl, role, room]);
 
   const getMic = useCallback(async (): Promise<MediaStream> => {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -195,89 +249,69 @@ export function useWebRTCCall({
     return stream;
   }, []);
 
-  const handleMessage = useCallback(async (raw: string) => {
-    let message: Record<string, unknown>;
-    try {
-      message = JSON.parse(raw);
-    } catch {
-      return;
-    }
-
-    const type = message.type as string;
-
+  const handleSignal = useCallback(async (type: string, payload: Record<string, unknown>) => {
     switch (type) {
-      case "peer-online":
-        setPeerOnline(true);
-        break;
-
-      case "peer-offline":
-        setPeerOnline(false);
-        if (statusRef.current === "ringing" || statusRef.current === "in-call") {
-          cleanupPeer();
-          updateStatus("ended");
-          onCallEnded?.();
-          setTimeout(() => updateStatus("ready"), 2000);
-        }
-        break;
-
       case "ring":
-        if (role === "parent") {
-          updateStatus("incoming");
-          onIncomingCall?.();
-        }
+        // Only ever polled by whichever side didn't send it, so this fires
+        // for the parent when the child calls out, and for the child when
+        // the parent calls in.
+        updateStatus("incoming");
+        onIncomingCall?.();
         break;
 
       case "accept":
-        if (role === "child") {
-          updateStatus("connecting");
+        // Only ever seen by whoever sent the original "ring" (the caller) â€”
+        // the callee that just accepted is waiting for this side's offer.
+        updateStatus("connecting");
+        {
+          if (pcRef.current) cleanupPeer();
           const stream = await getMic();
           const pc = createPeer();
           stream.getTracks().forEach((track) => pc.addTrack(track, stream));
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
-          sendSignal({ type: "offer", sdp: offer });
+          sendSignal("offer", { sdp: offer });
         }
         break;
 
       case "reject":
-        if (role === "child") {
-          cleanupPeer();
-          updateStatus("ended");
-          setTimeout(() => updateStatus("ready"), 2000);
-        }
+        cleanupPeer();
+        updateStatus("ended");
+        setTimeout(() => updateStatus("ready"), 2000);
         break;
 
-      case "offer":
-        if (role === "parent") {
-          updateStatus("connecting");
-          const stream = await getMic();
-          const pc = createPeer();
-          stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-          await pc.setRemoteDescription(new RTCSessionDescription(message.sdp as RTCSessionDescriptionInit));
-          await flushPendingIceCandidates();
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          sendSignal({ type: "answer", sdp: answer });
-        }
+      case "offer": {
+        // Only ever seen by the callee that just sent "accept" â€” the
+        // caller's offer, waiting for this side's answer.
+        updateStatus("connecting");
+        if (pcRef.current) cleanupPeer();
+        const stream = await getMic();
+        const pc = createPeer();
+        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+        await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp as RTCSessionDescriptionInit));
+        await flushPendingIceCandidates();
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        sendSignal("answer", { sdp: answer });
         break;
+      }
 
       case "answer":
-        if (role === "child" && pcRef.current) {
+        if (pcRef.current) {
           await pcRef.current.setRemoteDescription(
-            new RTCSessionDescription(message.sdp as RTCSessionDescriptionInit),
+            new RTCSessionDescription(payload.sdp as RTCSessionDescriptionInit),
           );
           await flushPendingIceCandidates();
         }
         break;
 
       case "ice-candidate":
-        if (message.candidate) {
-          const candidate = message.candidate as RTCIceCandidateInit;
+        if (payload.candidate) {
+          const candidate = payload.candidate as RTCIceCandidateInit;
           if (!pcRef.current?.remoteDescription) {
             pendingIceCandidates.current.push(candidate);
             break;
           }
-
           try {
             await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
           } catch {
@@ -292,81 +326,95 @@ export function useWebRTCCall({
         onCallEnded?.();
         setTimeout(() => updateStatus("ready"), 2000);
         break;
-
-      case "error":
-        setError(message.message as string);
-        updateStatus("error");
-        setTimeout(() => {
-          setError(null);
-          updateStatus("ready");
-        }, 4000);
-        break;
     }
-  }, [
-    cleanupPeer,
-    createPeer,
-    flushPendingIceCandidates,
-    getMic,
-    onCallEnded,
-    onIncomingCall,
-    role,
-    sendSignal,
-    updateStatus,
-  ]);
+  }, [cleanupPeer, createPeer, flushPendingIceCandidates, getMic, onCallEnded, onIncomingCall, sendSignal, updateStatus]);
 
-  const connect = useCallback(() => {
-    if (reconnectTimerRef.current) {
-      clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
-    }
+  // Always call the latest handleSignal without needing it in the polling
+  // effect's deps (which would otherwise restart the poll loop every time
+  // any of handleSignal's many dependencies change reference).
+  const handleSignalRef = useRef(handleSignal);
+  useEffect(() => { handleSignalRef.current = handleSignal; }, [handleSignal]);
 
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
+  // â”€â”€ Polling loop â€” replaces the old persistent WebSocket entirely â”€â”€â”€â”€â”€â”€â”€â”€
+  useEffect(() => {
+    stoppedRef.current = false;
+    lastIdRef.current = 0;
+    pollFailuresRef.current = 0;
 
-    setPeerOnline(false);
-    updateStatus("connecting-ws");
-
-    const url = new URL(signalingUrl);
-    url.searchParams.set("role", role);
-    url.searchParams.set("room", room);
-    const ws = new WebSocket(url.toString());
-    wsRef.current = ws;
-
-    const debugBeacon = (data: object) => {
-      const apiOrigin = signalingUrl.replace(/^ws/, "http").replace(/\/ws\/call.*$/, "");
-      fetch(`${apiOrigin}/debug/log`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role, room, ...data }),
-      }).catch(() => {});
-    };
-
-    ws.onopen = () => {
-      debugBeacon({ event: "open" });
-      updateStatus("ready");
-    };
-    ws.onmessage = (event) => handleMessage(event.data);
-    ws.onerror = () => debugBeacon({ event: "error" });
-    ws.onclose = (event) => {
-      debugBeacon({ event: "close", code: event.code, reason: event.reason, wasClean: event.wasClean });
-      if (statusRef.current !== "ended") {
-        updateStatus("error");
-        reconnectTimerRef.current = setTimeout(connect, 3000);
+    const applyPeerOnline = (online: boolean) => {
+      if (online === peerOnlineRef.current) return;
+      peerOnlineRef.current = online;
+      setPeerOnline(online);
+      if (!online && (statusRef.current === "ringing" || statusRef.current === "in-call")) {
+        cleanupPeer();
+        updateStatus("ended");
+        onCallEnded?.();
+        setTimeout(() => updateStatus("ready"), 2000);
       }
     };
-  }, [handleMessage, role, room, signalingUrl, updateStatus]);
 
-  useEffect(() => {
-    connect();
+    if (isFirebaseSignalingConfigured()) {
+      updateStatus("connecting-ws");
+      void createFirebaseSignaling({
+        room,
+        role,
+        onSignal: (type, payload) => handleSignalRef.current(type, payload),
+        onPeerOnline: applyPeerOnline,
+        onError: (message) => { if (!stoppedRef.current) setError(message); },
+      }).then((channel) => {
+        if (stoppedRef.current) { channel.close(); return; }
+        firebaseChannelRef.current = channel;
+        setError(null);
+        updateStatus("ready");
+      }).catch((cause) => {
+        if (stoppedRef.current) return;
+        const message = cause instanceof Error ? cause.message : "Firebase signaling unavailable";
+        setError(`${message}. Check Firebase Authentication and Database rules.`);
+        updateStatus("error");
+      });
+
+      return () => {
+        stoppedRef.current = true;
+        firebaseChannelRef.current?.close();
+        firebaseChannelRef.current = null;
+        cleanupPeer();
+      };
+    }
+
+    updateStatus("ready");
+    const poll = async () => {
+      if (stoppedRef.current) return;
+      try {
+        const res = await fetch(`${apiUrl}/call/${room}/poll?role=${role}&after_id=${lastIdRef.current}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (pollFailuresRef.current >= POLL_FAILURE_THRESHOLD && statusRef.current === "error") {
+          setError(null);
+          updateStatus("ready");
+        }
+        pollFailuresRef.current = 0;
+        const data = await res.json();
+        applyPeerOnline(Boolean(data.peer_online));
+        for (const sig of (data.signals as Array<{ type: string; payload: Record<string, unknown> }> | undefined) ?? []) {
+          await handleSignalRef.current(sig.type, sig.payload);
+        }
+        if (typeof data.latest_id === "number") lastIdRef.current = data.latest_id;
+      } catch {
+        pollFailuresRef.current += 1;
+        if (pollFailuresRef.current === POLL_FAILURE_THRESHOLD && !["connecting", "in-call"].includes(statusRef.current)) {
+          setError("Can't reach the Monto signaling server — check your connection or re-pair.");
+          updateStatus("error");
+        }
+      }
+      if (!stoppedRef.current) pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS);
+    };
+    void poll();
+
     return () => {
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      wsRef.current?.close();
+      stoppedRef.current = true;
+      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
       cleanupPeer();
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
+  }, [apiUrl, room, role]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!remoteAudio.current) {
       const audio = document.createElement("audio");
@@ -386,25 +434,48 @@ export function useWebRTCCall({
     };
   }, []);
 
+  // No-answer timeout â€” a ring/incoming call gets a full 2 minutes to reach
+  // "in-call" before this side gives up and ends it on its own.
+  const noAnswerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (noAnswerTimerRef.current) {
+      clearTimeout(noAnswerTimerRef.current);
+      noAnswerTimerRef.current = null;
+    }
+    if (status === "ringing" || status === "incoming" || status === "connecting") {
+      noAnswerTimerRef.current = setTimeout(() => {
+        noAnswerTimerRef.current = null;
+        if (statusRef.current === "in-call") return;
+        cleanupPeer();
+        updateStatus("ended");
+        onCallEnded?.();
+        setTimeout(() => updateStatus("ready"), 2000);
+      }, 120000);
+    }
+    return () => {
+      if (noAnswerTimerRef.current) clearTimeout(noAnswerTimerRef.current);
+    };
+  }, [status, cleanupPeer, onCallEnded, updateStatus]);
+
   const ringParent = useCallback(() => {
     if (statusRef.current !== "ready") return;
     updateStatus("ringing");
-    sendSignal({ type: "ring" });
+    sendSignal("ring");
   }, [sendSignal, updateStatus]);
 
   const acceptCall = useCallback(() => {
     if (statusRef.current !== "incoming") return;
     updateStatus("connecting");
-    sendSignal({ type: "accept" });
+    sendSignal("accept");
   }, [sendSignal, updateStatus]);
 
   const rejectCall = useCallback(() => {
-    sendSignal({ type: "reject" });
+    sendSignal("reject");
     updateStatus("ready");
   }, [sendSignal, updateStatus]);
 
   const hangUp = useCallback(() => {
-    sendSignal({ type: "hangup" });
+    sendSignal("hangup");
     cleanupPeer();
     updateStatus("ended");
     onCallEnded?.();

@@ -1,5 +1,7 @@
-"use client";
+﻿"use client";
 import { useState, useRef, useCallback, useEffect } from "react";
+
+export const dynamic = "force-dynamic";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Play, Pause, SkipBack, SkipForward, X,
@@ -10,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { SONGS, type Song } from "@/lib/media-content";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 import { sendVoiceQuery, APIError } from "@/lib/api";
+import { useDeviceChannelContext } from "@/components/DeviceChannelProvider";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmt(s: number) {
@@ -40,6 +43,7 @@ function AudioBars({ level, color }: { level: number; color: string }) {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function SongsPage() {
   const router = useRouter();
+  const { send, lastMessage } = useDeviceChannelContext();
 
   // Player state
   const [currentIndex, setCurrentIndex]   = useState<number | null>(null);
@@ -56,8 +60,21 @@ export default function SongsPage() {
 
   const audioRef  = useRef<HTMLAudioElement | null>(null);
   const recorder  = useAudioRecorder();
+  const lastStatusSentAtRef = useRef(0);
 
   const currentSong: Song | null = currentIndex !== null ? SONGS[currentIndex] : null;
+
+  // ── Report play/pause/stop/track-change state back over the device
+  // control channel so the parent app's remote-control UI reflects reality ──
+  const sendMusicStatus = useCallback((playing: boolean, song: Song | null, audio: HTMLAudioElement | null) => {
+    send({
+      type: "music-status",
+      playing,
+      trackId: song?.id,
+      currentTime: audio?.currentTime ?? 0,
+      duration: audio?.duration ?? 0,
+    });
+  }, [send]);
 
   // ── Play a song by index ───────────────────────────────────────────────────
   const playSong = useCallback((index: number) => {
@@ -74,7 +91,15 @@ export default function SongsPage() {
     audioRef.current = audio;
 
     audio.onloadedmetadata = () => setDuration(audio.duration);
-    audio.ontimeupdate     = () => setProgress(audio.currentTime);
+    audio.ontimeupdate     = () => {
+      setProgress(audio.currentTime);
+      // Echo status roughly every 5s while playing (not on every timeupdate tick)
+      const now = Date.now();
+      if (now - lastStatusSentAtRef.current >= 5000) {
+        lastStatusSentAtRef.current = now;
+        sendMusicStatus(true, song, audio);
+      }
+    };
     audio.onended          = () => {
       if (repeat) {
         audio.currentTime = 0;
@@ -91,14 +116,75 @@ export default function SongsPage() {
     setCurrentIndex(index);
     setIsPlaying(true);
     setProgress(0);
-  }, [volume, shuffle, repeat]);
+    lastStatusSentAtRef.current = Date.now();
+    sendMusicStatus(true, song, audio);
+  }, [volume, shuffle, repeat, sendMusicStatus]);
 
   // ── Toggle play/pause ──────────────────────────────────────────────────────
   const togglePlay = useCallback(() => {
     if (!audioRef.current) return;
-    if (isPlaying) { audioRef.current.pause(); setIsPlaying(false); }
-    else           { audioRef.current.play().catch(() => {}); setIsPlaying(true); }
-  }, [isPlaying]);
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+      sendMusicStatus(false, currentSong, audioRef.current);
+    } else {
+      audioRef.current.play().catch(() => {});
+      setIsPlaying(true);
+      sendMusicStatus(true, currentSong, audioRef.current);
+    }
+  }, [isPlaying, currentSong, sendMusicStatus]);
+
+  // ── Stop: pause and reset to the beginning ──────────────────────────────────
+  const stopSong = useCallback(() => {
+    if (!audioRef.current) return;
+    audioRef.current.pause();
+    audioRef.current.currentTime = 0;
+    setIsPlaying(false);
+    setProgress(0);
+    sendMusicStatus(false, currentSong, audioRef.current);
+  }, [currentSong, sendMusicStatus]);
+  // Always listen for the single word "cut" while a song is playing.
+  useEffect(() => {
+    if (!isPlaying || typeof window === "undefined") return;
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    let active = true;
+    let restartTimer: ReturnType<typeof setTimeout> | null = null;
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+
+    recognition.onresult = (event: any) => {
+      let heard = "";
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        heard += ` ${event.results[index][0]?.transcript ?? ""}`;
+      }
+      if (/(^|\s)cut(?=\s|$|[.!?,])/i.test(heard.trim())) {
+        active = false;
+        try { recognition.stop(); } catch { /* already stopped */ }
+        stopSong();
+        setVoiceStatus('Stopped - "cut" detected');
+        setTimeout(() => setVoiceStatus(null), 2500);
+      }
+    };
+
+    recognition.onend = () => {
+      if (active) restartTimer = setTimeout(() => {
+        try { recognition.start(); } catch { /* browser is restarting */ }
+      }, 250);
+    };
+
+    try { recognition.start(); } catch { /* microphone unavailable */ }
+    return () => {
+      active = false;
+      if (restartTimer) clearTimeout(restartTimer);
+      try { recognition.stop(); } catch { /* already stopped */ }
+    };
+  }, [isPlaying, stopSong]);
 
   // ── Skip ──────────────────────────────────────────────────────────────────
   const skip = useCallback((dir: 1 | -1) => {
@@ -135,8 +221,8 @@ export default function SongsPage() {
 
         if (/next|skip/.test(t))         skip(1);
         else if (/prev|back/.test(t))    skip(-1);
-        else if (/pause|stop/.test(t))   { audioRef.current?.pause(); setIsPlaying(false); }
-        else if (/play|resume/.test(t))  { audioRef.current?.play().catch(()=>{}); setIsPlaying(true); }
+        else if (/\b(cut|pause|stop)\b/.test(t)) { stopSong(); }
+        else if (/play|resume/.test(t))  { audioRef.current?.play().catch(()=>{}); setIsPlaying(true); sendMusicStatus(true, currentSong, audioRef.current); }
         else if (/shuffle/.test(t))      setShuffle(s => !s);
         else if (/repeat|loop/.test(t))  setRepeat(r => !r);
         else {
@@ -156,18 +242,57 @@ export default function SongsPage() {
     } else {
       await recorder.startRecording();
     }
-  }, [recorder, skip, playSong]);
+  }, [recorder, skip, playSong, sendMusicStatus, currentSong, stopSong]);
 
-  // ── Auto-play first song when page opens ──────────────────────────────
+  // ── Auto-play requested track (via ?track=) or the first song ──────────
   useEffect(() => {
+    const trackId = new URLSearchParams(window.location.search).get("track");
+    const requestedIndex = trackId ? SONGS.findIndex(s => s.id === trackId) : -1;
+    const initialIndex = requestedIndex >= 0 ? requestedIndex : 0;
     // Small delay so the audio element is ready after navigation
-    const t = setTimeout(() => playSong(0), 300);
+    const t = setTimeout(() => playSong(initialIndex), 300);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Cleanup on unmount ─────────────────────────────────────────────────────
   useEffect(() => () => { audioRef.current?.pause(); }, []);
+
+  // ── Remote transport control from the parent app (device control channel) ──
+  // Kept in a ref so this single effect (keyed only on `lastMessage`) always
+  // calls the *latest* versions of these callbacks without re-subscribing.
+  const latestRef = useRef({ playSong, skip, stopSong, sendMusicStatus, currentSong });
+  useEffect(() => {
+    latestRef.current = { playSong, skip, stopSong, sendMusicStatus, currentSong };
+  });
+
+  useEffect(() => {
+    if (!lastMessage || lastMessage.type !== "music-command") return;
+    const { action, trackId } = lastMessage;
+    const { playSong: play, skip: doSkip, stopSong: stop, sendMusicStatus: sendStatus, currentSong: song } = latestRef.current;
+
+    if (action === "play") {
+      if (trackId) {
+        const idx = SONGS.findIndex(s => s.id === trackId);
+        if (idx >= 0) { play(idx); return; }
+      }
+      if (audioRef.current) {
+        audioRef.current.play().catch(() => {});
+        setIsPlaying(true);
+        sendStatus(true, song, audioRef.current);
+      } else {
+        play(0);
+      }
+    } else if (action === "pause") {
+      audioRef.current?.pause();
+      setIsPlaying(false);
+      sendStatus(false, song, audioRef.current);
+    } else if (action === "stop") {
+      stop();
+    } else if (action === "skip") {
+      doSkip(1);
+    }
+  }, [lastMessage]);
 
   const isRec = recorder.recordingState === "recording";
   const pct   = duration ? (progress / duration) * 100 : 0;
@@ -200,12 +325,14 @@ export default function SongsPage() {
             {/* Art + info */}
             <div className="flex items-center gap-4 mb-4">
               <motion.div
-                className="w-16 h-16 rounded-2xl flex items-center justify-center text-4xl flex-shrink-0"
+                className="w-16 h-16 rounded-2xl flex items-center justify-center text-4xl flex-shrink-0 overflow-hidden"
                 style={{ background: `${currentSong.color}30` }}
                 animate={isPlaying ? { rotate: [0, 5, -5, 0] } : {}}
                 transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
               >
-                {currentSong.emoji}
+                {currentSong.thumbnail
+                  ? <img src={`/songs/thumbs/${currentSong.thumbnail}`} alt="" className="w-full h-full object-cover" />
+                  : currentSong.emoji}
               </motion.div>
               <div className="flex-1 min-w-0">
                 <p className="text-white font-bold text-base leading-snug truncate">{currentSong.title}</p>
@@ -308,7 +435,7 @@ export default function SongsPage() {
           ) : (
             <>
               <Mic className="w-4 h-4 text-white/60" />
-              <span className="text-white/50 text-sm">Say "next", "pause", or a song name</span>
+              <span className="text-white/50 text-sm">Say "cut" anytime to stop the song</span>
             </>
           )}
         </motion.button>
@@ -360,8 +487,12 @@ export default function SongsPage() {
                 )}
               </div>
 
-              {/* Emoji */}
-              <span className="text-2xl flex-shrink-0">{song.emoji}</span>
+              {/* Thumbnail (falls back to emoji when the song has no artwork) */}
+              {song.thumbnail ? (
+                <img src={`/songs/thumbs/${song.thumbnail}`} alt="" className="w-9 h-9 rounded-lg object-cover flex-shrink-0" />
+              ) : (
+                <span className="text-2xl flex-shrink-0">{song.emoji}</span>
+              )}
 
               {/* Title */}
               <div className="flex-1 min-w-0">
@@ -387,3 +518,6 @@ export default function SongsPage() {
     </div>
   );
 }
+
+
+

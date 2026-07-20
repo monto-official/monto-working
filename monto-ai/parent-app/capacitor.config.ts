@@ -15,12 +15,14 @@ const config: CapacitorConfig = {
   plugins: {
     SplashScreen: {
       launchShowDuration: 1500,
-      backgroundColor: "#0F0F1A",
+      // Matches the new splash artwork's own pastel background so there's
+      // no visible seam around it while the image loads/fades in.
+      backgroundColor: "#F5EAE9",
       showSpinner: false,
     },
     StatusBar: {
       style: "Dark",
-      backgroundColor: "#0F0F1A",
+      backgroundColor: "#F5EAE9",
     },
   },
 };

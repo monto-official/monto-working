@@ -121,8 +121,18 @@ async def transcribe(
             tmp_path,
             beam_size=5,
             vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=500),
+            vad_parameters=dict(
+                threshold=0.35,
+                min_speech_duration_ms=100,
+                min_silence_duration_ms=700,
+                speech_pad_ms=300,
+            ),
             language=os.getenv("WHISPER_LANGUAGE") or None,
+            initial_prompt=os.getenv(
+                "WHISPER_PROMPT",
+                "Monto, Hey Monto, Kavya. Nepali, Romanized Nepali, English, Hindi, and Bhojpuri child conversation.",
+            ),
+            condition_on_previous_text=False,
         )
 
         text = " ".join(seg.text.strip() for seg in segments).strip()

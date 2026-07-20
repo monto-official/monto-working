@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import { STORIES, type Story } from "@/lib/media-content";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 import { sendVoiceQuery, APIError } from "@/lib/api";
+import { useDeviceChannelContext } from "@/components/DeviceChannelProvider";
 
 function fmt(s: number) {
   if (!isFinite(s)) return "0:00";
@@ -37,6 +38,7 @@ function AudioBars({ level, color }: { level: number; color: string }) {
 
 export default function StoriesPage() {
   const router = useRouter();
+  const { send, lastMessage } = useDeviceChannelContext();
 
   const [currentIndex, setCurrentIndex] = useState<number | null>(null);
   const [isPlaying, setIsPlaying]       = useState(false);
@@ -49,8 +51,21 @@ export default function StoriesPage() {
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recorder = useAudioRecorder();
+  const lastStatusSentAtRef = useRef(0);
 
   const currentStory: Story | null = currentIndex !== null ? STORIES[currentIndex] : null;
+
+  // ── Report play/pause/stop/track-change state back over the device
+  // control channel so the parent app's remote-control UI reflects reality ──
+  const sendStoryStatus = useCallback((playing: boolean, story: Story | null, audio: HTMLAudioElement | null) => {
+    send({
+      type: "story-status",
+      playing,
+      trackId: story?.id,
+      currentTime: audio?.currentTime ?? 0,
+      duration: audio?.duration ?? 0,
+    });
+  }, [send]);
 
   const playStory = useCallback((index: number) => {
     const story = STORIES[index];
@@ -66,7 +81,14 @@ export default function StoriesPage() {
     audioRef.current = audio;
 
     audio.onloadedmetadata = () => setDuration(audio.duration);
-    audio.ontimeupdate     = () => setProgress(audio.currentTime);
+    audio.ontimeupdate     = () => {
+      setProgress(audio.currentTime);
+      const now = Date.now();
+      if (now - lastStatusSentAtRef.current >= 5000) {
+        lastStatusSentAtRef.current = now;
+        sendStoryStatus(true, story, audio);
+      }
+    };
     audio.onended          = () => {
       if (repeat) {
         audio.currentTime = 0;
@@ -83,20 +105,41 @@ export default function StoriesPage() {
     setCurrentIndex(index);
     setIsPlaying(true);
     setProgress(0);
-  }, [volume, shuffle, repeat]);
+    lastStatusSentAtRef.current = Date.now();
+    sendStoryStatus(true, story, audio);
+  }, [volume, shuffle, repeat, sendStoryStatus]);
 
-  // Auto-play first story on page open
+  const stopStory = useCallback(() => {
+    if (!audioRef.current) return;
+    audioRef.current.pause();
+    audioRef.current.currentTime = 0;
+    setIsPlaying(false);
+    setProgress(0);
+    sendStoryStatus(false, currentStory, audioRef.current);
+  }, [currentStory, sendStoryStatus]);
+
+  // Auto-play the requested story (via ?track=) or the first one
   useEffect(() => {
-    const t = setTimeout(() => playStory(0), 300);
+    const trackId = new URLSearchParams(window.location.search).get("track");
+    const requestedIndex = trackId ? STORIES.findIndex(s => s.id === trackId) : -1;
+    const initialIndex = requestedIndex >= 0 ? requestedIndex : 0;
+    const t = setTimeout(() => playStory(initialIndex), 300);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const togglePlay = useCallback(() => {
     if (!audioRef.current) return;
-    if (isPlaying) { audioRef.current.pause(); setIsPlaying(false); }
-    else           { audioRef.current.play().catch(() => {}); setIsPlaying(true); }
-  }, [isPlaying]);
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+      sendStoryStatus(false, currentStory, audioRef.current);
+    } else {
+      audioRef.current.play().catch(() => {});
+      setIsPlaying(true);
+      sendStoryStatus(true, currentStory, audioRef.current);
+    }
+  }, [isPlaying, currentStory, sendStoryStatus]);
 
   const skip = useCallback((dir: 1 | -1) => {
     if (currentIndex === null) { playStory(0); return; }
@@ -105,6 +148,40 @@ export default function StoriesPage() {
       : (currentIndex + dir + STORIES.length) % STORIES.length;
     playStory(next);
   }, [currentIndex, shuffle, playStory]);
+
+  // ── Remote transport control from the parent app (device control channel) ──
+  const latestRef = useRef({ playStory, skip, stopStory, sendStoryStatus, currentStory });
+  useEffect(() => {
+    latestRef.current = { playStory, skip, stopStory, sendStoryStatus, currentStory };
+  });
+
+  useEffect(() => {
+    if (!lastMessage || lastMessage.type !== "story-command") return;
+    const { action, trackId } = lastMessage;
+    const { playStory: play, skip: doSkip, stopStory: stop, sendStoryStatus: sendStatus, currentStory: story } = latestRef.current;
+
+    if (action === "play") {
+      if (trackId) {
+        const idx = STORIES.findIndex(s => s.id === trackId);
+        if (idx >= 0) { play(idx); return; }
+      }
+      if (audioRef.current) {
+        audioRef.current.play().catch(() => {});
+        setIsPlaying(true);
+        sendStatus(true, story, audioRef.current);
+      } else {
+        play(0);
+      }
+    } else if (action === "pause") {
+      audioRef.current?.pause();
+      setIsPlaying(false);
+      sendStatus(false, story, audioRef.current);
+    } else if (action === "stop") {
+      stop();
+    } else if (action === "skip") {
+      doSkip(1);
+    }
+  }, [lastMessage]);
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;
@@ -181,12 +258,14 @@ export default function StoriesPage() {
           >
             <div className="flex items-center gap-4 mb-4">
               <motion.div
-                className="w-16 h-16 rounded-2xl flex items-center justify-center text-4xl flex-shrink-0"
+                className="w-16 h-16 rounded-2xl flex items-center justify-center text-4xl flex-shrink-0 overflow-hidden"
                 style={{ background: `${currentStory.color}30` }}
                 animate={isPlaying ? { scale: [1, 1.06, 1] } : {}}
                 transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
               >
-                {currentStory.emoji}
+                {currentStory.thumbnail
+                  ? <img src={`/stories/thumbs/${currentStory.thumbnail}`} alt="" className="w-full h-full object-cover" />
+                  : currentStory.emoji}
               </motion.div>
               <div className="flex-1 min-w-0">
                 <p className="text-white font-bold text-base leading-snug truncate">{currentStory.title}</p>
@@ -328,7 +407,11 @@ export default function StoriesPage() {
                 )}
               </div>
 
-              <span className="text-2xl flex-shrink-0">{story.emoji}</span>
+              {story.thumbnail ? (
+                <img src={`/stories/thumbs/${story.thumbnail}`} alt="" className="w-9 h-9 rounded-lg object-cover flex-shrink-0" />
+              ) : (
+                <span className="text-2xl flex-shrink-0">{story.emoji}</span>
+              )}
 
               <div className="flex-1 min-w-0">
                 <p className={`text-sm font-semibold truncate ${active ? "text-white" : "text-white/80"}`}>

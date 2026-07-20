@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 
-const API = "http://localhost:8000";
+const API = "/api/backend";
 
 interface Category {
   id: string;

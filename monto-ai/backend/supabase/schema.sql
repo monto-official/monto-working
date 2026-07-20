@@ -89,3 +89,80 @@ drop trigger if exists trg_prune_session_messages on memory_messages;
 create trigger trg_prune_session_messages
     after insert on memory_messages
     for each row execute function prune_session_messages();
+
+-- ── Reminders ─────────────────────────────────────────────────────────────────
+-- Parent-configured reminders, delivered to the child device by polling.
+create table if not exists reminders (
+    id                uuid primary key default gen_random_uuid(),
+    child_device_id   text not null references devices(device_id) on delete cascade,
+    label             text not null,
+    time              text not null,
+    days_of_week      jsonb not null default '[]'::jsonb,
+    active            boolean not null default true,
+    created_at        timestamptz not null default now()
+);
+create index if not exists idx_reminders_device on reminders(child_device_id);
+
+-- ── Bedtime schedule ──────────────────────────────────────────────────────────
+-- Schedule storage only — no child-side lock/enforcement yet.
+create table if not exists bedtime_schedules (
+    child_device_id   text primary key references devices(device_id) on delete cascade,
+    start_time        text not null,
+    end_time          text not null,
+    enabled           boolean not null default true,
+    updated_at        timestamptz not null default now()
+);
+
+-- ── AI box usage events ───────────────────────────────────────────────────────
+-- One row per voice interaction; the dashboard's weekly chart buckets these by
+-- day and estimates hours from the interaction count.
+create table if not exists usage_events (
+    id                bigint generated always as identity primary key,
+    child_device_id   text references devices(device_id) on delete cascade,
+    created_at        timestamptz not null default now()
+);
+create index if not exists idx_usage_events_device
+    on usage_events(child_device_id, created_at);
+
+-- ── Call signaling (HTTP polling) ─────────────────────────────────────────────
+-- Backs /call/{room_id}/signal and /call/{room_id}/poll — replaces the old
+-- persistent-WebSocket signaling for actual call ring/accept/offer/answer/
+-- ice-candidate exchange, which was prone to silently dropping mid-message
+-- on some networks. See routes/call_signal.py.
+create table if not exists call_signals (
+    id          bigint generated always as identity primary key,
+    room_id     text not null,
+    role        text not null check (role in ('child', 'parent')),
+    type        text not null,
+    payload     jsonb not null default '{}'::jsonb,
+    created_at  timestamptz not null default now()
+);
+create index if not exists idx_call_signals_room on call_signals(room_id, id);
+
+-- One row per (room, role) — last_seen_at refreshed on every poll, which
+-- doubles as that side's heartbeat (see PRESENCE_FRESH_SECONDS).
+create table if not exists call_presence (
+    room_id       text not null,
+    role          text not null check (role in ('child', 'parent')),
+    last_seen_at  timestamptz not null default now(),
+    primary key (room_id, role)
+);
+
+-- ── Row Level Security ────────────────────────────────────────────────────────
+-- Every client (parent app, child app) talks to this backend's own REST API,
+-- never to Supabase directly — the backend (using SUPABASE_SERVICE_KEY) is the
+-- only thing that ever touches this database. RLS has no client to protect
+-- against here, and Supabase's dashboard auto-enables it with zero policies
+-- the first time a table is opened in the Table Editor, which silently blocks
+-- every write (including the backend's own). Keep it off on every app table.
+alter table devices             disable row level security;
+alter table pairing_codes       disable row level security;
+alter table pairings            disable row level security;
+alter table call_logs           disable row level security;
+alter table memory_messages     disable row level security;
+alter table session_facts       disable row level security;
+alter table reminders           disable row level security;
+alter table bedtime_schedules   disable row level security;
+alter table usage_events        disable row level security;
+alter table call_signals        disable row level security;
+alter table call_presence       disable row level security;

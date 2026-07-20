@@ -1,0 +1,19 @@
+{
+  "revision": 3,
+  "updated_at": "2026-07-19T07:34:35.414938+00:00",
+  "controls": {
+    "maintenance_mode": false,
+    "ai_enabled": true,
+    "microphone_enabled": true,
+    "calls_enabled": true,
+    "explore_enabled": true,
+    "stories_enabled": true,
+    "songs_enabled": true,
+    "yoga_enabled": true,
+    "default_language": "english",
+    "default_character": "spiderman",
+    "auto_speak": true,
+    "admin_notice": "",
+    "sync_interval_seconds": 10
+  }
+}

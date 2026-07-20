@@ -7,12 +7,14 @@ export const DEFAULT_CHILD: ChildProfile = {
   name: "",
   age: "",
   grade: "",
-  avatar: "🧒",
+  avatar: "photo",
+  photo: "/profile-kid.jpg",
 };
 
 export const DEFAULT_PARENT: ParentAccount = {
   name: "",
   email: "",
+  avatar: "🧑",
 };
 
 function loadJSON<T>(key: string, fallback: T): T {

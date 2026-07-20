@@ -14,6 +14,12 @@ logger = logging.getLogger(__name__)
 
 MIN_AUDIO_BYTES = 4_000
 
+DEFAULT_TRANSCRIPTION_PROMPT = (
+    "Monto, Hey Monto, Kavya. Natural conversation spoken by a child in "
+    "Nepali, Romanized Nepali, English, Hindi, Bhojpuri, or a natural mix "
+    "of these languages. Preserve names, questions, and code-switching."
+)
+
 
 class STTService:
     def __init__(self, api_key: str = ""):
@@ -26,7 +32,7 @@ class STTService:
         if groq_key:
             from groq import AsyncGroq
             self._groq       = AsyncGroq(api_key=groq_key)
-            self._groq_model = "whisper-large-v3"
+            self._groq_model = os.getenv("GROQ_STT_MODEL", "whisper-large-v3")
             self._has_groq   = True
         else:
             self._has_groq   = False
@@ -90,14 +96,20 @@ class STTService:
                     temperature=0,
                     response_format="verbose_json",
                     language=os.getenv("WHISPER_LANGUAGE", None) or None,
+                    prompt=os.getenv("WHISPER_PROMPT", DEFAULT_TRANSCRIPTION_PROMPT),
                 )
             text = result.text.strip()
             lang = getattr(result, "language", "?")
             logger.info(f"Groq STT [{lang}]: '{text[:80]}'")
 
             if hasattr(result, "segments") and result.segments:
+                def segment_value(segment, key, default=0):
+                    if isinstance(segment, dict):
+                        return segment.get(key, default)
+                    return getattr(segment, key, default)
+
                 avg_no_speech = sum(
-                    getattr(s, "no_speech_prob", 0) for s in result.segments
+                    segment_value(s, "no_speech_prob") for s in result.segments
                 ) / len(result.segments)
                 if avg_no_speech > 0.8:
                     logger.warning(f"STT: high silence prob ({avg_no_speech:.2f}), discarding")

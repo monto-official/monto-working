@@ -46,7 +46,8 @@ export interface ChildProfile {
   name: string;
   age: string;
   grade: string;
-  avatar: string; // emoji
+  avatar: string; // emoji, or the literal "photo" sentinel to use `photo` instead
+  photo?: string; // path under /public to an actual profile picture
 }
 
 // ── Parent Account ────────────────────────────────────────────────────────────
@@ -54,16 +55,5 @@ export interface ChildProfile {
 export interface ParentAccount {
   name: string;
   email: string;
+  avatar?: string; // emoji
 }
-
-// ── Bedtime Stories ───────────────────────────────────────────────────────────
-
-export interface BedtimeStory {
-  id: string;
-  title: string;
-  blurb: string;
-  gradient: string; // tailwind "from-x to-y" classes
-  paragraphs: string[];
-}
-
-export type StoryPlaybackState = "idle" | "playing" | "paused" | "unsupported";

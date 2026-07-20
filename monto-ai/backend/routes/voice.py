@@ -3,9 +3,10 @@ Voice Routes
 POST /voice/query   — receives audio, returns AI structured response (JSON)
 POST /voice/process — used by Raspberry Pi: returns JSON for face + TTS
 """
+import asyncio
 import logging
 import re
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Header
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Header, BackgroundTasks
 from fastapi.responses import Response
 from models.schemas import VoiceQueryResponse
 from services.stt_service import STTService
@@ -14,11 +15,25 @@ from services.tts_service import TTSService
 from services.emotion_service import resolve_animation
 from services.memory_service import memory
 from services.content_filter import check_content, sanitize_response
+from services.supabase_client import get_supabase
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/voice", tags=["voice"])
 
 DEFAULT_SESSION = "pi-default"
+
+
+def _record_usage_event(session_id: str):
+    """Best-effort usage tracking — never let a Supabase hiccup (or Supabase
+    being unconfigured) break the voice pipeline."""
+    try:
+        db = get_supabase()
+    except RuntimeError:
+        return
+    try:
+        db.table("usage_events").insert({"child_device_id": session_id}).execute()
+    except Exception as exc:
+        logger.warning(f"[Usage] usage_events insert failed (non-fatal): {exc}")
 
 # ── Language detection ────────────────────────────────────────────────────────
 
@@ -68,6 +83,7 @@ def get_tts_service() -> TTSService:
 
 @router.post("/query", response_model=VoiceQueryResponse)
 async def voice_query(
+    background_tasks: BackgroundTasks,
     audio:      UploadFile = File(...),
     session_id: str        = Header(default="web-default", alias="X-Session-Id"),
     stt:        STTService  = Depends(get_stt_service),
@@ -107,7 +123,8 @@ async def voice_query(
     filter_result = check_content(transcript)
     if not filter_result.is_safe:
         logger.info(f"[{session_id}] Content blocked [{filter_result.category}]")
-        memory.add_turn(session_id, transcript, filter_result.redirect_response)
+        background_tasks.add_task(memory.add_turn, session_id, transcript, filter_result.redirect_response)
+        background_tasks.add_task(_record_usage_event, session_id)
         return VoiceQueryResponse(
             transcript=transcript,
             intent="UNKNOWN",
@@ -117,8 +134,14 @@ async def voice_query(
             confidence=1.0,
         )
 
-    history      = memory.get_history(session_id)
-    facts_prompt = memory.get_facts_prompt(session_id)
+    try:
+        history, facts_prompt = await asyncio.gather(
+            asyncio.to_thread(memory.get_history, session_id),
+            asyncio.to_thread(memory.get_facts_prompt, session_id),
+        )
+    except Exception as exc:
+        logger.warning(f"[{session_id}] Memory unavailable; continuing without it: {exc}")
+        history, facts_prompt = [], ""
 
     # Pass detected language to LLM so it replies in the same language
     try:
@@ -129,7 +152,8 @@ async def voice_query(
 
     # Layer 2: Filter LLM output too
     llm_result.response = sanitize_response(llm_result.response)
-    memory.add_turn(session_id, transcript, llm_result.response)
+    background_tasks.add_task(memory.add_turn, session_id, transcript, llm_result.response)
+    background_tasks.add_task(_record_usage_event, session_id)
     animation = resolve_animation(llm_result.emotion.value, llm_result.animation.value)
 
     # Response language — use detected OR check response text
@@ -148,6 +172,7 @@ async def voice_query(
 
 @router.post("/process")
 async def voice_process(
+    background_tasks: BackgroundTasks,
     audio:      UploadFile = File(...),
     session_id: str        = Header(default=DEFAULT_SESSION, alias="X-Session-Id"),
     stt:        STTService  = Depends(get_stt_service),
@@ -188,7 +213,8 @@ async def voice_process(
     filter_result = check_content(transcript)
     if not filter_result.is_safe:
         logger.info(f"[Pi/{session_id}] Content blocked [{filter_result.category}]")
-        memory.add_turn(session_id, transcript, filter_result.redirect_response)
+        background_tasks.add_task(memory.add_turn, session_id, transcript, filter_result.redirect_response)
+        background_tasks.add_task(_record_usage_event, session_id)
         return {
             "transcript": transcript,
             "intent":     "UNKNOWN",
@@ -198,8 +224,14 @@ async def voice_process(
             "confidence": 1.0,
         }
 
-    history      = memory.get_history(session_id)
-    facts_prompt = memory.get_facts_prompt(session_id)
+    try:
+        history, facts_prompt = await asyncio.gather(
+            asyncio.to_thread(memory.get_history, session_id),
+            asyncio.to_thread(memory.get_facts_prompt, session_id),
+        )
+    except Exception as exc:
+        logger.warning(f"[Pi/{session_id}] Memory unavailable; continuing without it: {exc}")
+        history, facts_prompt = [], ""
 
     try:
         llm_result = await llm.get_response(transcript, history, facts_prompt, language=detected_lang)
@@ -209,7 +241,8 @@ async def voice_process(
 
     # Layer 2: Filter LLM output
     llm_result.response = sanitize_response(llm_result.response)
-    memory.add_turn(session_id, transcript, llm_result.response)
+    background_tasks.add_task(memory.add_turn, session_id, transcript, llm_result.response)
+    background_tasks.add_task(_record_usage_event, session_id)
     animation = resolve_animation(llm_result.emotion.value, llm_result.animation.value)
 
     logger.info(f"[Pi/{session_id}] [{llm_result.emotion.value}] {llm_result.response[:80]}")
@@ -223,6 +256,32 @@ async def voice_process(
         "confidence": llm_result.confidence,
         "language":   detected_lang,
     }
+
+
+@router.get("/questions/{session_id}")
+async def get_questions(session_id: str):
+    """List the child's voice questions and the AI's answers for the parent
+    dashboard's Questions Asked card, newest-first."""
+    transcript = memory.get_full_transcript(session_id)
+
+    questions = []
+    i = 0
+    while i < len(transcript):
+        row = transcript[i]
+        if row["role"] == "user":
+            answer = None
+            if i + 1 < len(transcript) and transcript[i + 1]["role"] == "assistant":
+                answer = transcript[i + 1]["content"]
+            questions.append({
+                "id": i,
+                "question": row["content"],
+                "answer": answer,
+                "timestamp": row["timestamp"],
+            })
+        i += 1
+
+    questions.reverse()
+    return {"questions": questions, "total": len(questions)}
 
 
 @router.delete("/memory/{session_id}")

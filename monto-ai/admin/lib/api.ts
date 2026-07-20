@@ -1,4 +1,4 @@
-const API = "http://localhost:8000";
+const API = "/api/backend";
 
 export interface HealthResponse {
   status: string;

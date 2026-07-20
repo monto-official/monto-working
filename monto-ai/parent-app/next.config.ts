@@ -7,6 +7,10 @@ const isCapacitorBuild = process.env.CAPACITOR_BUILD === "1";
 const nextConfig: NextConfig = {
   output: isCapacitorBuild ? "export" : "standalone",
   images: isCapacitorBuild ? { unoptimized: true } : undefined,
+  allowedDevOrigins: [
+    "192.168.0.5",
+    "federal-defendant-ruled-independent.trycloudflare.com",
+  ],
   // Line-ending (CRLF) lint errors from this Windows checkout shouldn't block
   // production builds — `npm run lint` still surfaces them separately.
   eslint: { ignoreDuringBuilds: true },

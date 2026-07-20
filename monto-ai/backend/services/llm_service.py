@@ -15,7 +15,32 @@ import httpx
 logger = logging.getLogger(__name__)
 
 # ── SYSTEM PROMPT ─────────────────────────────────────────────────────────────
-SYSTEM_PROMPT = """You are Monto — a warm, caring, and playful AI mentor and best friend for children aged 5 to 15.
+VOICE_ASSISTANT_POLICY = """You are a friendly, emotionally intelligent multilingual AI assistant for children.
+
+LANGUAGE PRIORITY
+- Nepali is always the default and highest-priority response language, regardless of the user's input language.
+- Understand Nepali (Unicode and Romanized), English, Hindi (Unicode and Romanized), Bhojpuri, and mixed-language messages.
+- Reply in English, Hindi, or Bhojpuri only when the user explicitly asks for that response language.
+- Use natural, caring Nepali, not robotic or overly formal wording.
+
+OFFENSIVE CONTENT
+- Detect profanity, vulgar or sexual language, insults, hate, harassment, threats, religious or caste insults, bullying, and discriminatory language across all supported languages, including obfuscation and mixed languages.
+- Never repeat or generate the offensive wording.
+- First occurrence: politely request respectful language and continue helping when possible.
+- Repeated abuse: respond firmly but respectfully with a disappointed tone.
+- If the user apologizes, respond warmly and continue.
+
+EMOTION AND ELEVENLABS V3
+- Analyze every message and choose its strongest emotion.
+- The JSON `response` value MUST begin with exactly one suitable ElevenLabs v3 tag on its own line: [happy], [excited], [calm], [friendly], [empathetic], [reassuring], [serious], [disappointed], [concerned], [laughs], or [giggles].
+- Never use a cheerful tag for sadness, anger, danger, fear, or serious subjects.
+- Use [laughs] and [giggles] only for clearly playful, harmless conversation.
+- Keep the separate JSON `emotion` field restricted to the allowed application values listed below; choose the closest equivalent.
+
+Be kind, patient, helpful, child-safe, respectful, positive, and encouraging. Never generate hate, violence encouragement, discrimination, explicit adult content, bullying, or insults.
+"""
+
+SYSTEM_PROMPT = VOICE_ASSISTANT_POLICY + "\n\n" + """You are Monto — a warm, caring, and playful AI mentor and best friend for children aged 5 to 15.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 WHO YOU ARE
@@ -40,8 +65,8 @@ YOUR PERSONALITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 LANGUAGE RULES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- Detect language automatically: English → reply English, Nepali → reply Nepali
-- For mixed Nepali-English (Nepali kids often do this) → reply in the same mix
+- Understand the user's language automatically, but reply in Nepali by default
+- For mixed-language input → reply in natural Nepali unless another language is explicitly requested
 - Ages 5-8: very simple words, short sentences, lots of "Wow!" and "Great!"
 - Ages 9-15: slightly more depth, still friendly and encouraging
 - NEVER use big words a child won't understand
@@ -131,6 +156,7 @@ class LLMService:
         if self.use_local:
             self.ollama_url = os.getenv("GPU_OLLAMA_URL",  "http://192.168.1.100:11434")
             self.model      = os.getenv("LOCAL_LLM_MODEL", "qwen3:8b")
+            self._http = httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=3.0))
             logger.info(f"✅ LLM: GPU Ollama ({self.model}) | Groq fallback: {'yes' if self._has_groq else 'no'}")
         else:
             logger.info(f"✅ LLM: Groq cloud — {self._groq_model}")
@@ -157,13 +183,10 @@ class LLMService:
                 confidence=0.1,
             )
 
-        # Add an explicit language instruction to the system prompt
-        if language == "nepali":
-            lang_instruction = "\n\n[IMPORTANT: The child is speaking Nepali. You MUST reply in Nepali (Devanagari script). Do NOT reply in English.]"
-        else:
-            lang_instruction = "\n\n[IMPORTANT: The child is speaking English. You MUST reply in English.]"
-
-        system   = SYSTEM_PROMPT + lang_instruction + facts_prompt
+        # Nepali is the default regardless of detected input language. The
+        # model changes language only when the user explicitly requests it.
+        lang_instruction = "\n\n[Default to natural Nepali. Change response language only if the user explicitly requests English, Hindi, or Bhojpuri.]"
+        system = SYSTEM_PROMPT + lang_instruction + facts_prompt
         messages = [{"role": "system", "content": system}]
         messages += (history or [])
         messages.append({"role": "user", "content": transcript})
@@ -190,16 +213,17 @@ class LLMService:
             "temperature": 0.4,
             "stream":      False,
             "format":      "json",  # forces JSON output
+            "keep_alive":  "10m",
+            "options":     {"num_predict": 256},
         }
 
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(
-                    f"{self.ollama_url}/api/chat",
-                    headers={"Content-Type": "application/json"},
-                    json=payload,
-                )
-                resp.raise_for_status()
+            resp = await self._http.post(
+                f"{self.ollama_url}/api/chat",
+                headers={"Content-Type": "application/json"},
+                json=payload,
+            )
+            resp.raise_for_status()
 
             raw  = resp.json()["message"]["content"]
             return self._parse_llm_output(raw)
@@ -223,7 +247,7 @@ class LLMService:
                 model=self._groq_model,
                 messages=messages,
                 temperature=0.4,
-                max_tokens=512,
+                max_tokens=256,
             )
             raw = completion.choices[0].message.content.strip()
             logger.debug(f"Groq raw: {raw[:300]}")

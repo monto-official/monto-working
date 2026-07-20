@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ (API 31+) ignores plain `android:background` on a
+         Theme.SplashScreen-derived style — the OS splash there only ever
+         renders an icon on a flat color, via these specific attributes.
+         The full illustrated splash.png still shows right after, drawn by
+         the Capacitor SplashScreen plugin itself (see MainActivity /
+         capacitor.config.ts), which isn't subject to this OS restriction. -->
+    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splashBackground</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
+    </style>
+</resources>

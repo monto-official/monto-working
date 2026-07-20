@@ -1,4 +1,5 @@
 import { getOrCreateParentDeviceId } from "./device-id";
+import { sendFirebaseSignal } from "./firebase-signaling";
 
 const STORAGE_KEY = "monto_pairing";
 
@@ -99,4 +100,31 @@ export async function redeemPairingCode(raw: string): Promise<PairingData> {
     turnUsername: data.turn_username ?? undefined,
     turnPassword: data.turn_password ?? undefined,
   };
+}
+
+/**
+ * Best-effort push to the child device over the same `${deviceId}:control`
+ * channel `useDeviceChannel`/music remote-control uses, so the child app can
+ * show its own "paired successfully" moment and learn the name the parent
+ * just set for it. Silently does nothing if the child app isn't online right
+ * now — pairing itself already succeeded via the backend redeem above.
+ */
+export function notifyChildPaired(pairing: PairingData, childName: string): void {
+  void sendFirebaseSignal(`${pairing.deviceId}:control`, "parent", "paired", { childName }).catch(() => {});
+}
+
+/**
+ * Wakes up the child app so it opens its own call screen and starts
+ * listening on the WebRTC call room — the child app has no persistent
+ * connection to that room while it's just sitting idle on the home screen,
+ * so a "ring" sent directly there before the child is listening would be
+ * dropped. This goes out over the always-on `${deviceId}:control` channel
+ * instead (same one used for `notifyChildPaired`/music commands), which the
+ * child app keeps connected everywhere.
+ */
+export function notifyChildIncomingCall(pairing: PairingData, callerName: string, callerAvatar?: string): void {
+  void sendFirebaseSignal(`${pairing.deviceId}:control`, "parent", "incoming-call", {
+    callerName,
+    callerAvatar,
+  }).catch(() => {});
 }

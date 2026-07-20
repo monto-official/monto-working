@@ -31,3 +31,25 @@ export function formatDate(date: Date): string {
     " " +
     formatTime(date);
 }
+
+/** Splits a raw timestamp (ISO string or epoch) into a "Today"/"Yesterday"/
+ * short-date label plus a clock time, for question/activity feed rows. */
+export function formatQuestionStamp(timestamp: string | number): { date: string; time: string } {
+  const d = new Date(timestamp);
+  if (isNaN(d.getTime())) return { date: "", time: "" };
+
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+
+  const isSameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+  const date = isSameDay(d, now)
+    ? "Today"
+    : isSameDay(d, yesterday)
+    ? "Yesterday"
+    : d.toLocaleDateString([], { month: "short", day: "numeric" });
+
+  return { date, time: formatTime(d) };
+}

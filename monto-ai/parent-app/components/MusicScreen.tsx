@@ -1,50 +1,91 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Play, Pause, Square, Music2 } from "lucide-react";
 import { PhoneShell } from "@/components/PhoneShell";
 import { PageHeader } from "@/components/AppHeader";
 import { BottomNav } from "@/components/BottomNav";
+import { loadPairing, type PairingData } from "@/lib/pairing-storage";
+import { useDeviceChannel } from "@/hooks/useDeviceChannel";
+import { SONGS } from "@/lib/songs";
 
-const tracks = [
-  { name: "Happy Learning", duration: "3:42", gradient: "from-amber-400 to-pink-500" },
-  { name: "Morning Motivation", duration: "4:18", gradient: "from-sky-400 to-indigo-500" },
-  { name: "Bedtime Calm", duration: "6:24", gradient: "from-indigo-500 to-purple-700" },
-  { name: "Nature Sounds", duration: "8:00", gradient: "from-emerald-400 to-teal-600" },
-  { name: "Focus Music", duration: "5:12", gradient: "from-slate-500 to-blue-700" },
-  { name: "Kids Adventure", duration: "3:55", gradient: "from-orange-400 to-red-500" },
-  { name: "Classical Kids", duration: "4:36", gradient: "from-rose-300 to-fuchsia-500" },
-  { name: "Relaxation", duration: "7:10", gradient: "from-cyan-400 to-blue-600" },
-  { name: "Instrumental Fun", duration: "4:02", gradient: "from-lime-400 to-emerald-600" },
-];
+const LANG_LABEL: Record<string, string> = { ne: "Nepali", hi: "Hindi", en: "English" };
 
 export function MusicScreen() {
-  const [active, setActive] = useState(0);
+  // undefined = pairing not checked yet, null = checked and none saved
+  const [pairing, setPairing] = useState<PairingData | null | undefined>(undefined);
+
+  useEffect(() => {
+    setPairing(loadPairing());
+  }, []);
+
+  const { send, lastMessage, online } = useDeviceChannel(pairing);
+
+  const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
-  const track = tracks[active];
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  // Drive all "now playing" UI from the child's real music-status echoes
+  // instead of local-only optimistic state.
+  useEffect(() => {
+    if (!lastMessage || lastMessage.type !== "music-status") return;
+    setPlaying(Boolean(lastMessage.playing));
+    if (typeof lastMessage.trackId === "string") setActiveTrackId(lastMessage.trackId);
+    if (typeof lastMessage.currentTime === "number") setCurrentTime(lastMessage.currentTime);
+    if (typeof lastMessage.duration === "number") setDuration(lastMessage.duration);
+  }, [lastMessage]);
+
+  const track = SONGS.find((t) => t.id === activeTrackId) ?? null;
+  const progressPct = duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0;
+
+  const playTrack = (id: string) => {
+    send({ type: "music-command", action: "play", trackId: id });
+  };
+
+  const togglePlayPause = () => {
+    send({ type: "music-command", action: playing ? "pause" : "play", trackId: activeTrackId ?? undefined });
+  };
+
+  const stop = () => {
+    send({ type: "music-command", action: "stop" });
+  };
 
   return (
     <PhoneShell>
       <PageHeader title="Music Library" />
       <div className="flex-1 overflow-y-auto px-5 py-4 pb-44">
-        <p className="text-sm text-muted-foreground -mt-1 mb-4">Choose music to play on the AI Box.</p>
+        <p className="text-sm text-muted-foreground -mt-1 mb-3">Choose music to play on the AI Box.</p>
+
+        {pairing === null && (
+          <div className="rounded-2xl bg-muted/50 p-4 text-sm text-muted-foreground mb-3">
+            Pair with your child's Monto box from the{" "}
+            <Link href="/call" className="text-primary font-semibold">Call screen</Link> to control music.
+          </div>
+        )}
+        {pairing && !online && (
+          <div className="rounded-2xl bg-warning/15 text-warning-foreground p-3 text-xs font-semibold mb-3 text-center">
+            Box is offline — commands won't reach the AI Box right now.
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-3">
-          {tracks.map((t, i) => (
+          {SONGS.map((t) => (
             <button
-              key={t.name}
-              onClick={() => {
-                setActive(i);
-                setPlaying(true);
-              }}
+              key={t.id}
+              onClick={() => playTrack(t.id)}
               className={`text-left rounded-3xl overflow-hidden border bg-card shadow-card hover:shadow-elevated transition ${
-                active === i ? "ring-2 ring-primary" : ""
+                activeTrackId === t.id ? "ring-2 ring-primary" : ""
               }`}
             >
-              <div className={`aspect-square bg-gradient-to-br ${t.gradient} flex items-center justify-center`}>
-                <Music2 className="size-10 text-white/80" strokeWidth={1.5} />
+              <div className="aspect-square brand-gradient flex items-center justify-center text-4xl overflow-hidden">
+                {t.thumbnail
+                  ? <img src={`/songs/thumbs/${t.thumbnail}`} alt="" className="w-full h-full object-cover" />
+                  : t.emoji}
               </div>
               <div className="p-3">
-                <p className="text-sm font-semibold leading-tight truncate">{t.name}</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">{t.duration}</p>
+                <p className="text-sm font-semibold leading-tight truncate">{t.title}</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">{LANG_LABEL[t.lang]}</p>
               </div>
             </button>
           ))}
@@ -54,24 +95,29 @@ export function MusicScreen() {
       {/* Player */}
       <div className="absolute bottom-[68px] left-0 right-0 px-3">
         <div className="rounded-3xl bg-card border shadow-elevated p-3 flex items-center gap-3">
-          <div className={`size-12 rounded-xl bg-gradient-to-br ${track.gradient} flex items-center justify-center shrink-0`}>
-            <Music2 className="size-5 text-white" />
+          <div className="size-12 rounded-xl brand-gradient flex items-center justify-center shrink-0 text-xl overflow-hidden">
+            {track
+              ? track.thumbnail
+                ? <img src={`/songs/thumbs/${track.thumbnail}`} alt="" className="w-full h-full object-cover" />
+                : track.emoji
+              : <Music2 className="size-5 text-white" />}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold truncate">{track.name}</p>
+            <p className="text-sm font-semibold truncate">{track ? track.title : "No track selected"}</p>
             <div className="h-1 rounded-full bg-muted mt-1.5 overflow-hidden">
               <div
                 className="h-full brand-gradient"
-                style={{ width: playing ? "42%" : "0%", transition: "width 0.4s" }}
+                style={{ width: `${progressPct}%`, transition: "width 0.4s" }}
               />
             </div>
           </div>
-          <button onClick={() => setPlaying(false)} className="size-9 rounded-full bg-muted flex items-center justify-center">
+          <button onClick={stop} className="size-9 rounded-full bg-muted flex items-center justify-center">
             <Square className="size-4 fill-current" />
           </button>
           <button
-            onClick={() => setPlaying((p) => !p)}
-            className="size-12 rounded-full brand-gradient text-white flex items-center justify-center shadow-card active:scale-95"
+            onClick={togglePlayPause}
+            disabled={!track}
+            className="size-12 rounded-full brand-gradient text-white flex items-center justify-center shadow-card active:scale-95 disabled:opacity-50"
           >
             {playing ? <Pause className="size-5 fill-current" /> : <Play className="size-5 fill-current ml-0.5" />}
           </button>

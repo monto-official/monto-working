@@ -1,19 +1,28 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
-import { PhoneOff, PhoneIncoming, Mic, MicOff, Phone, Clock, QrCode, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { PhoneOff, PhoneIncoming, PhoneCall, Mic, MicOff, Phone, Clock, QrCode, RefreshCw, CheckCircle2 } from "lucide-react";
+import { toast } from "sonner";
 import { PhoneShell } from "@/components/PhoneShell";
 import { PageHeader } from "@/components/AppHeader";
 import { BottomNav } from "@/components/BottomNav";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Modal } from "@/components/ui/modal";
 import { useWebRTCCall } from "@/hooks/useWebRTCCall";
-import { loadChildProfile, DEFAULT_CHILD } from "@/lib/profile-storage";
+import { useDeviceChannel } from "@/hooks/useDeviceChannel";
+import { loadChildProfile, saveChildProfile, DEFAULT_CHILD, loadParentAccount } from "@/lib/profile-storage";
 import {
   loadPairing,
   savePairing,
   clearPairing,
   redeemPairingCode,
+  notifyChildPaired,
+  notifyChildIncomingCall,
   type PairingData,
 } from "@/lib/pairing-storage";
 import { PairingScanner } from "@/components/PairingScanner";
+import { ChildAvatar } from "@/components/ChildAvatar";
 import type { ChildProfile } from "@/types";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -69,6 +78,19 @@ function PairingPrompt({ onPaired }: { onPaired: (data: PairingData) => void }) 
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [redeeming, setRedeeming] = useState(false);
+  // Set once a QR scan redeems successfully but the child's name hasn't been
+  // entered yet — holds the pairing data until the name modal is confirmed.
+  const [pendingPairing, setPendingPairing] = useState<PairingData | null>(null);
+  const [childName, setChildName] = useState("");
+
+  const finishPairing = useCallback(
+    (data: PairingData, name: string) => {
+      toast.success(`Pairing successful! You're connected to ${name}'s Monto box 🎉`);
+      notifyChildPaired(data, name);
+      onPaired(data);
+    },
+    [onPaired]
+  );
 
   const handleDetected = useCallback(
     async (raw: string) => {
@@ -78,7 +100,14 @@ function PairingPrompt({ onPaired }: { onPaired: (data: PairingData) => void }) 
         const data = await redeemPairingCode(raw);
         savePairing(data);
         setScanning(false);
-        onPaired(data);
+
+        const existing = loadChildProfile();
+        if (existing.name.trim()) {
+          finishPairing(data, existing.name.trim());
+        } else {
+          // Child's name is required before we show the paired dashboard.
+          setPendingPairing(data);
+        }
       } catch (err) {
         setScanError(err instanceof Error ? err.message : "Pairing failed — try again.");
         setScanning(false);
@@ -86,8 +115,17 @@ function PairingPrompt({ onPaired }: { onPaired: (data: PairingData) => void }) 
         setRedeeming(false);
       }
     },
-    [onPaired]
+    [finishPairing]
   );
+
+  const handleConfirmChildName = useCallback(() => {
+    const name = childName.trim();
+    if (!name || !pendingPairing) return;
+    saveChildProfile({ ...DEFAULT_CHILD, name });
+    finishPairing(pendingPairing, name);
+    setPendingPairing(null);
+    setChildName("");
+  }, [childName, pendingPairing, finishPairing]);
 
   return (
     <PhoneShell>
@@ -125,6 +163,36 @@ function PairingPrompt({ onPaired }: { onPaired: (data: PairingData) => void }) 
       {scanning && (
         <PairingScanner onDetected={handleDetected} onClose={() => setScanning(false)} />
       )}
+
+      <Modal open={pendingPairing !== null} onClose={() => {}}>
+        <div className="flex flex-col items-center text-center gap-2 mb-4">
+          <CheckCircle2 className="size-10 text-green-500" />
+          <h2 className="text-lg font-bold">Pairing successful!</h2>
+          <p className="text-sm text-muted-foreground">
+            One last step — what's your child's name? It'll be shown across the app.
+          </p>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            Child's Name
+          </Label>
+          <Input
+            autoFocus
+            value={childName}
+            onChange={(e) => setChildName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleConfirmChildName()}
+            placeholder="e.g. Aarav Sharma"
+            className="h-11 rounded-xl"
+          />
+        </div>
+        <Button
+          onClick={handleConfirmChildName}
+          disabled={!childName.trim()}
+          className="w-full h-11 rounded-2xl mt-5 disabled:opacity-60"
+        >
+          Continue
+        </Button>
+      </Modal>
     </PhoneShell>
   );
 }
@@ -138,13 +206,15 @@ function ActiveCallScreen({
   pairing: PairingData;
   onRepair: () => void;
 }) {
+  const { online: deviceOnline } = useDeviceChannel(pairing);
   const [child, setChild] = useState<ChildProfile>(DEFAULT_CHILD);
 
   useEffect(() => {
     setChild(loadChildProfile());
   }, []);
 
-  const signalingUrl = pairing.apiUrl.replace(/^http/, "ws") + "/ws/call";
+  // Signaling is HTTP polling now (see routes/call_signal.py) — pairing.apiUrl
+  // is already a plain http(s) base URL, no ws:// conversion needed.
   const iceServers: RTCIceServer[] = [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
@@ -154,9 +224,9 @@ function ActiveCallScreen({
   ];
 
   const { status, isMuted, durationFormatted, peerOnline, error,
-          acceptCall, rejectCall, hangUp, toggleMute } = useWebRTCCall({
+          ringParent, acceptCall, rejectCall, hangUp, toggleMute } = useWebRTCCall({
     role: "parent",
-    signalingUrl,
+    apiUrl: pairing.apiUrl,
     room: pairing.deviceId,
     iceServers,
   });
@@ -164,7 +234,67 @@ function ActiveCallScreen({
   const isIncoming  = status === "incoming";
   const isActive    = status === "in-call";
   const isConnecting = status === "connecting";
+  const isReady     = status === "ready";
   const label = error || STATUS_LABEL[status] || status;
+
+  // Ring for as long as the child's call is waiting on this side to
+  // accept/reject — stops the moment that resolves either way.
+  const ringtoneRef = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => {
+    if (isIncoming) {
+      const ringtone = new Audio("/sounds/call_ringtone.mp3");
+      ringtone.loop = true;
+      ringtone.play().catch(() => {});
+      ringtoneRef.current = ringtone;
+      return () => {
+        ringtone.pause();
+        if (ringtoneRef.current === ringtone) ringtoneRef.current = null;
+      };
+    }
+  }, [isIncoming]);
+
+  // ── Parent-initiated call ────────────────────────────────────────────────
+  // The child app has no persistent listener on the WebRTC call room while
+  // it's idle, so ring it over the always-on control channel first (wakes its
+  // own CallScreen open there) and wait for `peer-online` before sending the
+  // real `ring` signal — otherwise it'd be relayed into an empty room and
+  // dropped.
+  const [pendingRing, setPendingRing] = useState(false);
+  const pendingRingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Retries every 2s rather than sending once — the signaling socket has
+  // been observed to briefly recycle every ~3s under some networks, which
+  // can silently drop a single one-shot send; retrying gives it more
+  // chances to land in a stable window. Stops as soon as `status` moves
+  // past "ready" (the child acknowledged and the call is progressing).
+  useEffect(() => {
+    if (!(pendingRing && peerOnline)) return;
+    if (status !== "ready") {
+      if (pendingRingTimeoutRef.current) clearTimeout(pendingRingTimeoutRef.current);
+      setPendingRing(false);
+      return;
+    }
+    ringParent();
+    const retry = setInterval(ringParent, 2000);
+    return () => clearInterval(retry);
+  }, [pendingRing, peerOnline, status, ringParent]);
+
+  useEffect(() => () => {
+    if (pendingRingTimeoutRef.current) clearTimeout(pendingRingTimeoutRef.current);
+  }, []);
+
+  const handleCallChild = useCallback(() => {
+    if (!isReady || pendingRing) return;
+    const account = loadParentAccount();
+    notifyChildIncomingCall(pairing, account.name || "Your parent", account.avatar);
+    setPendingRing(true);
+    // Give the child device a full 2 minutes to wake up and come online
+    // before giving up — flaky wifi/reconnects shouldn't cut this short.
+    pendingRingTimeoutRef.current = setTimeout(() => {
+      setPendingRing(false);
+      toast.error("Child's Monto box didn't respond — make sure it's on and connected.");
+    }, 120000);
+  }, [isReady, pendingRing, pairing]);
 
   return (
     <PhoneShell>
@@ -185,7 +315,9 @@ function ActiveCallScreen({
 
           {/* Avatar */}
           <div className={`size-24 rounded-full brand-gradient text-white flex items-center justify-center text-3xl shadow-elevated relative ${isIncoming ? "animate-pulse" : ""}`}>
-            {child.avatar || "👦"}
+            <div className="w-full h-full rounded-full overflow-hidden flex items-center justify-center">
+              <ChildAvatar child={child} />
+            </div>
             {isActive && (
               <span className="absolute -bottom-1 -right-1 size-5 rounded-full bg-green-400 border-2 border-white" />
             )}
@@ -211,9 +343,9 @@ function ActiveCallScreen({
           )}
 
           {/* Peer status */}
-          <div className={`mt-3 flex items-center gap-1.5 text-xs relative ${peerOnline ? "text-green-500" : "text-muted-foreground"}`}>
-            <span className={`size-2 rounded-full ${peerOnline ? "bg-green-500" : "bg-gray-400"}`} />
-            {peerOnline ? "Child device online" : "Child device offline"}
+          <div className={`mt-3 flex items-center gap-1.5 text-xs relative ${deviceOnline ? "text-green-500" : "text-muted-foreground"}`}>
+            <span className={`size-2 rounded-full ${deviceOnline ? "bg-green-500" : "bg-gray-400"}`} />
+            {deviceOnline ? "Child device online" : "Child device offline"}
           </div>
         </div>
 
@@ -249,14 +381,26 @@ function ActiveCallScreen({
                 <PhoneOff className="size-7" />
               </button>
             </>
-          ) : (
-            <div className="flex flex-col items-center gap-2 text-center">
-              <div className="size-20 rounded-full bg-muted flex items-center justify-center">
-                <Phone className="size-8 text-muted-foreground" />
+          ) : pendingRing ? (
+            <div className="flex flex-col items-center gap-3 text-center">
+              <div className="size-20 rounded-full brand-gradient flex items-center justify-center animate-pulse">
+                <PhoneCall className="size-8 text-white" />
               </div>
               <p className="text-xs text-muted-foreground max-w-xs">
-                Keep this page open. When your child says "call mom" or "call dad",
-                you'll receive the call here.
+                Waking up {child.name ? `${child.name}'s` : "your child's"} Monto box…
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-3 text-center">
+              <button onClick={handleCallChild}
+                disabled={!isReady}
+                className="size-20 rounded-full brand-gradient text-white shadow-elevated flex items-center justify-center active:scale-95 transition disabled:opacity-40"
+                aria-label="Call child">
+                <PhoneCall className="size-8" />
+              </button>
+              <p className="text-xs text-muted-foreground max-w-xs">
+                Tap to call {child.name ? `${child.name}'s` : "your child's"} Monto box, or
+                just wait — when your child says "call mom" or "call dad" you'll get the call here.
               </p>
             </div>
           )}
@@ -278,3 +422,5 @@ function ActiveCallScreen({
     </PhoneShell>
   );
 }
+
+

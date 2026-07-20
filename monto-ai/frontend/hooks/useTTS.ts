@@ -11,8 +11,9 @@
  */
 import { useCallback, useRef } from "react";
 import { Settings } from "@/types";
+import { getApiUrl } from "@/lib/api-url";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_URL = getApiUrl();
 
 // ── Module-level singleton ────────────────────────────────────────────────────
 // Kept OUTSIDE React so it survives re-renders without recreating.
@@ -136,7 +137,8 @@ export function useTTS() {
     if (typeof window === "undefined" || !window.speechSynthesis) { onEnd(); return; }
 
     const isNe       = language === "nepali" || isNepali(text);
-    const utterance  = new SpeechSynthesisUtterance(text);
+    const browserText = text.replace(/^\s*\[[a-zA-Z ]+\]\s*/, "");
+    const utterance  = new SpeechSynthesisUtterance(browserText);
     utterance.lang   = isNe ? "ne-NP" : "en-US";
     utterance.rate   = isNe ? 0.85 : 0.92;
     utterance.pitch  = 1.05;

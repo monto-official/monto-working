@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches the splash artwork's own pastel background (see
+         capacitor.config.ts SplashScreen.backgroundColor) so Android 12+'s
+         own system splash screen — which only supports an icon + flat
+         background color, not an arbitrary image — doesn't flash a
+         mismatched color before Capacitor's own splash overlay (which CAN
+         show the full artwork) takes over. -->
+    <color name="splashBackground">#F5EAE9</color>
+</resources>

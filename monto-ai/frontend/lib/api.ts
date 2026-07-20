@@ -1,6 +1,8 @@
 import { VoiceQueryResponse } from "@/types";
+import { getOrCreateDeviceId } from "@/lib/device-id";
+import { getApiUrl } from "@/lib/api-url";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_URL = getApiUrl();
 
 export class APIError extends Error {
   constructor(
@@ -10,27 +12,6 @@ export class APIError extends Error {
     super(message);
     this.name = "APIError";
   }
-}
-
-// ── SESSION ID ────────────────────────────────────────────────────────────────
-// Each browser gets a unique persistent session ID stored in localStorage.
-// This ties web conversations to the same memory as the Pi (if SESSION_ID matches).
-const SESSION_ID_KEY = "monto_session_id";
-
-export function getSessionId(): string {
-  if (typeof window === "undefined") return "web-ssr";
-  let id = localStorage.getItem(SESSION_ID_KEY);
-  if (!id) {
-    // Generate a stable ID for this browser — includes timestamp so it's unique
-    id = `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    localStorage.setItem(SESSION_ID_KEY, id);
-  }
-  return id;
-}
-
-export function resetSessionId(): void {
-  if (typeof window === "undefined") return;
-  localStorage.removeItem(SESSION_ID_KEY);
 }
 
 // ── API CALLS ─────────────────────────────────────────────────────────────────
@@ -49,8 +30,11 @@ export async function sendVoiceQuery(
   const res = await fetch(`${API_URL}/voice/query`, {
     method: "POST",
     headers: {
-      // Send session ID so backend memory is tied to this browser session
-      "X-Session-Id": getSessionId(),
+      // Send the stable per-device ID (same one used for pairing/calls) so
+      // backend memory is tied to this physical device, not a random
+      // per-browser-tab session — this is what lets the parent app scope
+      // "Questions Asked" / "Usage" to the right child device.
+      "X-Session-Id": getOrCreateDeviceId(),
     },
     body: formData,
   });
@@ -79,7 +63,7 @@ export async function checkHealth(): Promise<boolean> {
 }
 
 export async function clearMemory(): Promise<void> {
-  const sessionId = getSessionId();
+  const sessionId = getOrCreateDeviceId();
   try {
     await fetch(`${API_URL}/voice/memory/${sessionId}`, { method: "DELETE" });
   } catch {

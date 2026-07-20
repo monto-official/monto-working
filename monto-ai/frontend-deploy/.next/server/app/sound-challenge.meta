@@ -1,0 +1,15 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/sound-challenge/layout,_N_T_/sound-challenge/page,_N_T_/sound-challenge"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/sound-challenge/__PAGE__",
+    "/sound-challenge",
+    "/_index",
+    "/_head"
+  ]
+}

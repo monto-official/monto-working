@@ -1,8 +1,8 @@
 "use client";
 /**
  * ProfilePanel — lets a parent view/edit their child's profile and their own
- * contact info. Persisted to localStorage — this app has no backend account
- * system yet, so "Sign Out" / "Delete Account" only clear local device data.
+ * contact info. Child/contact info is local-only; the account itself lives in
+ * Supabase Auth (see /signup, /login) — "Sign Out" clears that session.
  */
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -21,9 +21,12 @@ import {
   loadChildProfile, saveChildProfile,
   loadParentAccount, saveParentAccount,
 } from "@/lib/profile-storage";
+import { clearAuthSession } from "@/lib/auth-storage";
+import { ChildAvatar } from "@/components/ChildAvatar";
 import type { ChildProfile, ParentAccount } from "@/types";
 
 const AVATAR_OPTIONS = ["🧒", "👦", "👧", "👶", "🦊", "🐻", "🐰", "🌟"];
+const PARENT_AVATAR_OPTIONS = ["🧑", "👩", "👨", "🧔", "👩‍🦱", "👨‍🦱", "👩‍🦰", "🧕", "👳", "👩‍🦳", "👨‍🦳", "🧑‍🦲"];
 
 export function ProfilePanel() {
   const router = useRouter();
@@ -61,8 +64,8 @@ export function ProfilePanel() {
       <PageHeader title="Profile" />
       <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
         <div className="rounded-3xl brand-gradient text-white p-6 text-center shadow-elevated">
-          <div className="size-20 rounded-3xl bg-white/20 backdrop-blur mx-auto flex items-center justify-center text-4xl">
-            {child.avatar || "👦"}
+          <div className="size-20 rounded-3xl bg-white/20 backdrop-blur mx-auto flex items-center justify-center text-4xl overflow-hidden">
+            <ChildAvatar child={child} />
           </div>
           <h2 className="mt-3 text-xl font-bold">{child.name || "Add your child's name"}</h2>
           <p className="text-sm opacity-90">
@@ -72,6 +75,19 @@ export function ProfilePanel() {
 
         <Section title="Child Information">
           <div className="flex flex-wrap gap-2">
+            {child.photo && (
+              <button
+                type="button"
+                onClick={() => setChild((c) => ({ ...c, avatar: "photo" }))}
+                aria-label="Use profile photo"
+                className={cn(
+                  "flex h-10 w-10 items-center justify-center rounded-full overflow-hidden border-2 transition-colors",
+                  child.avatar === "photo" ? "border-primary" : "border-border hover:border-muted-foreground"
+                )}
+              >
+                <img src={child.photo} alt="" className="w-full h-full object-cover" />
+              </button>
+            )}
             {AVATAR_OPTIONS.map((emoji) => (
               <button
                 key={emoji}
@@ -99,6 +115,28 @@ export function ProfilePanel() {
         </Section>
 
         <Section title="Parent Account">
+          <div className="flex items-center gap-3">
+            <div className="size-14 rounded-full brand-gradient flex items-center justify-center text-3xl shrink-0">
+              {parent.avatar || "🧑"}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {PARENT_AVATAR_OPTIONS.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  onClick={() => setParent((p) => ({ ...p, avatar: emoji }))}
+                  aria-label={`Choose avatar ${emoji}`}
+                  className={cn(
+                    "flex h-9 w-9 items-center justify-center rounded-full text-lg border transition-colors",
+                    parent.avatar === emoji ? "border-primary bg-primary/10" : "border-border hover:border-muted-foreground"
+                  )}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <Field label="Your Name" value={parent.name} onChange={(v) => setParent((p) => ({ ...p, name: v }))} placeholder="e.g. Priya Sharma" />
           <Field label="Email" type="email" value={parent.email} onChange={(v) => setParent((p) => ({ ...p, email: v }))} placeholder="you@example.com" />
           <Button variant="outline" onClick={handleSaveParent} className="w-full h-11 rounded-2xl">
@@ -115,7 +153,14 @@ export function ProfilePanel() {
           </p>
         </div>
 
-        <Button variant="outline" onClick={() => router.push("/")} className="w-full h-11 rounded-2xl">
+        <Button
+          variant="outline"
+          onClick={() => {
+            clearAuthSession();
+            router.replace("/signup");
+          }}
+          className="w-full h-11 rounded-2xl"
+        >
           <LogOut className="size-4" /> Sign Out
         </Button>
 

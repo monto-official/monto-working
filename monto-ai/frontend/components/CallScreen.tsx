@@ -1,30 +1,40 @@
-"use client";
+﻿"use client";
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PhoneOff, Mic, MicOff } from "lucide-react";
 import { useWebRTCCall } from "@/hooks/useWebRTCCall";
 import { getOrCreateDeviceId } from "@/lib/device-id";
 import { useCallCutDetector } from "@/hooks/useCallCutDetector";
+import { getApiUrl } from "@/lib/api-url";
 
 interface CallScreenProps {
-  callee: "mom" | "dad";
+  // "mom"/"dad" for the child's own voice-triggered outgoing call; any other
+  // string is the caller's name for a parent-initiated incoming call.
+  callee: "mom" | "dad" | string;
+  // True when this screen was opened because the parent is calling in
+  // (via the control-channel wake-up) rather than the child calling out —
+  // skips the auto-ring-on-ready behavior and just waits for the real "ring".
+  isIncoming?: boolean;
+  // The calling parent's chosen profile emoji (see ProfilePanel) — only set
+  // for an incoming, parent-initiated call.
+  avatar?: string;
   onEnd: () => void;
 }
 
-const SIGNALING_URL =
-  (process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_MONTO_API_URL || "http://localhost:8000")
-    .replace(/^http/, "ws") + "/ws/call";
+// Signaling is HTTP polling now (see routes/call_signal.py) — plain API
+// base URL, no ws:// scheme needed.
+const API_URL = getApiUrl();
 
-export function CallScreen({ callee, onEnd }: CallScreenProps) {
-  const displayName = callee === "mom" ? "Mom 💜" : "Dad 💙";
-  const avatar      = callee === "mom" ? "👩" : "👨";
+export function CallScreen({ callee, isIncoming = false, avatar: callerAvatar, onEnd }: CallScreenProps) {
+  const displayName = callee === "mom" ? "Mom 💜" : callee === "dad" ? "Dad 💙" : `${callee} 💜`;
+  const avatar      = callee === "mom" ? "👩" : callee === "dad" ? "👨" : callerAvatar || "📞";
 
   const [deviceId] = useState(() => getOrCreateDeviceId());
 
   const { status, isMuted, durationFormatted, peerOnline, error,
-          ringParent, hangUp, toggleMute } = useWebRTCCall({
+          ringParent, acceptCall, hangUp, toggleMute } = useWebRTCCall({
     role: "child",
-    signalingUrl: SIGNALING_URL,
+    apiUrl: API_URL,
     room: deviceId,
     onCallEnded: onEnd,
   });
@@ -32,21 +42,37 @@ export function CallScreen({ callee, onEnd }: CallScreenProps) {
   // ── "Cut the call" voice command detector ────────────────────────────────
   // Listens for the child saying "cut the call" and auto-hangs up
   useCallCutDetector({
-    enabled: status === "connected" || status === "ringing",
+    enabled: status === "in-call" || status === "ringing",
     onCut: () => {
       console.log("[CallScreen] Voice command: cut the call");
       hangUp();
     },
   });
 
-  // Auto-ring once ready
+  // Auto-ring once ready — only for the child's own outgoing call; an
+  // incoming (parent-initiated) call just waits for the real "ring" signal.
+  // Retries every 2s while still "ready" (not just once) — the signaling
+  // socket on this connection has been observed to briefly recycle every
+  // ~3s under some networks, which can silently drop a single one-shot
+  // send; retrying gives it more chances to land in a stable window.
   const ranRef = useRef(false);
   useEffect(() => {
-    if (status === "ready" && !ranRef.current) {
-      ranRef.current = true;
-      ringParent();
-    }
-  }, [status, ringParent]);
+    if (isIncoming || status !== "ready") { ranRef.current = false; return; }
+    ranRef.current = true;
+    ringParent();
+    const retry = setInterval(() => { if (ranRef.current) ringParent(); }, 2000);
+    return () => clearInterval(retry);
+  }, [isIncoming, status, ringParent]);
+
+  // Auto-answer — the child device has no one to tap "accept", so any
+  // incoming ring (from the parent) is answered immediately. Retried on the
+  // same 2s cadence and for the same reason as the auto-ring above.
+  useEffect(() => {
+    if (status !== "incoming") return;
+    acceptCall();
+    const retry = setInterval(acceptCall, 2000);
+    return () => clearInterval(retry);
+  }, [status, acceptCall]);
 
   const handleHangup = () => { hangUp(); onEnd(); };
 
@@ -176,4 +202,6 @@ export function CallScreen({ callee, onEnd }: CallScreenProps) {
     </motion.div>
   );
 }
+
+
 

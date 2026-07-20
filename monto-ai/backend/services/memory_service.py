@@ -60,6 +60,15 @@ class _SQLiteMemory:
                 ).fetchall()
         return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
 
+    def get_full_transcript(self, session_id: str, limit: int = 200) -> List[dict]:
+        with self._lock:
+            with self._conn() as c:
+                rows = c.execute(
+                    "SELECT role, content, timestamp FROM messages WHERE session_id=? ORDER BY timestamp DESC LIMIT ?",
+                    (session_id, limit)
+                ).fetchall()
+        return [{"role": r["role"], "content": r["content"], "timestamp": r["timestamp"]} for r in reversed(rows)]
+
     def add_turn(self, session_id: str, user_text: str, assistant_text: str):
         clean = self._plain(assistant_text)
         now   = time.time()
@@ -183,6 +192,15 @@ class _SupabaseMemory:
                .execute())
         return [{"role": r["role"], "content": r["content"]} for r in reversed(res.data or [])]
 
+    def get_full_transcript(self, session_id: str, limit: int = 200) -> List[dict]:
+        res = (self._db().table("memory_messages")
+               .select("role, content, created_at")
+               .eq("session_id", session_id)
+               .order("created_at", desc=True)
+               .limit(limit)
+               .execute())
+        return [{"role": r["role"], "content": r["content"], "timestamp": r["created_at"]} for r in reversed(res.data or [])]
+
     def add_turn(self, session_id: str, user_text: str, assistant_text: str):
         self._db().table("memory_messages").insert([
             {"session_id": session_id, "role": "user",      "content": user_text},
@@ -191,9 +209,10 @@ class _SupabaseMemory:
 
     def get_facts(self, session_id: str) -> dict:
         res = (self._db().table("session_facts")
-               .select("facts_json").eq("session_id", session_id).maybe_single().execute())
+               .select("facts").eq("session_id", session_id).maybe_single().execute())
         if res and res.data:
-            return json.loads(res.data.get("facts_json", "{}"))
+            facts = res.data.get("facts")
+            return facts if isinstance(facts, dict) else {}
         return {}
 
     def get_facts_prompt(self, session_id: str) -> str:

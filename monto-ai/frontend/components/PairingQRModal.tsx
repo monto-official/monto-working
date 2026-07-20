@@ -4,12 +4,13 @@ import { motion } from "framer-motion";
 import QRCode from "qrcode";
 import { X } from "lucide-react";
 import { getOrCreateDeviceId } from "@/lib/device-id";
+import { getApiUrl } from "@/lib/api-url";
 
 interface PairingQRModalProps {
   onClose: () => void;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_URL = getApiUrl();
 
 export function PairingQRModal({ onClose }: PairingQRModalProps) {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
@@ -18,34 +19,33 @@ export function PairingQRModal({ onClose }: PairingQRModalProps) {
   useEffect(() => {
     let cancelled = false;
 
-    // Ask the backend (Supabase-backed) for a short-lived pairing code so the
-    // QR carries a redeemable code instead of raw TURN credentials — the
-    // pairing is then recorded server-side, not just in each app's storage.
-    fetch(`${API_URL}/pairing/code`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        child_device_id: getOrCreateDeviceId(),
-        api_url: API_URL,
-        turn_url: process.env.NEXT_PUBLIC_TURN_URL || undefined,
-        turn_username: process.env.NEXT_PUBLIC_TURN_USERNAME || undefined,
-        turn_password: process.env.NEXT_PUBLIC_TURN_PASSWORD || undefined,
-      }),
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then(({ code }) => {
-        if (cancelled) return;
-        const payload = JSON.stringify({ v: 2, code, api: API_URL });
-        return QRCode.toDataURL(payload, { width: 280, margin: 2 }).then((url) => {
-          if (!cancelled) setDataUrl(url);
+    // Mint a short-lived pairing code from the backend (persisted in
+    // Supabase) so the parent app's scan survives app reinstalls and more
+    // than one parent device can pair to this same child — the QR itself
+    // only carries the code, not raw connection info.
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/pairing/code`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            child_device_id: getOrCreateDeviceId(),
+            api_url: API_URL,
+            turn_url: process.env.NEXT_PUBLIC_TURN_URL || undefined,
+            turn_username: process.env.NEXT_PUBLIC_TURN_USERNAME || undefined,
+            turn_password: process.env.NEXT_PUBLIC_TURN_PASSWORD || undefined,
+          }),
         });
-      })
-      .catch(() => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        const payload = JSON.stringify({ v: 2, code: data.code, api: API_URL });
+        const url = await QRCode.toDataURL(payload, { width: 280, margin: 2 });
+        if (!cancelled) setDataUrl(url);
+      } catch {
         if (!cancelled) setError(true);
-      });
+      }
+    })();
 
     return () => {
       cancelled = true;

@@ -78,6 +78,19 @@ async def call_signaling(websocket: WebSocket, role: str = "child", room: str = 
         await websocket.close(code=4000, reason="invalid role")
         return
 
+    # A second connection for the same role (e.g. a stale browser tab left
+    # open from earlier testing) would otherwise silently coexist with this
+    # one — both would think they're "the child"/"the parent", each getting
+    # its own reconnect loop, and messages would only ever reach whichever
+    # one happens to hold this dict slot at that instant. Evict any prior
+    # connection for this role so exactly one is ever live per room.
+    existing = room_state.get(role)
+    if existing is not None:
+        try:
+            await existing.close(code=4002, reason="replaced by a new connection for this role")
+        except Exception:
+            pass
+
     room_state[role] = websocket
     peer_role = "parent" if role == "child" else "child"
     logger.info(f"[Signaling] {role} joined room {room_id}")

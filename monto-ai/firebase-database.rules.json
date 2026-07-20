@@ -1,0 +1,20 @@
+﻿{
+  "rules": {
+    "montoCalls": {
+      "$room": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "signals": {
+          "$signal": {
+            ".validate": "newData.hasChildren(['role', 'type', 'createdAt']) && (newData.child('role').val() === 'child' || newData.child('role').val() === 'parent') && newData.child('createdAt').isNumber()"
+          }
+        },
+        "presence": {
+          "$role": {
+            ".validate": "($role === 'child' || $role === 'parent') && newData.hasChildren(['online', 'lastSeen']) && newData.child('online').isBoolean() && newData.child('lastSeen').isNumber()"
+          }
+        }
+      }
+    }
+  }
+}
