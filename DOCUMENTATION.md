@@ -84,7 +84,7 @@ Monto AI is a voice-activated AI companion designed specifically for children ag
 ## 3. Folder Structure
 
 ```
-monto-ai/
+monto-working/
 │
 ├── backend/                    ← FastAPI server (your PC / server)
 │   ├── main.py                 ← app startup, service init
@@ -549,7 +549,7 @@ Uses **Picovoice Porcupine** (free tier available):
 ### 11.1 Backend Setup
 
 ```bash
-cd monto-ai/backend
+cd backend
 
 # Create virtual environment
 python -m venv venv
@@ -573,7 +573,7 @@ python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ### 11.2 Frontend Setup
 
 ```bash
-cd monto-ai/frontend
+cd frontend
 
 npm install
 
@@ -588,7 +588,7 @@ npm run dev
 ### 11.3 GPU Server Setup
 
 ```bash
-cd monto-ai/gpu_server
+cd gpu_server
 
 # Configure
 cp .env.example .env
@@ -613,7 +613,7 @@ bash start_gpu_server.sh
 
 ```bash
 # On the Raspberry Pi:
-cd monto-ai/raspberry_pi
+cd monto-working/raspberry_pi
 
 # Install system + Python deps
 bash setup.sh
@@ -650,9 +650,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=pi
-WorkingDirectory=/home/pi/monto-ai/raspberry_pi
-EnvironmentFile=/home/pi/monto-ai/raspberry_pi/.env
-ExecStart=/home/pi/monto-ai/raspberry_pi/venv/bin/python monto_listener.py
+WorkingDirectory=/home/pi/monto-working/raspberry_pi
+EnvironmentFile=/home/pi/monto-working/raspberry_pi/.env
+ExecStart=/home/pi/monto-working/raspberry_pi/venv/bin/python monto_listener.py
 Restart=always
 RestartSec=5
 ```

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Single entry point: `npm run dev` from monto-ai/ boots the backend
+ * Single entry point: `npm run dev` from the repo root boots the backend
  * (FastAPI/uvicorn) and the frontend (Next.js child app) together, in one
  * terminal, with output prefixed per service.
  *

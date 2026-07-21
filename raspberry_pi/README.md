@@ -18,13 +18,9 @@ raspberry_pi/
 ## Setup (run once on Pi)
 
 ```bash
-# 1. Clone only this folder
-git clone --no-checkout <your-repo-url> monto-pi
-cd monto-pi
-git sparse-checkout init
-git sparse-checkout set monto-ai/raspberry_pi
-git checkout
-cd monto-ai/raspberry_pi
+# 1. Clone the repo
+git clone https://github.com/monto-official/monto-working.git monto-working
+cd monto-working/raspberry_pi
 
 # 2. Install dependencies
 bash setup.sh

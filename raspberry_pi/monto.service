@@ -6,9 +6,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=pi
-WorkingDirectory=/home/pi/monto-ai/raspberry_pi
-EnvironmentFile=/home/pi/monto-ai/raspberry_pi/.env
-ExecStart=/home/pi/monto-ai/raspberry_pi/venv/bin/python monto_listener.py
+WorkingDirectory=/home/pi/monto-working/raspberry_pi
+EnvironmentFile=/home/pi/monto-working/raspberry_pi/.env
+ExecStart=/home/pi/monto-working/raspberry_pi/venv/bin/python monto_listener.py
 Restart=always
 RestartSec=5
 

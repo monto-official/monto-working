@@ -5,7 +5,7 @@ Child-safe voice AI companion — warm, playful, and always remembers your name.
 ## Project Structure
 
 ```
-monto-ai/
+monto-working/
 │
 ├── backend/          ← FastAPI server (runs on your laptop/server)
 │   ├── main.py

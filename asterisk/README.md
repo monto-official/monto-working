@@ -41,8 +41,8 @@ Internet / LAN
 ## Quick Start (Linux GPU server)
 
 ```bash
-# Clone / pull the repo, then:
-cd monto-ai
+git clone https://github.com/monto-official/monto-working.git monto-working
+cd monto-working
 chmod +x install.sh
 sudo ./install.sh
 ```
