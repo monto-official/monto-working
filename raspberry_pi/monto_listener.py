@@ -416,14 +416,31 @@ def main():
                 elif event.key in (pygame.K_SPACE, pygame.K_RETURN):
                     do_conversation(face)
 
+            # ── Mic button — touch panels register as a mouse (MOUSEBUTTONDOWN);
+            # FINGERDOWN is handled too in case the driver reports raw touch events.
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if face.hit_mic_button(event.pos):
+                    face.set_mic_button_pressed(True)
+                    do_conversation(face)
+            elif event.type == pygame.MOUSEBUTTONUP:
+                face.set_mic_button_pressed(False)
+            elif event.type == pygame.FINGERDOWN:
+                pos = (int(event.x * face.W), int(event.y * face.H))
+                if face.hit_mic_button(pos):
+                    face.set_mic_button_pressed(True)
+                    do_conversation(face)
+            elif event.type == pygame.FINGERUP:
+                face.set_mic_button_pressed(False)
+
         # ── Render ───────────────────────────────────────────────────────────
         with face._lock:
-            emotion   = face.emotion
-            text      = face.text
-            tick      = face._tick
-            talking   = face.talking
-            mic_level = face.mic_level
-            parts     = list(face.particles)
+            emotion    = face.emotion
+            text       = face.text
+            tick       = face._tick
+            talking    = face.talking
+            mic_level  = face.mic_level
+            btn_pressed = face.mic_btn_pressed
+            parts      = list(face.particles)
 
         face.screen.blit(face._bg_cached, (0, 0))
 
@@ -449,6 +466,7 @@ def main():
             face._draw_text_card(text, emotion)
 
         face._draw_status_bar(emotion, mic_level, talking)
+        face._draw_mic_button(tick, emotion, talking, btn_pressed)
 
         pygame.display.flip()
         with face._lock:

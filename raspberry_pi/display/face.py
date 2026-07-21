@@ -176,12 +176,24 @@ class MontoFace:
         self.face_cx = self.W // 2
         self.face_r  = int(min(self.W, self.H) * 0.27)  # face radius
 
+        # Status bar height (also used to dock the mic button above it)
+        self.bar_h = int(self.H * 0.055)
+
+        # Mic button — floating circular touch target, bottom-right corner,
+        # sized for a 7" touch panel (docked above the status bar so it never
+        # overlaps the mic-visualizer / text-card zone that lives bottom-center)
+        self.mic_btn_r  = int(min(self.W, self.H) * 0.088)
+        btn_margin      = int(self.W * 0.035)
+        self.mic_btn_cx = self.W - btn_margin - self.mic_btn_r
+        self.mic_btn_cy = self.H - self.bar_h - btn_margin - self.mic_btn_r
+
         # State
         self.emotion   = "idle"
         self.text      = ""
         self.talking   = False
         self.running   = True
         self.mic_level = 0.0   # 0.0-1.0 live mic input level
+        self.mic_btn_pressed = False
         self._lock     = threading.Lock()
         self._tick     = 0
         self.clock     = pygame.time.Clock()
@@ -233,6 +245,17 @@ class MontoFace:
     def stop(self):
         self.running = False
 
+    def hit_mic_button(self, pos) -> bool:
+        """True if (x, y) — a mouse click or touch point — lands on the mic button.
+        Tolerance is padded slightly since a fingertip is imprecise on a 7" panel."""
+        dx = pos[0] - self.mic_btn_cx
+        dy = pos[1] - self.mic_btn_cy
+        return (dx * dx + dy * dy) <= (self.mic_btn_r * 1.15) ** 2
+
+    def set_mic_button_pressed(self, pressed: bool):
+        with self._lock:
+            self.mic_btn_pressed = pressed
+
     def run(self):
         while self.running:
             for e in pygame.event.get():
@@ -240,12 +263,13 @@ class MontoFace:
                 if e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE: self.running = False
 
             with self._lock:
-                emotion   = self.emotion
-                text      = self.text
-                tick      = self._tick
-                talking   = self.talking
-                mic_level = self.mic_level
-                parts     = list(self.particles)
+                emotion    = self.emotion
+                text       = self.text
+                tick       = self._tick
+                talking    = self.talking
+                mic_level  = self.mic_level
+                btn_pressed = self.mic_btn_pressed
+                parts      = list(self.particles)
 
             # ── Background
             self.screen.blit(self._bg_cached, (0, 0))
@@ -282,6 +306,9 @@ class MontoFace:
 
             # ── Status bar
             self._draw_status_bar(emotion, mic_level)
+
+            # ── Mic button (touch target for 7" panels)
+            self._draw_mic_button(tick, emotion, talking, btn_pressed)
 
             pygame.display.flip()
             self._tick += 1
@@ -783,3 +810,49 @@ class MontoFace:
         status = self._f_status.render(f"{icon}  {label}", True, (*acc,))
         self.screen.blit(status, ((self.W - status.get_width()) // 2,
                                    bar_y + (bar_h - status.get_height()) // 2))
+
+    # ── MIC BUTTON ────────────────────────────────────────────────────────────
+
+    def _icon_mic(self, cx, cy, r, color):
+        """Simple hand-drawn microphone glyph (capsule head + stand + base)."""
+        w = max(2, int(r * 0.09))
+
+        cap_w = int(r * 0.62)
+        cap_h = int(r * 0.95)
+        cap_rect = pygame.Rect(cx - cap_w // 2, cy - int(r * 0.62), cap_w, cap_h)
+        pygame.draw.rect(self.screen, color, cap_rect, border_radius=cap_w // 2)
+
+        arc_rect = pygame.Rect(cx - int(r * 0.55), cy - int(r * 0.05), int(r * 1.10), int(r * 0.85))
+        pygame.draw.arc(self.screen, color, arc_rect, math.pi, 2 * math.pi, w)
+
+        pygame.draw.line(self.screen, color, (cx, cy + int(r * 0.42)), (cx, cy + int(r * 0.66)), w)
+
+        base_w = int(r * 0.50)
+        pygame.draw.line(self.screen, color,
+                          (cx - base_w // 2, cy + int(r * 0.66)),
+                          (cx + base_w // 2, cy + int(r * 0.66)), w)
+
+    def _draw_mic_button(self, tick, emotion, talking, pressed):
+        acc = Theme.accent(emotion)
+        cx, cy = self.mic_btn_cx, self.mic_btn_cy
+
+        # Pulsing rings while actively listening — same language as the
+        # in-face "sound rings" so the button reads as part of one system.
+        if emotion == "listening":
+            for i in range(1, 3):
+                rr    = self.mic_btn_r + 8 + i * 10 + int(math.sin(tick * 0.12) * 3)
+                alpha = max(0, 130 - i * 45)
+                rs = pygame.Surface((rr * 2 + 4, rr * 2 + 4), pygame.SRCALPHA)
+                pygame.gfxdraw.aacircle(rs, rr + 2, rr + 2, rr, (*acc, alpha))
+                self.screen.blit(rs, (cx - rr - 2, cy - rr - 2))
+
+        # Pressed = slight squish + darken, so a tap gives instant feedback
+        r_eff = int(self.mic_btn_r * (0.90 if pressed else 1.0))
+        fill  = tuple(max(0, int(c * 0.72)) for c in acc) if pressed else acc
+
+        glow(self.screen, (*acc, 55), cx, cy, r_eff + 16, steps=5)
+        aa_circle(self.screen, fill, (cx, cy), r_eff)
+        pygame.gfxdraw.aacircle(self.screen, cx, cy, r_eff, (255, 255, 255, 90))
+
+        icon_col = (225, 222, 245) if pressed else Theme.TEXT_FG
+        self._icon_mic(cx, cy, r_eff, icon_col)
