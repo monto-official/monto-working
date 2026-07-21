@@ -1,0 +1,7 @@
+{
+  "name": "monto-ai",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/dev-all.js"
+  }
+}
