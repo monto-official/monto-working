@@ -3,6 +3,7 @@
   "/_not-found/page": "app/_not-found/page.js",
   "/freeze-dance/page": "app/freeze-dance/page.js",
   "/games/page": "app/games/page.js",
+  "/moral-game/page": "app/moral-game/page.js",
   "/page": "app/page.js",
   "/songs/page": "app/songs/page.js",
   "/sound-challenge/page": "app/sound-challenge/page.js",

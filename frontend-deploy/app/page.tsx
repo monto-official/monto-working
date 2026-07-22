@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Volume2, VolumeX, Mic, Sparkles, MessageCircle, X, ChevronRight, QrCode, Settings as SettingsIcon, CheckCircle2, Music2, BookOpen, PersonStanding, Compass, Snowflake, Gamepad2 } from "lucide-react";
+import { Volume2, VolumeX, Mic, MicOff, Sparkles, MessageCircle, X, ChevronRight, QrCode, Settings as SettingsIcon, CheckCircle2, Music2, BookOpen, PersonStanding, Compass, Snowflake, Gamepad2, HeartHandshake } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { HangingAvatar } from "@/components/HangingAvatar";
 import { CallScreen } from "@/components/CallScreen";
@@ -91,6 +91,7 @@ export default function Home() {
   const [isSpeaking, setIsSpeaking]   = useState(false);
   const [online, setOnline]           = useState<boolean | null>(null);
   const [autoSpeak, setAutoSpeak]     = useState(true);
+  const [micMuted, setMicMuted]       = useState(false);
   const [showChat, setShowChat]       = useState(false);
   const [emojiBurst, setEmojiBurst]   = useState(0);
   const [lang, setLang]               = useState<"english" | "nepali">("english");
@@ -264,8 +265,16 @@ export default function Home() {
       if (appControls?.calls_enabled !== false && callDad) { setRS("idle"); busyRef.current = false; setCalling({ callee: "dad", isIncoming: false }); return; }
 
       // ── Media detection ─────────────────────────────────────────────────
-      const playSongs   = /play\s+(song|songs|music|tune)/i.test(lower);
-      const playStories = /play\s+(story|stories|bedtime|tale)/i.test(lower);
+      // Flexible intent matching: accepts "play a song", "play song",
+      // "song play", "song chalao", and the same word-order variants for stories.
+      const hasPlayIntent = /\b(play|start|listen|hear|chalao|chala do|bajao|baja do|sunao|suna do)\b/i.test(lower);
+      const hasSongWord = /\b(song|songs|music|tune|gana|gaana|gane|gaane)\b/i.test(lower);
+      const hasStoryIntent = /\b(play|start|tell|read|listen|hear|chalao|sunao|suna do)\b/i.test(lower);
+      const hasStoryWord = /\b(story|stories|bedtime story|tale|kahani|kahaani|katha)\b/i.test(lower);
+      const onlySongWord = /^(please\s+)?(a\s+)?(song|songs|music|tune|gana|gaana)(\s+please)?[.!?]*$/i.test(lower.trim());
+      const onlyStoryWord = /^(please\s+)?(a\s+)?(story|stories|tale|kahani|kahaani|katha)(\s+please)?[.!?]*$/i.test(lower.trim());
+      const playSongs = hasSongWord && (hasPlayIntent || onlySongWord);
+      const playStories = hasStoryWord && (hasStoryIntent || onlyStoryWord);
       const doYoga      = /(do|start|let'?s do)\s+yoga|yoga\s+time/i.test(lower);
       if (appControls?.songs_enabled !== false && playSongs)   { setRS("idle"); busyRef.current = false; router.push("/songs");   return; }
       if (appControls?.stories_enabled !== false && playStories) { setRS("idle"); busyRef.current = false; router.push("/stories"); return; }
@@ -339,6 +348,10 @@ export default function Home() {
   const handleMicRef = useRef<() => Promise<void>>(async () => {});
 
   const handleMic = useCallback(async () => {
+    if (micMuted) {
+      setApiError("Microphone is muted. Turn it on to talk.");
+      return;
+    }
     if (appControls?.maintenance_mode || appControls?.ai_enabled === false || appControls?.microphone_enabled === false) {
       setApiError(appControls.admin_notice || "Voice features are disabled by the administrator.");
       return;
@@ -361,7 +374,7 @@ export default function Home() {
       await recorder.startRecording();
       setRS("recording");
     }
-  }, [recorder, processAudio, calling]);
+  }, [recorder, processAudio, calling, micMuted]);
 
   // Keep ref in sync so wake word always calls latest handleMic
   useEffect(() => { handleMicRef.current = handleMic; }, [handleMic]);
@@ -378,7 +391,7 @@ export default function Home() {
   const { listening: wakeListen } = useWakeWord({
     onDetected: () => {
       console.log("[page] wake detected, state:", recordingStateRef.current, "online:", online);
-      if (recordingStateRef.current === "idle" && online !== false) {
+      if (recordingStateRef.current === "idle") {
         handleMicRef.current();
       }
     },
@@ -386,7 +399,7 @@ export default function Home() {
     // getUserMedia for WebRTC, and a second concurrent mic grab from the
     // wake-word engine destabilizes the audio pipeline (and, on Android
     // WebView, was observed dropping the call's signaling WebSocket).
-    enabled: recordingState === "idle" && !isSpeaking && online !== false && !exploreScene && !calling,
+    enabled: !micMuted && recordingState === "idle" && !isSpeaking && !exploreScene && !calling,
     keywords: ["monto", "hey monto", "hi monto", "montu", "hey montu", "hi montu", "मन्टो", "हे मन्टो"],
     language: lang === "nepali" ? "ne-NP" : "en-US",
   });
@@ -624,12 +637,12 @@ export default function Home() {
         <motion.div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full glass glass-border"
           initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}>
           <motion.div
-            className={cn("w-1.5 h-1.5 rounded-full", online === null ? "bg-amber-400" : online ? "bg-emerald-400" : "bg-red-400")}
+            className={cn("w-1.5 h-1.5 rounded-full", online ? "bg-emerald-400" : "bg-amber-400")}
             animate={{ scale: [1, 1.4, 1] }}
             transition={{ duration: 2, repeat: Infinity }}
           />
           <span className="text-[10px] text-white/50 font-semibold tracking-wide">
-            {online === null ? "WAKING UP" : online ? "READY" : "OFFLINE"}
+            {online ? "READY" : "RECONNECTING"}
           </span>
         </motion.div>
 
@@ -711,13 +724,43 @@ export default function Home() {
 
               <div className="monto-console rounded-[28px] p-4 sm:p-6 flex flex-col gap-4 min-h-[480px]">
                 <div className="monto-adventure-wrap">
-                  <p className="text-[10px] uppercase tracking-[0.3em] text-sky-200/50 font-extrabold mb-2">Pick an adventure</p>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[10px] uppercase tracking-[0.3em] text-sky-200/50 font-extrabold">Pick an adventure</p>
+                    <div className="flex items-center gap-2">
+                      <motion.button
+                        onClick={() => {
+                          if (!micMuted) recorder.cancelRecording();
+                          setMicMuted(value => !value);
+                          setApiError(null);
+                        }}
+                        aria-pressed={micMuted}
+                        title={micMuted ? "Turn microphone on" : "Mute microphone"}
+                        className={"flex h-9 items-center gap-2 rounded-xl border px-3 text-[11px] font-bold transition " + (micMuted ? "border-rose-400/40 bg-rose-500/20 text-rose-200" : "border-emerald-400/30 bg-emerald-400/10 text-emerald-200")}
+                        whileTap={{ scale: .94 }}>
+                        {micMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                        <span>{micMuted ? "Mic muted" : "Mic on"}</span>
+                      </motion.button>
+                      <motion.button
+                        onClick={() => {
+                          if (autoSpeak) cancelTTS();
+                          setAutoSpeak(value => !value);
+                        }}
+                        aria-pressed={!autoSpeak}
+                        title={autoSpeak ? "Mute speaker" : "Turn speaker on"}
+                        className={"flex h-9 items-center gap-2 rounded-xl border px-3 text-[11px] font-bold transition " + (autoSpeak ? "border-sky-400/30 bg-sky-400/10 text-sky-200" : "border-slate-400/20 bg-white/5 text-white/45")}
+                        whileTap={{ scale: .94 }}>
+                        {autoSpeak ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+                        <span>{autoSpeak ? "Speaker on" : "Speaker muted"}</span>
+                      </motion.button>
+                    </div>
+                  </div>
                   <div className="grid grid-cols-4 gap-2 sm:gap-3">
                     {[
                       { label: "Music", icon: Music2, route: "/songs", tone: "coral", enabled: appControls?.songs_enabled !== false },
                       { label: "Stories", icon: BookOpen, route: "/stories", tone: "violet", enabled: appControls?.stories_enabled !== false },
                       { label: "Move", icon: PersonStanding, route: "/yoga", tone: "mint", enabled: appControls?.yoga_enabled !== false },
                       { label: "Games", icon: Gamepad2, route: "/games", tone: "sun", enabled: true },
+                      { label: "Moral Game", icon: HeartHandshake, route: "/moral-game", tone: "coral", enabled: true },
                     ].filter(item => item.enabled).map((item) => (
                       <motion.button key={item.label} onClick={() => item.route ? router.push(item.route) : handleMic()}
                         className={`monto-adventure monto-adventure-${item.tone}`} whileHover={{ y: -3 }} whileTap={{ scale: 0.95 }}>
@@ -809,7 +852,7 @@ export default function Home() {
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <motion.button
                       onClick={handleMic}
-                      disabled={!online || isProc}
+                      disabled={isProc}
                       className="monto-talk-button w-full rounded-3xl text-white py-3.5 font-extrabold"
                       whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
                       {isRec ? "Finish" : "Talk to Monto"}
@@ -846,7 +889,7 @@ export default function Home() {
                   {/* Button */}
                   <motion.button
                     onClick={handleMic}
-                    disabled={!online || isProc || appControls?.maintenance_mode || appControls?.ai_enabled === false || appControls?.microphone_enabled === false}
+                    disabled={isProc || appControls?.maintenance_mode || appControls?.ai_enabled === false || appControls?.microphone_enabled === false}
                     className="relative z-10 w-22 h-22 rounded-full flex items-center justify-center focus:outline-none disabled:opacity-40"
                     style={{
                       width: 88, height: 88,
@@ -957,7 +1000,7 @@ export default function Home() {
               {/* Chat mic */}
               <div className="pt-3 flex items-center justify-center gap-3">
                 <motion.button onClick={handleMic}
-                  disabled={!online || isProc || appControls?.maintenance_mode || appControls?.ai_enabled === false || appControls?.microphone_enabled === false}
+                  disabled={isProc || appControls?.maintenance_mode || appControls?.ai_enabled === false || appControls?.microphone_enabled === false}
                   className="w-16 h-16 rounded-full flex items-center justify-center focus:outline-none disabled:opacity-40"
                   style={{
                     background: isRec

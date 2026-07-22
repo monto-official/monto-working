@@ -54,6 +54,12 @@
       "namedRegex": "^/games(?:/)?$"
     },
     {
+      "page": "/moral-game",
+      "regex": "^/moral\\-game(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/moral\\-game(?:/)?$"
+    },
+    {
       "page": "/songs",
       "regex": "^/songs(?:/)?$",
       "routeKeys": {},

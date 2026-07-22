@@ -104,7 +104,7 @@
         "transform": "lodash/{{member}}"
       }
     },
-    "outputFileTracingRoot": "C:\\Users\\Sachin\\Desktop\\monto 1\\monto-working\\monto-ai\\frontend-deploy",
+    "outputFileTracingRoot": "C:\\Users\\Sachin\\Desktop\\monto 1\\monto-working\\frontend-deploy",
     "allowedDevOrigins": [
       "10.59.10.7",
       "169.254.83.107",
@@ -309,11 +309,11 @@
     "bundlePagesRouterDependencies": false,
     "configFileName": "next.config.ts",
     "turbopack": {
-      "root": "C:\\Users\\Sachin\\Desktop\\monto 1\\monto-working\\monto-ai\\frontend-deploy"
+      "root": "C:\\Users\\Sachin\\Desktop\\monto 1\\monto-working\\frontend-deploy"
     },
     "distDirRoot": ".next"
   },
-  "appDir": "C:\\Users\\Sachin\\Desktop\\monto 1\\monto-working\\monto-ai\\frontend-deploy",
+  "appDir": "C:\\Users\\Sachin\\Desktop\\monto 1\\monto-working\\frontend-deploy",
   "relativeAppDir": "",
   "files": [
     ".next\\package.json",

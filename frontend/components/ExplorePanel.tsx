@@ -14,9 +14,10 @@ import { WaterCycle } from "@/components/explore/WaterCycle";
 import { DinosaurWorld } from "@/components/explore/DinosaurWorld";
 import { OceanLife } from "@/components/explore/OceanLife";
 import { HumanBody } from "@/components/explore/HumanBody";
+import { NepalWorld } from "@/components/explore/NepalWorld";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-export type ExploreScene = "solar-system" | "photosynthesis" | "animal-life" | "water-cycle" | "dinosaurs" | "ocean-life" | "human-body" | null;
+export type ExploreScene = "solar-system" | "photosynthesis" | "animal-life" | "water-cycle" | "dinosaurs" | "ocean-life" | "human-body" | "know-nepal" | null;
 
 interface Step {
   narration: string;
@@ -106,6 +107,16 @@ const SCRIPTS: Record<NonNullable<ExploreScene>, (ctx: string) => Step[]> = {
     { narration: "Step 5: Your five senses — sight, hearing, smell, taste, and touch — help you explore the whole world! 👀👂👃👅✋", highlight: "", duration: 5500 },
     { narration: "Wow! Every part of your body works as a team, every single second! You're amazing! 🎉", highlight: "", duration: 5000 },
   ],
+  "know-nepal": () => [
+    { narration: "Let's explore Nepal — a beautiful country between two giants, India and China! 🇳🇵", highlight: "", duration: 4500 },
+    { narration: "Step 1: Geography! Nepal is home to Mount Everest — the tallest mountain on our whole planet! 🏔️", highlight: "", duration: 5500 },
+    { narration: "Step 2: History! Nepal was unified in 1768 by King Prithvi Narayan Shah, and it was never colonized! 📜", highlight: "", duration: 5500 },
+    { narration: "Step 3: Culture! Over 100 different ethnic groups and languages all live together in Nepal! 🎎", highlight: "", duration: 5500 },
+    { narration: "Step 4: Tradition! Dashain and Tihar are Nepal's biggest festivals, filled with family, blessings, and lights! 🪔", highlight: "", duration: 5500 },
+    { narration: "Step 5: Wildlife! Royal Bengal tigers and rare one-horned rhinos roam Nepal's jungles! 🐅🦏", highlight: "", duration: 5500 },
+    { narration: "Step 6: Heritage! Lumbini, in Nepal, is the birthplace of Lord Buddha! 🙏", highlight: "", duration: 5000 },
+    { narration: "Wow! You just learned all about Nepal — its mountains, history, culture, and wildlife! Jai Nepal! 🎉", highlight: "", duration: 5000 },
+  ],
 };
 
 // ─── Topic detector ───────────────────────────────────────────────────────────
@@ -121,6 +132,7 @@ export function detectExploreScene(transcript: string): ExploreScene {
   if (/plant|photosynthesis|leaf|leaves|food|chlorophyll|oxygen|grow/.test(t)) return "photosynthesis";
   if (/butterfly|frog|chicken|egg|hatch|caterpillar|tadpole|animal|baby|born|life cycle/.test(t)) return "animal-life";
   if (/water cycle|rain|cloud|evapor|condensat|precipitation|river/.test(t)) return "water-cycle";
+  if (/nepal|everest|himalay|kathmandu|dashain|tihar|prithvi narayan|lumbini|sherpa|gorkha/.test(t)) return "know-nepal";
 
   return null;
 }
@@ -138,6 +150,7 @@ const SCENE_TITLES: Record<NonNullable<ExploreScene>, string> = {
   "dinosaurs":      "🦖 Dinosaur World",
   "ocean-life":     "🐋 Ocean Life",
   "human-body":     "🧠 Your Amazing Body",
+  "know-nepal":     "🇳🇵 Know Nepal",
 };
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -257,6 +270,7 @@ export function ExplorePanel({ scene, transcript, onClose, onNarrate, isSpeaking
             {scene === "dinosaurs"      && <DinosaurWorld step={animStep} />}
             {scene === "ocean-life"     && <OceanLife step={animStep} />}
             {scene === "human-body"     && <HumanBody step={animStep} />}
+            {scene === "know-nepal"     && <NepalWorld step={animStep} />}
 
             {/* Explore mode badge */}
             <div className="absolute top-3 left-3 px-2 py-1 rounded-lg text-xs font-semibold" style={{ background: "rgba(99,102,241,0.3)", border: "1px solid rgba(99,102,241,0.4)", color: "#a5b4fc" }}>

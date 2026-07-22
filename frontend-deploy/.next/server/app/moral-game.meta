@@ -1,0 +1,15 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/moral-game/layout,_N_T_/moral-game/page,_N_T_/moral-game"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/moral-game/__PAGE__",
+    "/moral-game",
+    "/_index",
+    "/_head"
+  ]
+}

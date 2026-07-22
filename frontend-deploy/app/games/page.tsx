@@ -1,10 +1,20 @@
-﻿"use client";
+"use client";
 
 import { motion } from "framer-motion";
-import { ArrowLeft, ChevronRight, Gamepad2, Snowflake, Volume2 } from "lucide-react";
+import { ArrowLeft, ChevronRight, Gamepad2, HeartHandshake, Snowflake, Volume2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 const GAMES = [
+  {
+    title: "Moral Adventure",
+    subtitle: "Make kind choices and see what happens!",
+    route: "/moral-game",
+    icon: HeartHandshake,
+    emoji: "💛",
+    gradient: "from-amber-300 via-orange-400 to-rose-500",
+    glow: "rgba(251,146,60,.3)",
+    skills: ["Kindness", "Courage", "Good choices"],
+  },
   {
     title: "Freeze Dance Party",
     subtitle: "Dance, listen, and freeze!",
