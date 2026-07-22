@@ -9,6 +9,9 @@ interface SettingsModalProps {
   settings: Settings;
   onClose: () => void;
   onChange: (s: Partial<Settings>) => void;
+  noiseFloor?: number | null;
+  calibrating?: boolean;
+  onCalibrate?: () => void;
 }
 
 export function SettingsModal({
@@ -16,6 +19,9 @@ export function SettingsModal({
   settings,
   onClose,
   onChange,
+  noiseFloor,
+  calibrating,
+  onCalibrate,
 }: SettingsModalProps) {
   return (
     <AnimatePresence>
@@ -156,6 +162,51 @@ export function SettingsModal({
                     />
                   </button>
                 </div>
+
+                {/* Mic calibration */}
+                {onCalibrate && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Mic className="w-4 h-4 text-primary-500" />
+                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                        Background noise
+                      </label>
+                    </div>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">
+                      Stay quiet for a second so Monto can learn this room&apos;s noise and filter it out while listening.
+                    </p>
+                    <button
+                      onClick={onCalibrate}
+                      disabled={calibrating}
+                      className={cn(
+                        "w-full py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2",
+                        calibrating
+                          ? "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500"
+                          : "bg-gradient-to-r from-primary-500 to-secondary-500 text-white shadow-md hover:opacity-90"
+                      )}
+                    >
+                      {calibrating ? (
+                        <>
+                          <motion.span
+                            className="w-2 h-2 rounded-full bg-current"
+                            animate={{ opacity: [1, 0.2, 1] }}
+                            transition={{ duration: 0.8, repeat: Infinity }}
+                          />
+                          Listening…
+                        </>
+                      ) : noiseFloor != null ? (
+                        "Re-calibrate mic"
+                      ) : (
+                        "Calibrate mic"
+                      )}
+                    </button>
+                    {!calibrating && noiseFloor != null && (
+                      <p className="text-[11px] text-emerald-500 dark:text-emerald-400 font-medium mt-2">
+                        ✓ Calibrated — background noise will be filtered out
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* Dark Mode */}
                 <div className="flex items-center justify-between">

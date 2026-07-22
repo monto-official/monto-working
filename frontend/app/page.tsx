@@ -23,6 +23,32 @@ import { loadChildName, saveChildName } from "@/lib/child-profile";
 import { Emotion, RecordingState, Settings, VoiceQueryResponse, Character } from "@/types";
 import { cn } from "@/lib/utils";
 
+// ── Nepal flag (simplified double-pennant SVG) ─────────────────────────────────
+function NepalFlag({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 100 120" className={className} xmlns="http://www.w3.org/2000/svg">
+      <path
+        d="M4 4 L96 30 L36 58 L96 92 L4 116 Z"
+        fill="#DC143C"
+        stroke="#003893"
+        strokeWidth="7"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+      {/* Moon — upper pennant */}
+      <circle cx="38" cy="21" r="7" fill="#ffffff" />
+      <circle cx="42" cy="18.5" r="6" fill="#DC143C" />
+      {/* Sun — lower pennant */}
+      <g transform="translate(45 89)">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <rect key={i} x="-1" y="-11" width="2" height="5" fill="#ffffff" transform={`rotate(${i * 45})`} />
+        ))}
+        <circle r="6" fill="#ffffff" />
+      </g>
+    </svg>
+  );
+}
+
 // ── Emotion config ────────────────────────────────────────────────────────────
 const EMOTION_CONFIG = {
   happy:     { color: "#FBBF24", glow: "#F59E0B", bg: "#78350F", emojis: ["😊","🌟","🎉","✨","🌈"] },
@@ -122,6 +148,7 @@ export default function Home() {
   // ── Explore mode ────────────────────────────────────────────────────────
   const [exploreScene, setExploreScene] = useState<ExploreScene>(null);
   const [exploreTranscript, setExploreTranscript] = useState("");
+  const [showExplorePicker, setShowExplorePicker] = useState(false);
 
   // ── Water reminder ─────────────────────────────────────────────────────
   const [showWater, setShowWater]     = useState(false);
@@ -455,6 +482,63 @@ export default function Home() {
         isSpeaking={isSpeaking}
       />
 
+      {/* ── Explore topic picker ─────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showExplorePicker && (
+          <motion.div
+            className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-4"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          >
+            <motion.div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowExplorePicker(false)} />
+            <motion.div
+              className="relative z-10 w-full max-w-md rounded-3xl overflow-hidden p-5"
+              style={{
+                background: "linear-gradient(135deg, rgba(15,15,30,0.97) 0%, rgba(20,10,40,0.97) 100%)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                boxShadow: "0 0 80px rgba(99,102,241,0.3), 0 32px 64px rgba(0,0,0,0.6)",
+              }}
+              initial={{ y: 40, scale: 0.94, opacity: 0 }}
+              animate={{ y: 0, scale: 1, opacity: 1 }}
+              exit={{ y: 30, scale: 0.96, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 280, damping: 26 }}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-white font-bold text-base">🔭 Pick something to explore</span>
+                <button onClick={() => setShowExplorePicker(false)} className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors">
+                  <X className="w-4 h-4 text-white/70" />
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  { scene: "solar-system" as const, label: "Solar System", emoji: "🪐", transcript: "solar system planets" },
+                  { scene: "photosynthesis" as const, label: "Plants & Food", emoji: "🌿", transcript: "how plants make food" },
+                  { scene: "animal-life" as const, label: "Animal Life", emoji: "🦋", transcript: "animal life cycle butterfly" },
+                  { scene: "water-cycle" as const, label: "Water Cycle", emoji: "💧", transcript: "water cycle rain" },
+                  { scene: "dinosaurs" as const, label: "Dinosaurs", emoji: "🦖", transcript: "dinosaurs" },
+                  { scene: "ocean-life" as const, label: "Ocean Life", emoji: "🐋", transcript: "ocean sea creatures" },
+                  { scene: "human-body" as const, label: "Your Body", emoji: "🧠", transcript: "human body" },
+                ].map((topic) => (
+                  <motion.button
+                    key={topic.scene}
+                    onClick={() => {
+                      setExploreScene(topic.scene);
+                      setExploreTranscript(topic.transcript);
+                      setShowExplorePicker(false);
+                    }}
+                    whileHover={{ y: -3 }} whileTap={{ scale: 0.95 }}
+                    className="rounded-2xl p-4 flex flex-col items-center gap-2 text-center text-white text-sm font-semibold"
+                    style={{ background: "rgba(99,102,241,0.14)", border: "1px solid rgba(99,102,241,0.28)" }}
+                  >
+                    <span className="text-3xl">{topic.emoji}</span>
+                    <span>{topic.label}</span>
+                  </motion.button>
+                ))}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── Calling overlay ─────────────────────────────────────────────── */}
       <AnimatePresence>
         {calling && (
@@ -657,7 +741,17 @@ export default function Home() {
 
         {/* Brand */}
         <motion.div className="text-center" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
-          <div className="font-kids text-3xl text-white leading-none monto-wordmark">MONTO</div>
+          <div className="flex items-center justify-center gap-1.5">
+            <div className="font-kids text-3xl text-white leading-none monto-wordmark">MONTO</div>
+            <motion.div
+              className="w-4 h-5 sm:w-5 sm:h-6"
+              style={{ transformOrigin: "0% 100%" }}
+              animate={{ rotate: [0, 16, -12, 16, -6, 0] }}
+              transition={{ duration: 1.8, repeat: Infinity, repeatDelay: 1.4, ease: "easeInOut" }}
+            >
+              <NepalFlag className="w-full h-full" />
+            </motion.div>
+          </div>
           <div className="text-[9px] tracking-[0.3em] text-white/40 uppercase mt-0.5">Your little universe</div>
         </motion.div>
 
@@ -734,20 +828,52 @@ export default function Home() {
               <div className="monto-console rounded-[28px] p-4 sm:p-6 flex flex-col gap-4 min-h-[480px]">
                 <div className="monto-adventure-wrap">
                   <p className="text-[10px] uppercase tracking-[0.3em] text-sky-200/50 font-extrabold mb-2">Pick an adventure</p>
-                  <div className="grid grid-cols-4 gap-2 sm:gap-3">
+                  <div className="grid grid-cols-4 sm:grid-cols-5 gap-2 sm:gap-3">
                     {[
                       { label: "Music", icon: Music2, route: "/songs", tone: "coral", enabled: appControls?.songs_enabled !== false },
                       { label: "Stories", icon: BookOpen, route: "/stories", tone: "violet", enabled: appControls?.stories_enabled !== false },
                       { label: "Move", icon: PersonStanding, route: "/yoga", tone: "mint", enabled: appControls?.yoga_enabled !== false },
                       { label: "Games", icon: Gamepad2, route: "/games", tone: "sun", enabled: true },
+                      { label: "Explore", icon: Compass, action: () => setShowExplorePicker(true), tone: "sky", enabled: true },
                     ].filter(item => item.enabled).map((item) => (
-                      <motion.button key={item.label} onClick={() => item.route ? router.push(item.route) : handleMic()}
+                      <motion.button key={item.label} onClick={() => item.action ? item.action() : item.route ? router.push(item.route) : handleMic()}
                         className={`monto-adventure monto-adventure-${item.tone}`} whileHover={{ y: -3 }} whileTap={{ scale: 0.95 }}>
                         <item.icon className="w-5 h-5 sm:w-6 sm:h-6" strokeWidth={2.3} />
                         <span>{item.label}</span>
                       </motion.button>
                     ))}
                   </div>
+                  <motion.button
+                    onClick={handleMic}
+                    disabled={!online || isProc || appControls?.maintenance_mode || appControls?.ai_enabled === false || appControls?.microphone_enabled === false}
+                    className="mt-3 w-full rounded-2xl flex items-center justify-center gap-2 py-2.5 font-bold text-sm text-white focus:outline-none disabled:opacity-40"
+                    style={{
+                      background: isRec
+                        ? "linear-gradient(135deg, #EF4444, #DC2626)"
+                        : `linear-gradient(135deg, ${cfg.color}, ${cfg.glow})`,
+                      boxShadow: isRec
+                        ? "0 0 24px rgba(239,68,68,0.45), 0 6px 20px rgba(0,0,0,0.3)"
+                        : `0 0 24px ${cfg.glow}45, 0 6px 20px rgba(0,0,0,0.3)`,
+                    }}
+                    whileHover={{ scale: 1.02, y: -1 }}
+                    whileTap={{ scale: 0.97 }}>
+                    <AnimatePresence mode="wait">
+                      {isProc ? (
+                        <motion.div key="spin" animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}>
+                          <Sparkles className="w-4 h-4" />
+                        </motion.div>
+                      ) : isRec ? (
+                        <motion.div key="stop" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}>
+                          <div className="w-3 h-3 rounded-[3px] bg-white" />
+                        </motion.div>
+                      ) : (
+                        <motion.div key="mic" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}>
+                          <Mic className="w-4 h-4" />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                    <span>{isRec ? "Listening… tap to finish" : "Tap to talk"}</span>
+                  </motion.button>
                 </div>
 
                 <div className="flex flex-col gap-2">
@@ -1011,6 +1137,9 @@ export default function Home() {
         settings={settings}
         onClose={() => setShowSettings(false)}
         onChange={handleSettingsChange}
+        noiseFloor={recorder.noiseFloor}
+        calibrating={recorder.calibrating}
+        onCalibrate={recorder.calibrate}
       />
     </div>
   );

@@ -194,6 +194,7 @@ body {
 .monto-adventure-violet { color: #f5f3ff; background: linear-gradient(145deg,#6d28d9,#a78bfa); }
 .monto-adventure-mint { color: #ecfdf5; background: linear-gradient(145deg,#047857,#34d399); }
 .monto-adventure-sun { color: #422006; background: linear-gradient(145deg,#f59e0b,#fde68a); }
+.monto-adventure-sky { color: #eff6ff; background: linear-gradient(145deg,#1d4ed8,#60a5fa); }
 .monto-greeting { background: linear-gradient(145deg, rgba(14,165,233,.1), rgba(124,58,237,.1)); border: 1px dashed rgba(186,230,253,.18); }
 .monto-talk-button { background: linear-gradient(135deg,#0284c7,#2563eb 55%,#7c3aed); box-shadow: 0 12px 28px rgba(37,99,235,.28), inset 0 1px 0 rgba(255,255,255,.25); }
 @media (max-width: 640px) {

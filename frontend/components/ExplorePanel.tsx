@@ -11,9 +11,12 @@ import { SolarSystem } from "@/components/explore/SolarSystem";
 import { Photosynthesis } from "@/components/explore/Photosynthesis";
 import { AnimalLife } from "@/components/explore/AnimalLife";
 import { WaterCycle } from "@/components/explore/WaterCycle";
+import { DinosaurWorld } from "@/components/explore/DinosaurWorld";
+import { OceanLife } from "@/components/explore/OceanLife";
+import { HumanBody } from "@/components/explore/HumanBody";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-export type ExploreScene = "solar-system" | "photosynthesis" | "animal-life" | "water-cycle" | null;
+export type ExploreScene = "solar-system" | "photosynthesis" | "animal-life" | "water-cycle" | "dinosaurs" | "ocean-life" | "human-body" | null;
 
 interface Step {
   narration: string;
@@ -74,6 +77,35 @@ const SCRIPTS: Record<NonNullable<ExploreScene>, (ctx: string) => Step[]> = {
     { narration: "And the cycle repeats — forever! The same water has been cycling for billions of years! 🌊", highlight: "", duration: 5500 },
     { narration: "Wow! The water in your glass might have been in a dinosaur once! 🦕 How cool is that?", highlight: "", duration: 5000 },
   ],
+  "dinosaurs": () => [
+    { narration: "Let's travel back in time to meet the dinosaurs! 🦖 They lived millions of years ago, long before people!", highlight: "", duration: 4500 },
+    { narration: "Step 1: Tyrannosaurus Rex was a giant hunter with huge teeth and tiny little arms! 🦖", highlight: "", duration: 5000 },
+    { narration: "Step 2: Triceratops had three horns on its face to protect itself from danger! 🦕", highlight: "", duration: 5000 },
+    { narration: "Step 3: Stegosaurus had big bony plates along its back and a spiky tail! 🦴", highlight: "", duration: 5000 },
+    { narration: "Step 4: Brachiosaurus had a super long neck to reach leaves at the very top of tall trees! 🌳", highlight: "", duration: 5000 },
+    { narration: "Step 5: Pterodactyls could fly through the sky — but they were flying reptiles, not dinosaurs! 🦅", highlight: "", duration: 5000 },
+    { narration: "Step 6: Velociraptors were small but super fast, and they hunted together in clever packs! 🏃", highlight: "", duration: 5000 },
+    { narration: "You just became a dinosaur expert! Can you roar like a dinosaur? RAWR! 🦖", highlight: "", duration: 5000 },
+  ],
+  "ocean-life": () => [
+    { narration: "Let's dive deep into the ocean! 🌊 It's full of amazing creatures, from the sunny surface to the darkest depths!", highlight: "", duration: 4500 },
+    { narration: "Step 1: Near the sunny surface, playful dolphins jump and dive through the waves! 🐬", highlight: "", duration: 5000 },
+    { narration: "Step 2: Just below, colorful fish dart around bright, busy coral reefs! 🐠", highlight: "", duration: 5000 },
+    { narration: "Step 3: A clever octopus can squeeze through tiny gaps and even change color to hide! 🐙", highlight: "", duration: 5000 },
+    { narration: "Step 4: Sharks are powerful swimmers that have lived in our oceans for millions of years! 🦈", highlight: "", duration: 5000 },
+    { narration: "Step 5: Down in the darkest depths, some creatures glow with their very own light! ✨", highlight: "", duration: 5000 },
+    { narration: "Step 6: The blue whale is the biggest animal that has EVER lived — even bigger than any dinosaur! 🐋", highlight: "", duration: 5500 },
+    { narration: "The ocean covers most of our planet and is home to so much amazing life! 💙", highlight: "", duration: 5000 },
+  ],
+  "human-body": () => [
+    { narration: "Let's explore your amazing body! It has so many superpowers hidden inside! 🦸", highlight: "", duration: 4500 },
+    { narration: "Step 1: Your brain is the boss! It controls everything you think, feel, and do! 🧠", highlight: "", duration: 5000 },
+    { narration: "Step 2: Your heart pumps blood all day and night — even while you're sleeping! ❤️", highlight: "", duration: 5000 },
+    { narration: "Step 3: Your lungs breathe in fresh air and send oxygen all through your body! 🫁", highlight: "", duration: 5000 },
+    { narration: "Step 4: Your bones and muscles work together so you can run, jump, and dance! 💪", highlight: "", duration: 5000 },
+    { narration: "Step 5: Your five senses — sight, hearing, smell, taste, and touch — help you explore the whole world! 👀👂👃👅✋", highlight: "", duration: 5500 },
+    { narration: "Wow! Every part of your body works as a team, every single second! You're amazing! 🎉", highlight: "", duration: 5000 },
+  ],
 };
 
 // ─── Topic detector ───────────────────────────────────────────────────────────
@@ -83,9 +115,12 @@ export function detectExploreScene(transcript: string): ExploreScene {
   if (!hasExplore) return null;
 
   if (/solar|planet|space|sun|mercury|venus|earth|mars|jupiter|saturn|uranus|neptune|orbit/.test(t)) return "solar-system";
+  if (/dinosaur|dino|t-?rex|triceratops|stegosaurus|brachiosaurus|pterodactyl|velociraptor|fossil/.test(t)) return "dinosaurs";
+  if (/ocean|sea creature|dolphin|shark|whale|octopus|coral|reef|marine/.test(t)) return "ocean-life";
+  if (/\bbody\b|brain|heart|lungs|muscle|bones?|five senses/.test(t)) return "human-body";
   if (/plant|photosynthesis|leaf|leaves|food|chlorophyll|oxygen|grow/.test(t)) return "photosynthesis";
   if (/butterfly|frog|chicken|egg|hatch|caterpillar|tadpole|animal|baby|born|life cycle/.test(t)) return "animal-life";
-  if (/water cycle|rain|cloud|evapor|condensat|precipitation|river|ocean/.test(t)) return "water-cycle";
+  if (/water cycle|rain|cloud|evapor|condensat|precipitation|river/.test(t)) return "water-cycle";
 
   return null;
 }
@@ -100,6 +135,9 @@ const SCENE_TITLES: Record<NonNullable<ExploreScene>, string> = {
   "photosynthesis": "🌿 How Plants Make Food",
   "animal-life":    "🦋 Animal Life Cycles",
   "water-cycle":    "💧 The Water Cycle",
+  "dinosaurs":      "🦖 Dinosaur World",
+  "ocean-life":     "🐋 Ocean Life",
+  "human-body":     "🧠 Your Amazing Body",
 };
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -216,6 +254,9 @@ export function ExplorePanel({ scene, transcript, onClose, onNarrate, isSpeaking
             {scene === "photosynthesis" && <Photosynthesis step={animStep} />}
             {scene === "animal-life"    && <AnimalLife animal={animalName} step={animStep} />}
             {scene === "water-cycle"    && <WaterCycle step={animStep} />}
+            {scene === "dinosaurs"      && <DinosaurWorld step={animStep} />}
+            {scene === "ocean-life"     && <OceanLife step={animStep} />}
+            {scene === "human-body"     && <HumanBody step={animStep} />}
 
             {/* Explore mode badge */}
             <div className="absolute top-3 left-3 px-2 py-1 rounded-lg text-xs font-semibold" style={{ background: "rgba(99,102,241,0.3)", border: "1px solid rgba(99,102,241,0.4)", color: "#a5b4fc" }}>

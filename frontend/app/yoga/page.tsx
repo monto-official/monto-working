@@ -116,6 +116,22 @@ export default function YogaPage() {
     say(`[excited]\n${exercise.encouragement}`, "excited");
   }, [exercise, phase, remaining, say]);
 
+  // Fully touchless: no tap needed to begin — Monto talks it through and
+  // auto-starts the countdown so kids don't have to stop moving to press a button.
+  useEffect(() => {
+    if (phase !== "welcome") return;
+    say("[excited]\nरमाइलो गर्दै शरीर चलाऔँ! तयार होऊ!", "excited");
+    const t = setTimeout(() => beginCountdown(0), 3500);
+    return () => clearTimeout(t);
+  }, [phase, say, beginCountdown]);
+
+  // ...and no tap needed to leave — auto-return home once the celebration plays out.
+  useEffect(() => {
+    if (phase !== "finished") return;
+    const t = setTimeout(() => { cancel(); router.push("/"); }, 6000);
+    return () => clearTimeout(t);
+  }, [phase, cancel, router]);
+
   const skip = () => {
     if (phase === "finished") return;
     if (index >= EXERCISES.length - 1) {
