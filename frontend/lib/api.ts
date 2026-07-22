@@ -27,17 +27,22 @@ export async function sendVoiceQuery(
       : "webm";
   formData.append("audio", audioBlob, `recording.${ext}`);
 
-  const res = await fetch(`${API_URL}/voice/query`, {
-    method: "POST",
-    headers: {
-      // Send the stable per-device ID (same one used for pairing/calls) so
-      // backend memory is tied to this physical device, not a random
-      // per-browser-tab session — this is what lets the parent app scope
-      // "Questions Asked" / "Usage" to the right child device.
-      "X-Session-Id": getOrCreateDeviceId(),
-    },
-    body: formData,
-  });
+  let res: Response | null = null;
+  let networkError: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      res = await fetch(`${API_URL}/voice/query`, {
+        method: "POST",
+        headers: { "X-Session-Id": getOrCreateDeviceId() },
+        body: formData,
+      });
+      if (res.ok || res.status < 500) break;
+    } catch (error) {
+      networkError = error;
+    }
+    if (attempt === 0) await new Promise(resolve => setTimeout(resolve, 450));
+  }
+  if (!res) throw networkError instanceof Error ? networkError : new Error("Voice service unavailable");
 
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;

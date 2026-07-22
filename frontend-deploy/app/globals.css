@@ -1,4 +1,4 @@
-﻿@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fredoka+One&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fredoka+One&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -223,3 +223,244 @@ html[data-low-power="true"] .monto-console { background: #0b1d33; }
 html[data-low-power="true"] .monto-3d-avatar img { filter: drop-shadow(0 12px 14px rgba(0,0,0,.28)); }
 html[data-low-power="true"] .monto-character-card::before,
 html[data-low-power="true"] .monto-avatar-podium::before { display: none; }
+
+/* Fluid adventure dashboard: sized by the console, not the viewport.
+   Keeps all six destinations on one clean row on Pi/desktop displays. */
+.monto-adventure-wrap { container-type: inline-size; }
+.monto-adventure-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .75rem;
+}
+.monto-adventure {
+  min-width: 0;
+  min-height: 92px;
+  padding: .9rem;
+  border-radius: 22px;
+  font-size: .78rem;
+  line-height: 1.15;
+  overflow: hidden;
+  touch-action: manipulation;
+}
+.monto-adventure-icon { width: 1.65rem; height: 1.65rem; flex: none; }
+@container (min-width: 430px) {
+  .monto-adventure-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.monto-adventure-center { display: none; }
+@container (min-width: 680px) {
+  .monto-adventure-grid {
+    position: relative; isolation: isolate;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: repeat(3, 82px);
+    column-gap: 1.2rem; row-gap: .75rem; padding: .35rem 0;
+  }
+  .monto-adventure-grid::before {
+    content: ""; position: absolute; z-index: -1; inset: 1rem 8%;
+    border: 1px solid rgba(125,211,252,.18); border-radius: 50%;
+    background: radial-gradient(circle, rgba(56,189,248,.09), transparent 58%);
+    box-shadow: inset 0 0 34px rgba(56,189,248,.05);
+  }
+  .monto-adventure { min-height: 82px; padding: .8rem 1rem; font-size: .82rem; }
+  .monto-adventure-icon { width: 1.7rem; height: 1.7rem; }
+  .monto-adventure:nth-child(1) { grid-column: 1; grid-row: 1; }
+  .monto-adventure:nth-child(2) { grid-column: 3; grid-row: 1; }
+  .monto-adventure:nth-child(3) { grid-column: 1; grid-row: 2; }
+  .monto-adventure:nth-child(4) { grid-column: 3; grid-row: 2; }
+  .monto-adventure:nth-child(5) { grid-column: 1; grid-row: 3; }
+  .monto-adventure:nth-child(6) { grid-column: 3; grid-row: 3; }
+  .monto-adventure-center {
+    grid-column: 2; grid-row: 2; align-self: center; justify-self: center;
+    display: flex; width: 112px; height: 112px; border-radius: 999px;
+    flex-direction: column; align-items: center; justify-content: center;
+    color: #bae6fd; background: radial-gradient(circle at 35% 28%, #1d4ed8, #111b46 72%);
+    border: 2px solid rgba(125,211,252,.32);
+    box-shadow: 0 0 0 8px rgba(56,189,248,.05), 0 14px 32px rgba(0,0,0,.28);
+    text-transform: uppercase; font-size: .68rem; font-weight: 900; letter-spacing: .12em;
+  }
+  .monto-adventure-center small { margin-top: .1rem; color: rgba(186,230,253,.55); font-size: .48rem; letter-spacing: .18em; }
+}
+
+/* Raspberry Pi landscape: preserve usable dashboard height and avoid clipping. */
+@media (min-width: 900px) and (max-height: 760px) {
+  .monto-stage-dashboard { gap: .75rem; padding: .75rem; }
+  .monto-main-console { min-height: 0; padding: 1rem; gap: .75rem; }
+  .monto-character-card { min-height: 0; padding: 1rem; }
+  .monto-adventure { min-height: 88px; }
+}
+html[data-low-power="true"] .monto-adventure,
+html[data-low-power="true"] .monto-console {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transition: none !important;
+}
+html[data-low-power="true"] .monto-adventure {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 4px 10px rgba(0,0,0,.14);
+}
+/* Ring / slider view switch */
+.monto-layout-switch {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 12px;
+  background: rgba(2,12,27,.72);
+  border: 1px solid rgba(125,211,252,.16);
+}
+.monto-layout-switch button {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: .38rem;
+  border-radius: 9px;
+  padding: .35rem .62rem;
+  color: rgba(186,230,253,.48);
+  font-size: .62rem;
+  font-weight: 800;
+  transition: background .18s ease, color .18s ease;
+  touch-action: manipulation;
+}
+.monto-layout-switch button.is-active {
+  color: #e0f2fe;
+  background: linear-gradient(135deg, rgba(14,165,233,.3), rgba(79,70,229,.3));
+  box-shadow: inset 0 0 0 1px rgba(125,211,252,.18);
+}
+.monto-ring-symbol { width: 10px; height: 10px; border: 2px solid currentColor; border-radius: 50%; }
+.monto-slider-symbol { width: 13px; height: 8px; border-top: 2px solid currentColor; border-bottom: 2px solid currentColor; }
+
+.monto-adventure-grid.monto-adventure-slider {
+  display: flex;
+  grid-template-columns: none;
+  grid-template-rows: none;
+  gap: .85rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: .45rem .15rem .8rem;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: .15rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(125,211,252,.35) rgba(255,255,255,.05);
+  -webkit-overflow-scrolling: touch;
+}
+.monto-adventure-slider .monto-adventure {
+  flex: 0 0 clamp(126px, 24%, 170px);
+  min-height: 104px;
+  scroll-snap-align: start;
+  grid-column: auto !important;
+  grid-row: auto !important;
+}
+.monto-adventure-slider .monto-adventure-center,
+.monto-adventure-slider::before { display: none !important; }
+.monto-adventure-slider::-webkit-scrollbar { height: 5px; }
+.monto-adventure-slider::-webkit-scrollbar-track { background: rgba(255,255,255,.05); border-radius: 999px; }
+.monto-adventure-slider::-webkit-scrollbar-thumb { background: rgba(125,211,252,.35); border-radius: 999px; }
+html[data-low-power="true"] .monto-layout-switch button { transition: none; }
+/* Permanent slider affordance */
+.monto-slide-guide {
+  display: inline-flex;
+  align-items: center;
+  gap: .15rem;
+  border-radius: 999px;
+  padding: .3rem .55rem .3rem .7rem;
+  color: #bae6fd;
+  background: rgba(14,165,233,.12);
+  border: 1px solid rgba(125,211,252,.18);
+  font-size: .61rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+.monto-slide-guide svg { animation: monto-slide-nudge 1.15s ease-in-out infinite; }
+@keyframes monto-slide-nudge {
+  0%, 100% { transform: translateX(0); opacity: .6; }
+  50% { transform: translateX(4px); opacity: 1; }
+}
+.monto-adventure-slider {
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 22px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 22px), transparent 100%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .monto-slide-guide svg { animation: none; }
+}
+/* Additional Raspberry Pi rendering budget */
+.monto-main-console { contain: layout paint; }
+.monto-adventure { contain: layout paint; }
+html[data-low-power="true"] .monto-adventure-slider {
+  mask-image: none;
+  -webkit-mask-image: none;
+  scroll-behavior: auto;
+}
+html[data-low-power="true"] .monto-slide-guide svg { animation: none !important; }
+html[data-low-power="true"] .monto-adventure:hover { transform: none !important; }
+html[data-low-power="true"] .monto-wordmark { text-shadow: none; }
+html[data-low-power="true"] .monto-avatar-podium::after { filter: none; opacity: .55; }
+html[data-low-power="true"] .monto-3d-avatar,
+html[data-low-power="true"] .monto-3d-avatar * { will-change: auto !important; }
+/* Child-friendly carousel refresh */
+.monto-main-console {
+  background:
+    radial-gradient(circle at 92% 4%, rgba(99,102,241,.12), transparent 28%),
+    radial-gradient(circle at 8% 95%, rgba(14,165,233,.09), transparent 30%),
+    linear-gradient(165deg, rgba(11,31,55,.94), rgba(7,18,36,.92));
+}
+.monto-adventure-slider {
+  mask-image: none !important;
+  -webkit-mask-image: none !important;
+  padding: .55rem .2rem .8rem;
+  gap: 1rem;
+  scrollbar-width: none;
+}
+.monto-adventure-slider::-webkit-scrollbar { display: none; }
+.monto-adventure-slider .monto-adventure {
+  flex: 0 0 clamp(152px, 28%, 188px);
+  min-height: 124px;
+  padding: 1rem;
+  border-radius: 26px;
+  scroll-snap-align: start;
+  justify-content: space-between;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.26), 0 12px 22px rgba(0,0,0,.2);
+}
+.monto-adventure-slider .monto-adventure-icon {
+  width: 2.55rem;
+  height: 2.55rem;
+  padding: .52rem;
+  border-radius: 14px;
+  background: rgba(255,255,255,.18);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.24);
+}
+.monto-adventure-slider .monto-adventure > span {
+  font-family: var(--font-nunito), ui-rounded, sans-serif;
+  font-size: .94rem;
+  font-weight: 900;
+}
+.monto-adventure-rose { color: #fff1f2; background: linear-gradient(145deg,#e11d48,#fb7185 58%,#fda4af); }
+.monto-slider-nav {
+  display: inline-flex;
+  gap: .3rem;
+  padding: .2rem;
+  border-radius: 13px;
+  background: rgba(2,12,27,.55);
+  border: 1px solid rgba(125,211,252,.13);
+}
+.monto-slider-nav button {
+  display: grid;
+  width: 31px;
+  height: 31px;
+  place-items: center;
+  border-radius: 10px;
+  color: #bae6fd;
+  background: rgba(56,189,248,.1);
+  touch-action: manipulation;
+}
+.monto-slider-nav button:active { background: rgba(56,189,248,.25); transform: scale(.94); }
+.monto-greeting {
+  background:
+    radial-gradient(circle at 15% 20%, rgba(56,189,248,.13), transparent 28%),
+    linear-gradient(135deg, rgba(30,64,175,.2), rgba(109,40,217,.16));
+  border-color: rgba(125,211,252,.22);
+}
+@media (max-width: 640px) {
+  .monto-adventure-slider .monto-adventure { flex-basis: 138px; min-height: 108px; }
+  .monto-slider-nav { display: none; }
+}
+html[data-low-power="true"] .monto-adventure-slider .monto-adventure {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 5px 10px rgba(0,0,0,.14);
+}

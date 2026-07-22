@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Image from "next/image";
 import { AnimatePresence, motion } from "framer-motion";
@@ -43,9 +43,11 @@ export function Monto3DAvatar({ emotion, size = 320 }: { emotion: Emotion; size?
       transition={{ duration: talking ? 1.15 : 3.8, repeat: Infinity, ease: "easeInOut" }}
       aria-label={`Monto is ${emotion}`}
     >
-      <motion.div className="absolute inset-[9%] rounded-full bg-cyan-400/20 blur-3xl"
-        animate={{ opacity: talking ? [0.25, 0.52, 0.25] : [0.18, 0.32, 0.18], scale: talking ? [0.94, 1.05, 0.94] : 1 }}
-        transition={{ duration: talking ? 1.1 : 3, repeat: Infinity }} />
+      {!lowPower && (
+        <motion.div className="absolute inset-[9%] rounded-full bg-cyan-400/20 blur-3xl"
+          animate={{ opacity: talking ? [0.25, 0.52, 0.25] : [0.18, 0.32, 0.18], scale: talking ? [0.94, 1.05, 0.94] : 1 }}
+          transition={{ duration: talking ? 1.1 : 3, repeat: Infinity }} />
+      )}
 
       <AnimatePresence initial={false} mode="popLayout">
         <motion.div key={MODEL_FRAMES[frame]} className="absolute inset-0 z-10 flex items-end justify-center"
@@ -57,9 +59,13 @@ export function Monto3DAvatar({ emotion, size = 320 }: { emotion: Emotion; size?
         </motion.div>
       </AnimatePresence>
 
-      <motion.div className="absolute bottom-[2%] left-[20%] right-[20%] h-[7%] rounded-[50%] bg-black/40 blur-lg"
-        animate={{ scaleX: talking ? [1, 0.88, 1] : [1, 0.92, 1], opacity: [0.34, 0.22, 0.34] }}
-        transition={{ duration: talking ? 1.15 : 3.8, repeat: Infinity }} />
+      {lowPower ? (
+        <div className="absolute bottom-[2%] left-[20%] right-[20%] h-[7%] rounded-[50%] bg-black/35" />
+      ) : (
+        <motion.div className="absolute bottom-[2%] left-[20%] right-[20%] h-[7%] rounded-[50%] bg-black/40 blur-lg"
+          animate={{ scaleX: talking ? [1, 0.88, 1] : [1, 0.92, 1], opacity: [0.34, 0.22, 0.34] }}
+          transition={{ duration: talking ? 1.15 : 3.8, repeat: Infinity }} />
+      )}
     </motion.div>
   );
 }

@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 load_dotenv()
+load_dotenv(".env.local", override=True)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,6 +53,7 @@ async def lifespan(app: FastAPI):
     global stt_service, llm_service, tts_service
 
     groq_key       = os.getenv("GROQ_API_KEY", "")
+    groq_keys      = os.getenv("GROQ_API_KEYS", "")
     elevenlabs_key = os.getenv("ELEVENLABS_API_KEY", "") or os.getenv("ELEVENLABS_API_KEYS", "").split(",")[0].strip() or os.getenv("ELEVENLABS_API_KEY_1", "")
 
     mode = "LOCAL GPU" if USE_LOCAL else "GROQ cloud (testing)"
@@ -59,9 +61,9 @@ async def lifespan(app: FastAPI):
 
     # Validate keys for cloud mode
     if not USE_LOCAL:
-        if not groq_key or groq_key == "your_groq_api_key_here":
+        if not (groq_key or groq_keys):
             raise RuntimeError(
-                "GROQ_API_KEY is required when USE_LOCAL_GPU=false. "
+                "GROQ_API_KEY or GROQ_API_KEYS is required when USE_LOCAL_GPU=false. "
                 "Set it in backend/.env or switch to USE_LOCAL_GPU=true"
             )
 

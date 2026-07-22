@@ -11,6 +11,7 @@ import json
 import os
 import logging
 import httpx
+from services.groq_key_pool import GroqClientPool, is_retryable_groq_error, load_groq_keys
 
 logger = logging.getLogger(__name__)
 
@@ -143,16 +144,11 @@ class LLMService:
     def __init__(self, api_key: str = ""):
         self.use_local = os.getenv("USE_LOCAL_GPU", "false").lower() == "true"
 
-        # Always init Groq as fallback (used when GPU is offline)
-        groq_key = api_key or os.getenv("GROQ_API_KEY", "")
-        if groq_key:
-            from groq import AsyncGroq
-            self._groq       = AsyncGroq(api_key=groq_key)
-            self._groq_model = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
-            self._has_groq   = True
-        else:
-            self._has_groq   = False
-
+        # Key pool rotates immediately on quota/auth/server failures.
+        self._groq_pool  = GroqClientPool(load_groq_keys(api_key))
+        self._groq_model = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
+        self._has_groq   = len(self._groq_pool) > 0
+        logger.info("LLM: %d Groq key(s) available", len(self._groq_pool))
         if self.use_local:
             self.ollama_url = os.getenv("GPU_OLLAMA_URL",  "http://192.168.1.100:11434")
             self.model      = os.getenv("LOCAL_LLM_MODEL", "qwen3:8b")
@@ -240,24 +236,28 @@ class LLMService:
     # ── GROQ CLOUD (testing) ──────────────────────────────────────────────────
 
     async def _call_groq(self, messages: list):
-        from models.schemas import LLMResponse
-
-        try:
-            completion = await self._groq.chat.completions.create(
-                model=self._groq_model,
-                messages=messages,
-                temperature=0.4,
-                max_tokens=256,
-            )
-            raw = completion.choices[0].message.content.strip()
-            logger.debug(f"Groq raw: {raw[:300]}")
-
-            return self._parse_llm_output(raw)
-
-        except Exception as e:
-            logger.error(f"Groq error: {e}")
-            raise
-
+        last_error: Exception | None = None
+        for key_index, client in self._groq_pool.candidates():
+            try:
+                completion = await client.chat.completions.create(
+                    model=self._groq_model,
+                    messages=messages,
+                    temperature=0.4,
+                    max_tokens=256,
+                )
+                self._groq_pool.mark_success(key_index)
+                raw = completion.choices[0].message.content.strip()
+                logger.info("Groq LLM succeeded with key slot %d", key_index + 1)
+                return self._parse_llm_output(raw)
+            except Exception as error:
+                last_error = error
+                if not is_retryable_groq_error(error):
+                    raise
+                self._groq_pool.mark_failed(key_index, error)
+                logger.warning("Groq LLM key slot %d unavailable (%s); trying next", key_index + 1, type(error).__name__)
+        if last_error:
+            raise last_error
+        raise RuntimeError("No Groq LLM API key is configured")
     # ── SHARED PARSER ─────────────────────────────────────────────────────────
 
     def _parse_llm_output(self, raw: str):
