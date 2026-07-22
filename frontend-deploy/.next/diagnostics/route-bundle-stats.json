@@ -1,12 +1,12 @@
 [
   {
     "route": "/",
-    "firstLoadUncompressedJsBytes": 835494,
+    "firstLoadUncompressedJsBytes": 835121,
     "firstLoadChunkPaths": [
       ".next\\static\\chunks\\354wvf624r6jv.js",
       ".next\\static\\chunks\\14mumt5_n0xhi.js",
-      ".next\\static\\chunks\\0b4thxewp9cza.js",
-      ".next\\static\\chunks\\0tcz4zzueg08c.js",
+      ".next\\static\\chunks\\1ab-pq5egchv1.js",
+      ".next\\static\\chunks\\3mncy38i_41jz.js",
       ".next\\static\\chunks\\2ghpsme9olb5d.js",
       ".next\\static\\chunks\\2bcsa2r_sts3m.js",
       ".next\\static\\chunks\\07-hzktxqjvzd.js",
@@ -17,11 +17,11 @@
   },
   {
     "route": "/songs",
-    "firstLoadUncompressedJsBytes": 662816,
+    "firstLoadUncompressedJsBytes": 663012,
     "firstLoadChunkPaths": [
       ".next\\static\\chunks\\354wvf624r6jv.js",
       ".next\\static\\chunks\\14mumt5_n0xhi.js",
-      ".next\\static\\chunks\\02_9bibcyqkm7.js",
+      ".next\\static\\chunks\\2m3j6ecs48o_4.js",
       ".next\\static\\chunks\\40-2kj9almew6.js",
       ".next\\static\\chunks\\2bcsa2r_sts3m.js",
       ".next\\static\\chunks\\07-hzktxqjvzd.js",
@@ -32,11 +32,11 @@
   },
   {
     "route": "/stories",
-    "firstLoadUncompressedJsBytes": 661013,
+    "firstLoadUncompressedJsBytes": 661209,
     "firstLoadChunkPaths": [
       ".next\\static\\chunks\\354wvf624r6jv.js",
       ".next\\static\\chunks\\14mumt5_n0xhi.js",
-      ".next\\static\\chunks\\0gvog7wmuj9az.js",
+      ".next\\static\\chunks\\1lyg25cqkpg96.js",
       ".next\\static\\chunks\\40-2kj9almew6.js",
       ".next\\static\\chunks\\2bcsa2r_sts3m.js",
       ".next\\static\\chunks\\07-hzktxqjvzd.js",
@@ -77,11 +77,11 @@
   },
   {
     "route": "/sound-challenge",
-    "firstLoadUncompressedJsBytes": 655499,
+    "firstLoadUncompressedJsBytes": 655480,
     "firstLoadChunkPaths": [
       ".next\\static\\chunks\\354wvf624r6jv.js",
       ".next\\static\\chunks\\14mumt5_n0xhi.js",
-      ".next\\static\\chunks\\1bu69-ovxkmim.js",
+      ".next\\static\\chunks\\2npsqds_tyacm.js",
       ".next\\static\\chunks\\03h35mo-0e0dy.js",
       ".next\\static\\chunks\\2bcsa2r_sts3m.js",
       ".next\\static\\chunks\\07-hzktxqjvzd.js",
@@ -92,11 +92,11 @@
   },
   {
     "route": "/moral-game",
-    "firstLoadUncompressedJsBytes": 651992,
+    "firstLoadUncompressedJsBytes": 653823,
     "firstLoadChunkPaths": [
       ".next\\static\\chunks\\354wvf624r6jv.js",
       ".next\\static\\chunks\\14mumt5_n0xhi.js",
-      ".next\\static\\chunks\\2ou_bttkjxp-_.js",
+      ".next\\static\\chunks\\0hwijszo33r49.js",
       ".next\\static\\chunks\\03h35mo-0e0dy.js",
       ".next\\static\\chunks\\2bcsa2r_sts3m.js",
       ".next\\static\\chunks\\07-hzktxqjvzd.js",
@@ -107,11 +107,11 @@
   },
   {
     "route": "/games",
-    "firstLoadUncompressedJsBytes": 644929,
+    "firstLoadUncompressedJsBytes": 644986,
     "firstLoadChunkPaths": [
       ".next\\static\\chunks\\354wvf624r6jv.js",
       ".next\\static\\chunks\\14mumt5_n0xhi.js",
-      ".next\\static\\chunks\\3il9xb3c2tuk4.js",
+      ".next\\static\\chunks\\2-6ypw61pqm22.js",
       ".next\\static\\chunks\\40-2kj9almew6.js",
       ".next\\static\\chunks\\2bcsa2r_sts3m.js",
       ".next\\static\\chunks\\07-hzktxqjvzd.js",
