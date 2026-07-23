@@ -73,7 +73,7 @@ async def lifespan(app: FastAPI):
     tts_service = TTSService(api_key=elevenlabs_key)
 
     logger.info(f"✅ STT  : {'GPU Whisper' if USE_LOCAL else 'Groq Whisper'}")
-    logger.info(f"✅ LLM  : {'GPU Ollama qwen3:8b' if USE_LOCAL else 'Groq qwen3-32b'}")
+    logger.info("LLM  : %s", "GPU Ollama" if USE_LOCAL else "Groq smart routing (GPT-OSS + Llama 3.3)")
     logger.info(f"✅ TTS  : {'GPU Piper' if USE_LOCAL else 'ElevenLabs' if tts_service.enabled else 'disabled'}")
     logger.info("✅ Monto AI backend ready")
 
@@ -97,6 +97,7 @@ allowed_origins = os.getenv(
 production_origins = [
     "https://frontend-deploy-alpha-woad.vercel.app",  # child app
     "https://parent-app-plum.vercel.app",             # parent app
+    "http://localhost",   # packaged Capacitor Android apps (androidScheme: "http")
 ]
 for origin in production_origins:
     if origin not in allowed_origins:
@@ -105,13 +106,14 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     # Also allow: (1) any device on the local network (192.168.x.x, 10.x.x.x,
-    # 172.16-31.x.x) hitting the child/parent/admin dev ports, so the
-    # pairing QR's embedded LAN IP works from a phone/tablet on the same
-    # wifi; (2) the Cloudflare quick-tunnel origins the child/parent/admin
-    # apps are exposed through for cross-network access — those get a new
-    # random *.trycloudflare.com subdomain each time the tunnel restarts,
-    # so the whole domain is allowed rather than one fixed subdomain.
-    allow_origin_regex=r"^https?://(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}):(3000|3001|3002)$|^https://[a-zA-Z0-9-]+\.trycloudflare\.com$",
+    # 172.16-31.x.x) or Tailscale (100.64.0.0/10) hitting the child/parent/
+    # admin dev ports, so the pairing QR's embedded LAN/Tailscale IP works
+    # from a phone/tablet on the same wifi or tailnet; (2) the Cloudflare
+    # quick-tunnel origins the child/parent/admin apps are exposed through
+    # for cross-network access — those get a new random *.trycloudflare.com
+    # subdomain each time the tunnel restarts, so the whole domain is
+    # allowed rather than one fixed subdomain.
+    allow_origin_regex=r"^https?://(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}):(3000|3001|3002)$|^https://[a-zA-Z0-9-]+\.trycloudflare\.com$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
