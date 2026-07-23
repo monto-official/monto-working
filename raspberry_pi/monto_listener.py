@@ -15,6 +15,7 @@ import os
 import io
 import wave
 import time
+import shutil
 import tempfile
 import logging
 import threading
@@ -24,12 +25,25 @@ import numpy as np
 import requests
 import pyaudio
 import pygame
+import qrcode
 from display.face import MontoFace, glow, Theme
 from dotenv import dotenv_values
+from lib import device_id as device_id_lib
+from lib import pairing as pairing_lib
+from lib.firebase_signaling import FirebaseSignaling, is_configured as firebase_is_configured
 
 env = dotenv_values(".env")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+try:
+    from lib.webrtc_call import CallManager
+except ImportError as e:
+    CallManager = None
+    logger.warning(f"Voice calling disabled — aiortc not installed ({e})")
+
+# raspberry_pi/ is one level below the repo root — `git pull` needs to run there
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 GPU_BACKEND      = env.get("BACKEND_URL",          "http://100.76.66.40:8000")
@@ -40,9 +54,18 @@ FULLSCREEN       = env.get("FULLSCREEN",            "true").lower() == "true"
 SAMPLE_RATE      = 16000
 GPIO_PIN         = int(env.get("GPIO_BUTTON_PIN",   "0"))
 
+# Parent-app pairing + calling
+FIREBASE_API_KEY      = env.get("FIREBASE_API_KEY", "")
+FIREBASE_DATABASE_URL = env.get("FIREBASE_DATABASE_URL", "")
+TURN_URL              = env.get("TURN_URL") or None
+TURN_USERNAME         = env.get("TURN_USERNAME") or None
+TURN_PASSWORD         = env.get("TURN_PASSWORD") or None
+DEVICE_ID             = device_id_lib.get_or_create_device_id()
+
 _active_backend = GPU_BACKEND
 _backend_lock   = threading.Lock()
 _busy           = threading.Event()
+_call_manager   = None   # set in main() once CallManager (if available) is started
 
 # Cached mic device index and sample rate (set once at startup)
 _mic_idx        = None
@@ -287,6 +310,104 @@ def backend_monitor(face):
                     gpu_fail_start = None
         time.sleep(15)
 
+# ── PAIRING ───────────────────────────────────────────────────────────────────
+# Mirrors frontend/components/PairingQRModal.tsx: mint a short-lived code from
+# the backend, show it as a QR the parent app scans, then poll pairing status
+# so the panel can stop nagging once a parent has paired.
+
+PAIRING_CODE_REFRESH_S = 8 * 60   # codes expire after 10 min server-side
+PAIRING_STATUS_POLL_S  = 30
+
+def _make_qr_surface(payload: str):
+    img = qrcode.QRCode(border=2, box_size=8)
+    img.add_data(payload)
+    img.make(fit=True)
+    pil_img = img.make_image().get_image().convert("RGB")
+    return pygame.image.fromstring(pil_img.tobytes(), pil_img.size, "RGB")
+
+def pairing_loop(face):
+    """Keeps a fresh, unexpired pairing code on screen until a parent has
+    paired, then just polls status so a second parent device can still pair."""
+    paired = False
+    code, qr = "", None
+    while face.running:
+        if not paired:
+            result = pairing_lib.create_code(
+                get_backend(), DEVICE_ID, get_backend(),
+                turn_url=TURN_URL, turn_username=TURN_USERNAME, turn_password=TURN_PASSWORD,
+            )
+            if result:
+                code = result["code"]
+                qr = _make_qr_surface(f'{{"v":2,"code":"{code}","api":"{get_backend()}"}}')
+            face.set_pairing_info(code, qr, paired=False)
+
+        status = pairing_lib.get_status(get_backend(), DEVICE_ID)
+        if status:
+            paired = True
+            face.set_pairing_info(code, qr, paired=True)
+
+        time.sleep(PAIRING_CODE_REFRESH_S if not paired else PAIRING_STATUS_POLL_S)
+
+# ── CONTROL CHANNEL & CALLING ─────────────────────────────────────────────────
+# Mirrors useDeviceChannel.ts (pairing/notification messages) and
+# useWebRTCCall.ts (voice calls) — same Firebase rooms, so the parent app
+# reaches this native kiosk exactly like it reaches the web child app.
+
+def start_control_channel(face):
+    if not firebase_is_configured(FIREBASE_API_KEY, FIREBASE_DATABASE_URL):
+        logger.warning("Control channel disabled — FIREBASE_API_KEY/FIREBASE_DATABASE_URL not set")
+        return None
+
+    def on_signal(signal_type, payload):
+        if signal_type == "paired":
+            child_name = payload.get("childName") or "there"
+            face.set_emotion("happy", f"Paired with {child_name}'s parent! 🎉")
+            play_tts(f"Hi {child_name}! I'm now paired with your parent's app.", emotion="happy", face=face)
+            time.sleep(1)
+            face.set_emotion("idle")
+
+    channel = FirebaseSignaling(
+        api_key=FIREBASE_API_KEY,
+        database_url=FIREBASE_DATABASE_URL,
+        room=f"{DEVICE_ID}:control",
+        role="child",
+        on_signal=on_signal,
+        on_error=lambda msg: logger.warning(f"[Control] {msg}"),
+    )
+    channel.start()
+    return channel
+
+def start_call_manager(face):
+    if CallManager is None:
+        return None
+    if not firebase_is_configured(FIREBASE_API_KEY, FIREBASE_DATABASE_URL):
+        logger.warning("Voice calling disabled — FIREBASE_API_KEY/FIREBASE_DATABASE_URL not set")
+        return None
+
+    def on_incoming_call():
+        face.show_incoming_call("Parent")
+
+    def on_call_started():
+        face.hide_incoming_call()
+        face.set_in_call(True)
+
+    def on_call_ended():
+        face.hide_incoming_call()
+        face.set_in_call(False)
+
+    manager = CallManager(
+        room=DEVICE_ID,
+        firebase_api_key=FIREBASE_API_KEY,
+        firebase_database_url=FIREBASE_DATABASE_URL,
+        get_mic_source=lambda: (_mic_idx, _mic_rate),
+        turn_url=TURN_URL, turn_username=TURN_USERNAME, turn_password=TURN_PASSWORD,
+        on_incoming_call=on_incoming_call,
+        on_call_started=on_call_started,
+        on_call_ended=on_call_ended,
+    )
+    manager.start()
+    return manager
+
 # ── CONVERSATION ──────────────────────────────────────────────────────────────
 
 def do_conversation(face):
@@ -360,6 +481,119 @@ def gpio_listener(face, pin):
     except Exception as e:
         logger.error(f"GPIO error: {e}")
 
+# ── MAINTENANCE (git pull / restart / logs / reboot from the touchscreen) ─────
+# The face app runs fullscreen and this Pi may have no desktop/X11 session at
+# all (just a console framebuffer), so a real terminal emulator isn't always
+# launchable. Prefer a real terminal when a desktop is present; otherwise fall
+# back to the in-app panel so maintenance is still possible with no keyboard.
+
+TERMINAL_CANDIDATES = ["lxterminal", "x-terminal-emulator", "xterm", "gnome-terminal", "konsole"]
+
+def open_terminal_or_panel(face):
+    if os.environ.get("DISPLAY"):
+        for name in TERMINAL_CANDIDATES:
+            path = shutil.which(name)
+            if not path:
+                continue
+            try:
+                subprocess.Popen([path])
+                logger.info(f"Opened terminal: {name}")
+                return
+            except Exception as e:
+                logger.warning(f"Could not launch {name}: {e}")
+    face.open_maintenance_panel()
+
+def run_maintenance_action(face, action):
+    """Run one maintenance panel action in a background thread."""
+    if action == "close":
+        face.close_maintenance_panel()
+        return
+
+    if action == "pair":
+        face.close_maintenance_panel()
+        face.open_pairing_panel()
+        return
+
+    if action == "reboot" and not face.reboot_armed:
+        face.reboot_armed = True
+        face.log_maintenance("Tap Reboot again to confirm.")
+        return
+
+    def _run():
+        face.set_maintenance_busy(True)
+        try:
+            if action == "pull":
+                face.log_maintenance("$ git pull")
+                result = subprocess.run(["git", "pull"], cwd=REPO_ROOT,
+                                         capture_output=True, text=True, timeout=60)
+                for line in (result.stdout + result.stderr).splitlines():
+                    face.log_maintenance(line)
+                face.log_maintenance(
+                    "Done. Restart Monto to pick up changes." if result.returncode == 0
+                    else f"git pull failed (exit {result.returncode})."
+                )
+
+            elif action == "restart":
+                face.log_maintenance("Restarting monto.service...")
+                subprocess.Popen(["sudo", "systemctl", "restart", "monto"])
+                # process exits here as the service restarts — nothing more to log
+
+            elif action == "logs":
+                face.log_maintenance("$ journalctl -u monto -n 12")
+                result = subprocess.run(["journalctl", "-u", "monto", "-n", "12", "--no-pager"],
+                                         capture_output=True, text=True, timeout=15)
+                for line in result.stdout.splitlines():
+                    face.log_maintenance(line)
+
+            elif action == "reboot":
+                face.log_maintenance("Rebooting...")
+                subprocess.Popen(["sudo", "reboot"])
+
+        except Exception as e:
+            face.log_maintenance(f"Error: {e}")
+        finally:
+            face.reboot_armed = False
+            face.set_maintenance_busy(False)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+# ── TOUCH / CLICK ROUTING ──────────────────────────────────────────────────────
+# One shared handler for mouse clicks and touch taps — priority order matches
+# on-screen stacking: an incoming call interrupts everything, then whichever
+# panel is open, then the always-visible mic/util buttons and call banner.
+
+def handle_tap(face, pos):
+    if face.incoming_call_active:
+        action = face.hit_incoming_call_action(pos)
+        if action == "accept":
+            face.hide_incoming_call()
+            if _call_manager: _call_manager.accept_call()
+        elif action == "decline":
+            face.hide_incoming_call()
+            if _call_manager: _call_manager.reject_call()
+        return
+
+    if face.show_pairing:
+        if face.hit_pairing_action(pos) == "close":
+            face.close_pairing_panel()
+        return
+
+    if face.show_maintenance:
+        action = face.hit_maintenance_action(pos)
+        if action:
+            run_maintenance_action(face, action)
+        return
+
+    if face.in_call and face.hit_hangup_button(pos):
+        if _call_manager: _call_manager.hang_up()
+        return
+
+    if face.hit_mic_button(pos):
+        face.set_mic_button_pressed(True)
+        do_conversation(face)
+    elif face.hit_util_button(pos):
+        open_terminal_or_panel(face)
+
 # ── MAIN LOOP ─────────────────────────────────────────────────────────────────
 
 def main():
@@ -399,6 +633,12 @@ def main():
         if GPIO_PIN > 0:
             threading.Thread(target=gpio_listener, args=(face, GPIO_PIN), daemon=True).start()
 
+        # Start pairing + parent-app connectivity (control channel + calling)
+        threading.Thread(target=pairing_loop, args=(face,), daemon=True).start()
+        start_control_channel(face)
+        global _call_manager
+        _call_manager = start_call_manager(face)
+
     threading.Thread(target=startup, daemon=True).start()
 
     logger.info("Controls: SPACE or ENTER = talk  |  ESC = quit")
@@ -416,19 +656,15 @@ def main():
                 elif event.key in (pygame.K_SPACE, pygame.K_RETURN):
                     do_conversation(face)
 
-            # ── Mic button — touch panels register as a mouse (MOUSEBUTTONDOWN);
-            # FINGERDOWN is handled too in case the driver reports raw touch events.
+            # ── Mic / maintenance buttons — touch panels register as a mouse
+            # (MOUSEBUTTONDOWN); FINGERDOWN is handled too in case the driver
+            # reports raw touch events.
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                if face.hit_mic_button(event.pos):
-                    face.set_mic_button_pressed(True)
-                    do_conversation(face)
+                handle_tap(face, event.pos)
             elif event.type == pygame.MOUSEBUTTONUP:
                 face.set_mic_button_pressed(False)
             elif event.type == pygame.FINGERDOWN:
-                pos = (int(event.x * face.W), int(event.y * face.H))
-                if face.hit_mic_button(pos):
-                    face.set_mic_button_pressed(True)
-                    do_conversation(face)
+                handle_tap(face, (int(event.x * face.W), int(event.y * face.H)))
             elif event.type == pygame.FINGERUP:
                 face.set_mic_button_pressed(False)
 
@@ -467,6 +703,15 @@ def main():
 
         face._draw_status_bar(emotion, mic_level, talking)
         face._draw_mic_button(tick, emotion, talking, btn_pressed)
+        face._draw_util_button(False)
+        if face.in_call:
+            face._draw_in_call_banner()
+        if face.show_maintenance:
+            face._draw_maintenance_panel()
+        if face.show_pairing:
+            face._draw_pairing_panel()
+        if face.incoming_call_active:
+            face._draw_incoming_call_panel()
 
         pygame.display.flip()
         with face._lock:

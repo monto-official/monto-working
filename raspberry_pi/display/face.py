@@ -187,6 +187,15 @@ class MontoFace:
         self.mic_btn_cx = self.W - btn_margin - self.mic_btn_r
         self.mic_btn_cy = self.H - self.bar_h - btn_margin - self.mic_btn_r
 
+        # Maintenance button — bottom-left corner, mirrors the mic button.
+        # Deliberately small and dim: this opens git-pull/restart/reboot
+        # controls, so it's a "findable if you're looking for it" affordance
+        # for whoever maintains the device, not something meant to catch a
+        # child's eye like the mic button.
+        self.util_btn_r  = int(min(self.W, self.H) * 0.05)
+        self.util_btn_cx = btn_margin + self.util_btn_r
+        self.util_btn_cy = self.H - self.bar_h - btn_margin - self.util_btn_r
+
         # State
         self.emotion   = "idle"
         self.text      = ""
@@ -194,6 +203,28 @@ class MontoFace:
         self.running   = True
         self.mic_level = 0.0   # 0.0-1.0 live mic input level
         self.mic_btn_pressed = False
+
+        # Maintenance panel state
+        self.show_maintenance   = False
+        self.maintenance_lines: List[str] = []
+        self.maintenance_busy   = False
+        self.reboot_armed       = False   # reboot needs a confirming second tap
+        self._maintenance_rects = {}      # set by _draw_maintenance_panel(), read by hit-testing
+
+        # Pairing panel state — shows the QR/code a parent app scans to pair
+        self.show_pairing      = False
+        self.pairing_code      = ""
+        self.pairing_qr        = None   # pygame.Surface, set by set_pairing_info()
+        self.pairing_paired    = False
+        self._pairing_rects    = {}
+
+        # Incoming-call overlay + in-call banner state
+        self.incoming_call_active = False
+        self.incoming_caller      = ""
+        self.in_call              = False
+        self._incoming_call_rects = {}
+        self._hangup_rect         = None
+
         self._lock     = threading.Lock()
         self._tick     = 0
         self.clock     = pygame.time.Clock()
@@ -256,6 +287,91 @@ class MontoFace:
         with self._lock:
             self.mic_btn_pressed = pressed
 
+    # ── MAINTENANCE PANEL API ─────────────────────────────────────────────────
+
+    def hit_util_button(self, pos) -> bool:
+        """True if (x, y) lands on the maintenance button. Extra tolerance
+        since the target is small and touch panels are imprecise."""
+        dx = pos[0] - self.util_btn_cx
+        dy = pos[1] - self.util_btn_cy
+        return (dx * dx + dy * dy) <= (self.util_btn_r * 1.3) ** 2
+
+    def open_maintenance_panel(self):
+        with self._lock:
+            self.show_maintenance = True
+            self.reboot_armed     = False
+
+    def close_maintenance_panel(self):
+        with self._lock:
+            self.show_maintenance = False
+            self.reboot_armed     = False
+
+    def log_maintenance(self, line: str):
+        """Append one line to the panel's output log (keeps the last 10)."""
+        with self._lock:
+            self.maintenance_lines.append(line)
+            self.maintenance_lines = self.maintenance_lines[-10:]
+
+    def set_maintenance_busy(self, busy: bool):
+        with self._lock:
+            self.maintenance_busy = busy
+
+    def hit_maintenance_action(self, pos):
+        """Returns 'pull' | 'restart' | 'logs' | 'reboot' | 'pair' | 'close' | None."""
+        for name, rect in self._maintenance_rects.items():
+            if rect.collidepoint(pos):
+                return name
+        return None
+
+    # ── PAIRING PANEL API ──────────────────────────────────────────────────────
+
+    def open_pairing_panel(self):
+        with self._lock:
+            self.show_pairing = True
+
+    def close_pairing_panel(self):
+        with self._lock:
+            self.show_pairing = False
+
+    def set_pairing_info(self, code: str, qr_surface, paired: bool):
+        """qr_surface is a pygame.Surface (or None while a code is pending)."""
+        with self._lock:
+            self.pairing_code   = code
+            self.pairing_qr     = qr_surface
+            self.pairing_paired = paired
+
+    def hit_pairing_action(self, pos):
+        """Returns 'close' or None."""
+        for name, rect in self._pairing_rects.items():
+            if rect.collidepoint(pos):
+                return name
+        return None
+
+    # ── CALL UI API ────────────────────────────────────────────────────────────
+
+    def show_incoming_call(self, caller_label: str = "Parent"):
+        with self._lock:
+            self.incoming_call_active = True
+            self.incoming_caller      = caller_label
+
+    def hide_incoming_call(self):
+        with self._lock:
+            self.incoming_call_active = False
+
+    def hit_incoming_call_action(self, pos):
+        """Returns 'accept' | 'decline' | None."""
+        for name, rect in self._incoming_call_rects.items():
+            if rect.collidepoint(pos):
+                return name
+        return None
+
+    def set_in_call(self, active: bool):
+        with self._lock:
+            self.in_call = active
+
+    def hit_hangup_button(self, pos) -> bool:
+        return bool(self._hangup_rect and self._hangup_rect.collidepoint(pos))
+
     def run(self):
         while self.running:
             for e in pygame.event.get():
@@ -309,6 +425,13 @@ class MontoFace:
 
             # ── Mic button (touch target for 7" panels)
             self._draw_mic_button(tick, emotion, talking, btn_pressed)
+
+            # ── Maintenance button + panel
+            self._draw_util_button(False)
+            with self._lock:
+                show_maintenance = self.show_maintenance
+            if show_maintenance:
+                self._draw_maintenance_panel()
 
             pygame.display.flip()
             self._tick += 1
@@ -856,3 +979,237 @@ class MontoFace:
 
         icon_col = (225, 222, 245) if pressed else Theme.TEXT_FG
         self._icon_mic(cx, cy, r_eff, icon_col)
+
+    # ── MAINTENANCE BUTTON + PANEL ────────────────────────────────────────────
+
+    def _icon_terminal(self, cx, cy, r, color):
+        """Simple '>_' terminal glyph."""
+        w = max(2, int(r * 0.16))
+        pts = [(cx - int(r * 0.35), cy - int(r * 0.30)),
+               (cx + int(r * 0.05), cy),
+               (cx - int(r * 0.35), cy + int(r * 0.30))]
+        pygame.draw.lines(self.screen, color, False, pts, w)
+        pygame.draw.line(self.screen, color,
+                          (cx + int(r * 0.05), cy + int(r * 0.34)),
+                          (cx + int(r * 0.42), cy + int(r * 0.34)), w)
+
+    def _draw_util_button(self, pressed):
+        cx, cy = self.util_btn_cx, self.util_btn_cy
+        r_eff  = int(self.util_btn_r * (0.90 if pressed else 1.0))
+        base   = (58, 54, 96)
+        fill   = tuple(max(0, int(c * 0.72)) for c in base) if pressed else base
+
+        aa_circle(self.screen, fill, (cx, cy), r_eff)
+        pygame.gfxdraw.aacircle(self.screen, cx, cy, r_eff, (255, 255, 255, 60))
+        self._icon_terminal(cx, cy, r_eff, (205, 200, 230))
+
+    def _draw_maintenance_panel(self):
+        """Full-screen dim + a centered card with git-pull/restart/logs/reboot
+        buttons and a scrolling output log — a touch-only stand-in for SSH-ing
+        into the Pi when there's no keyboard attached to it."""
+        overlay = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
+        overlay.fill((5, 4, 16, 215))
+        self.screen.blit(overlay, (0, 0))
+
+        card_w = int(self.W * 0.82)
+        card_h = int(self.H * 0.72)
+        card_x = (self.W - card_w) // 2
+        card_y = (self.H - card_h) // 2
+
+        card = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
+        pygame.draw.rect(card, (16, 14, 42, 245), card.get_rect(), border_radius=22)
+        pygame.draw.rect(card, (255, 255, 255, 30), card.get_rect(), width=1, border_radius=22)
+        self.screen.blit(card, (card_x, card_y))
+
+        pad = int(card_w * 0.05)
+        title = self._f_text.render("Maintenance", True, Theme.TEXT_FG)
+        self.screen.blit(title, (card_x + pad, card_y + pad // 2))
+
+        # Close button — top-right of the card
+        close_r  = int(card_w * 0.045)
+        close_cx = card_x + card_w - pad // 2 - close_r
+        close_cy = card_y + pad // 2 + close_r
+        aa_circle(self.screen, (60, 40, 60), (close_cx, close_cy), close_r)
+        d = close_r * 0.5
+        pygame.draw.line(self.screen, (230, 200, 200),
+                          (close_cx - d, close_cy - d), (close_cx + d, close_cy + d), 3)
+        pygame.draw.line(self.screen, (230, 200, 200),
+                          (close_cx - d, close_cy + d), (close_cx + d, close_cy - d), 3)
+
+        with self._lock:
+            reboot_armed = self.reboot_armed
+            busy         = self.maintenance_busy
+            lines        = list(self.maintenance_lines)
+            paired       = self.pairing_paired
+
+        # Action buttons — 2x2 grid, plus a full-width pairing row
+        labels = [
+            ("pull",    "⬇ Git Pull"),
+            ("restart", "♻ Restart Monto"),
+            ("logs",    "\U0001F4DC View Logs"),
+            ("reboot",  "Tap again to confirm" if reboot_armed else "⏻ Reboot Pi"),
+        ]
+        btn_w = (card_w - pad * 3) // 2
+        btn_h = int(card_h * 0.15)
+        top_y = card_y + int(pad * 2.2)
+
+        rects = {"close": pygame.Rect(close_cx - close_r, close_cy - close_r, close_r * 2, close_r * 2)}
+        for i, (key, label) in enumerate(labels):
+            col, row = i % 2, i // 2
+            bx = card_x + pad + col * (btn_w + pad)
+            by = top_y + row * (btn_h + int(pad * 0.6))
+            rect = pygame.Rect(bx, by, btn_w, btn_h)
+            rects[key] = rect
+
+            bg = (100, 40, 40) if (key == "reboot" and reboot_armed) else (40, 36, 74)
+            pygame.draw.rect(self.screen, bg, rect, border_radius=14)
+            pygame.draw.rect(self.screen, (255, 255, 255), rect, width=1, border_radius=14)
+            txt = self._f_status.render(label, True, Theme.TEXT_FG)
+            self.screen.blit(txt, (rect.centerx - txt.get_width() // 2,
+                                    rect.centery - txt.get_height() // 2))
+
+        # Pairing row — full width, third row
+        pair_y    = top_y + 2 * (btn_h + int(pad * 0.6))
+        pair_rect = pygame.Rect(card_x + pad, pair_y, card_w - pad * 2, btn_h)
+        rects["pair"] = pair_rect
+        pair_label = "✓ Paired with parent app" if paired else "\U0001F4F1 Pair with parent app"
+        pygame.draw.rect(self.screen, (34, 74, 44) if paired else (40, 36, 74), pair_rect, border_radius=14)
+        pygame.draw.rect(self.screen, (255, 255, 255), pair_rect, width=1, border_radius=14)
+        txt = self._f_status.render(pair_label, True, Theme.TEXT_FG)
+        self.screen.blit(txt, (pair_rect.centerx - txt.get_width() // 2,
+                                pair_rect.centery - txt.get_height() // 2))
+
+        self._maintenance_rects = rects
+
+        # Output log
+        log_y   = pair_y + btn_h + int(pad * 0.6)
+        log_h   = card_y + card_h - pad - log_y
+        log_rect = pygame.Rect(card_x + pad, log_y, card_w - pad * 2, max(0, log_h))
+        pygame.draw.rect(self.screen, (8, 6, 24), log_rect, border_radius=10)
+
+        ly = log_rect.y + 8
+        status_line = "Running..." if busy else ("Ready — tap an action above" if not lines else "")
+        if status_line:
+            s = self._f_status.render(status_line, True, Theme.TEXT_DIM)
+            self.screen.blit(s, (log_rect.x + 10, ly))
+            ly += s.get_height() + 4
+
+        line_h = 22
+        max_lines = max(0, (log_rect.h - (ly - log_rect.y) - 8) // line_h)
+        for line in lines[-max_lines:] if max_lines else []:
+            s = self._f_status.render(line[:70], True, Theme.TEXT_FG)
+            self.screen.blit(s, (log_rect.x + 10, ly))
+            ly += line_h
+
+    # ── PAIRING PANEL ────────────────────────────────────────────────────────
+
+    def _draw_pairing_panel(self):
+        """Full-screen dim + a centered card with the pairing QR/code — the
+        touchscreen counterpart of PairingQRModal.tsx in the web child app."""
+        overlay = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
+        overlay.fill((5, 4, 16, 215))
+        self.screen.blit(overlay, (0, 0))
+
+        card_w = int(self.W * 0.6)
+        card_h = int(self.H * 0.72)
+        card_x = (self.W - card_w) // 2
+        card_y = (self.H - card_h) // 2
+
+        card = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
+        pygame.draw.rect(card, (16, 14, 42, 245), card.get_rect(), border_radius=22)
+        pygame.draw.rect(card, (255, 255, 255, 30), card.get_rect(), width=1, border_radius=22)
+        self.screen.blit(card, (card_x, card_y))
+
+        pad = int(card_w * 0.06)
+        title = self._f_text.render("Pair with the parent app", True, Theme.TEXT_FG)
+        self.screen.blit(title, (card_x + card_w // 2 - title.get_width() // 2, card_y + pad // 2))
+
+        # Close button — top-right of the card
+        close_r  = int(card_w * 0.06)
+        close_cx = card_x + card_w - int(pad * 0.7) - close_r
+        close_cy = card_y + pad // 2 + close_r
+        aa_circle(self.screen, (60, 40, 60), (close_cx, close_cy), close_r)
+        d = close_r * 0.5
+        pygame.draw.line(self.screen, (230, 200, 200),
+                          (close_cx - d, close_cy - d), (close_cx + d, close_cy + d), 3)
+        pygame.draw.line(self.screen, (230, 200, 200),
+                          (close_cx - d, close_cy + d), (close_cx + d, close_cy - d), 3)
+        self._pairing_rects = {"close": pygame.Rect(close_cx - close_r, close_cy - close_r, close_r * 2, close_r * 2)}
+
+        with self._lock:
+            code   = self.pairing_code
+            qr     = self.pairing_qr
+            paired = self.pairing_paired
+
+        content_y = card_y + int(pad * 2)
+
+        if paired:
+            msg = self._f_text.render("✓ Paired!", True, (150, 230, 160))
+            self.screen.blit(msg, (card_x + card_w // 2 - msg.get_width() // 2, content_y + card_h // 3))
+            return
+
+        if qr is not None:
+            qx = card_x + (card_w - qr.get_width()) // 2
+            self.screen.blit(qr, (qx, content_y))
+            content_y += qr.get_height() + int(pad * 0.6)
+        else:
+            waiting = self._f_status.render("Generating code…", True, Theme.TEXT_DIM)
+            self.screen.blit(waiting, (card_x + card_w // 2 - waiting.get_width() // 2, content_y + card_h // 3))
+
+        if code:
+            code_txt = self._f_logo.render(code, True, Theme.TEXT_FG)
+            self.screen.blit(code_txt, (card_x + card_w // 2 - code_txt.get_width() // 2, content_y))
+            content_y += code_txt.get_height() + int(pad * 0.3)
+            hint = self._f_status.render("Scan the QR or enter this code in the parent app", True, Theme.TEXT_DIM)
+            self.screen.blit(hint, (card_x + card_w // 2 - hint.get_width() // 2, content_y))
+
+    # ── INCOMING-CALL OVERLAY ────────────────────────────────────────────────
+
+    def _draw_incoming_call_panel(self):
+        """Full-screen prompt with big Accept/Decline targets — this one IS
+        meant to catch a child's eye, unlike the maintenance/pairing panels."""
+        overlay = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
+        overlay.fill((5, 4, 16, 200))
+        self.screen.blit(overlay, (0, 0))
+
+        with self._lock:
+            caller = self.incoming_caller or "Parent"
+            tick   = self._tick
+
+        pulse = int(min(self.W, self.H) * (0.30 + 0.03 * math.sin(tick * 0.08)))
+        glow(self.screen, (*Theme.ACCENT["happy"], 40), self.face_cx, int(self.H * 0.38), pulse, steps=5)
+
+        label = self._f_logo.render(f"📞 {caller} is calling…", True, Theme.TEXT_FG)
+        self.screen.blit(label, (self.face_cx - label.get_width() // 2, int(self.H * 0.18)))
+
+        btn_r = int(min(self.W, self.H) * 0.11)
+        btn_y = int(self.H * 0.62)
+        accept_cx = self.face_cx + int(self.W * 0.16)
+        decline_cx = self.face_cx - int(self.W * 0.16)
+
+        aa_circle(self.screen, (40, 130, 60), (accept_cx, btn_y), btn_r)
+        aa_circle(self.screen, (150, 40, 40), (decline_cx, btn_y), btn_r)
+        accept_lbl = self._f_status.render("Accept", True, Theme.TEXT_FG)
+        decline_lbl = self._f_status.render("Decline", True, Theme.TEXT_FG)
+        self.screen.blit(accept_lbl, (accept_cx - accept_lbl.get_width() // 2, btn_y + btn_r + 8))
+        self.screen.blit(decline_lbl, (decline_cx - decline_lbl.get_width() // 2, btn_y + btn_r + 8))
+
+        self._incoming_call_rects = {
+            "accept": pygame.Rect(accept_cx - btn_r, btn_y - btn_r, btn_r * 2, btn_r * 2),
+            "decline": pygame.Rect(decline_cx - btn_r, btn_y - btn_r, btn_r * 2, btn_r * 2),
+        }
+
+    # ── IN-CALL BANNER ───────────────────────────────────────────────────────
+
+    def _draw_in_call_banner(self):
+        """Small persistent bar at the top of the screen while a call is
+        connected — tap it to hang up."""
+        bar_h = int(self.H * 0.06)
+        bar = pygame.Surface((self.W, bar_h), pygame.SRCALPHA)
+        bar.fill((16, 60, 30, 220))
+        self.screen.blit(bar, (0, 0))
+
+        label = self._f_status.render("On call — tap to hang up", True, Theme.TEXT_FG)
+        self.screen.blit(label, (self.W // 2 - label.get_width() // 2, bar_h // 2 - label.get_height() // 2))
+
+        self._hangup_rect = pygame.Rect(0, 0, self.W, bar_h)

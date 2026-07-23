@@ -5,3 +5,9 @@ pygame>=2.5.2
 python-dotenv>=1.0.0
 numpy>=1.24.0
 SpeechRecognition>=3.10.0
+
+# Parent-app pairing (QR code) + voice calling
+qrcode[pil]>=7.4.2
+# aiortc needs system packages before `pip install` will succeed on Raspberry
+# Pi OS: sudo apt install libavdevice-dev libavfilter-dev libopus-dev libvpx-dev pkg-config
+aiortc>=1.9.0
