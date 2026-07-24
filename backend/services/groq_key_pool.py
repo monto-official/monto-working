@@ -29,6 +29,16 @@ def load_groq_keys(primary: str = "") -> list[str]:
     return unique
 
 
+def is_network_groq_error(error: Exception) -> bool:
+    """True for connectivity failures that are independent of the API key."""
+    if getattr(error, "status_code", None) is not None:
+        return False
+    message = str(error).lower()
+    name = type(error).__name__.lower()
+    return any(token in message or token in name for token in (
+        "connection", "connecterror", "apiconnection", "getaddrinfo", "dns", "timed out", "timeout",
+    ))
+
 def is_retryable_groq_error(error: Exception) -> bool:
     status = getattr(error, "status_code", None)
     if status in {401, 403, 408, 409, 429} or (isinstance(status, int) and status >= 500):

@@ -37,7 +37,7 @@ class ElevenLabsManager:
         output_format: str = "mp3_44100_128",
     ) -> None:
         self.api_keys = self._normalise_keys(api_keys or self.load_api_keys())
-        self.voice_id = voice_id or os.getenv("ELEVENLABS_VOICE_ID", "Dk3lflqf310KiWVmwB9F")
+        self.voice_id = voice_id or os.getenv("ELEVENLABS_VOICE_ID", "cgSgspJ2msm6clMCkdW9")
         self.model_id = model_id or os.getenv("ELEVENLABS_MODEL_ID", "eleven_v3")
         self.output_format = output_format
         self._active_index = 0

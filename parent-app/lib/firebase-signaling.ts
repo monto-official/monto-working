@@ -95,6 +95,9 @@ export async function createFirebaseSignaling(options: {
   const myPresencePath = `montoCalls/${room}/presence/${options.role}`;
   const peerPresencePath = `montoCalls/${room}/presence/${peerRole}`;
   const startedAt = Date.now() - 2_000;
+  // A ring may be written just before navigation mounts the full call screen.
+  // Never extend this grace period to old SDP or ICE messages.
+  const ringStartedAt = Date.now() - 45_000;
   const seen = new Set<string>();
   let closed = false;
   let peerLastSeen = 0;
@@ -102,7 +105,8 @@ export async function createFirebaseSignaling(options: {
   const processSignal = (key: string, signal: FirebaseSignal | null) => {
     if (!signal || seen.has(key) || signal.role === options.role) return;
     seen.add(key);
-    if ((signal.createdAt ?? 0) < startedAt) return;
+    const cutoff = signal.type === "ring" ? ringStartedAt : startedAt;
+    if ((signal.createdAt ?? 0) < cutoff) return;
     void options.onSignal(signal.type, signal.payload ?? {});
   };
 

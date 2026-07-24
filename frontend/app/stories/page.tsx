@@ -2,7 +2,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Play, Pause, SkipBack, SkipForward,
+  Play, Pause, SkipBack, SkipForward, X,
   Mic, Volume2, BookOpen, ChevronLeft,
   Shuffle, Repeat
 } from "lucide-react";
@@ -11,6 +11,7 @@ import { STORIES, type Story } from "@/lib/media-content";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 import { sendVoiceQuery, APIError } from "@/lib/api";
 import { useDeviceChannelContext } from "@/components/DeviceChannelProvider";
+import { MiniMonto } from "@/components/MiniMonto";
 
 function fmt(s: number) {
   if (!isFinite(s)) return "0:00";
@@ -236,16 +237,23 @@ export default function StoriesPage() {
     <div className="min-h-dvh flex flex-col bg-black select-none">
 
       {/* Header */}
-      <header className="flex items-center justify-between px-5 pt-safe pt-5 pb-3">
-        <motion.button onClick={() => router.back()} whileTap={{ scale: 0.85 }}
-          className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
-          <ChevronLeft className="w-5 h-5 text-white" />
-        </motion.button>
+      <header className="flex flex-col items-center gap-2 px-5 pt-safe pt-5 pb-3">
+        <div className="flex items-center gap-2 bg-white/5 rounded-full p-1">
+          <motion.button onClick={() => router.back()} whileTap={{ scale: 0.85 }}
+            title="Back" aria-label="Back"
+            className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
+            <ChevronLeft className="w-5 h-5 text-white" />
+          </motion.button>
+          <motion.button onClick={() => { stopStory(); router.push("/"); }} whileTap={{ scale: 0.85 }}
+            title="Close — stop and go home" aria-label="Close — stop and go home"
+            className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center disabled:opacity-30">
+            <X className="w-5 h-5 text-white" />
+          </motion.button>
+        </div>
         <div className="text-center">
-          <p className="text-white font-bold text-xl">📖 Stories</p>
+          <p className="text-white font-bold text-base">📖 Stories</p>
           <p className="text-white/40 text-xs">{STORIES.length} stories</p>
         </div>
-        <div className="w-10" />
       </header>
 
       {/* Now-playing card */}
@@ -430,6 +438,7 @@ export default function StoriesPage() {
           );
         })}
       </div>
+      <MiniMonto />
     </div>
   );
 }

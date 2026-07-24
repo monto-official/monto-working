@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Volume2, VolumeX, Mic, MicOff, Sparkles, MessageCircle, X, ChevronLeft, ChevronRight, QrCode, Settings as SettingsIcon, CheckCircle2, Music2, BookOpen, PersonStanding, Compass, Snowflake, Gamepad2, HeartHandshake } from "lucide-react";
+import { Volume2, VolumeX, Mic, MicOff, Sparkles, MessageCircle, X, ChevronLeft, ChevronRight, QrCode, Settings as SettingsIcon, CheckCircle2, Music2, BookOpen, Dumbbell, Compass, Snowflake, Gamepad2, HeartHandshake, Voicemail } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { HangingAvatar } from "@/components/HangingAvatar";
 import { CallScreen } from "@/components/CallScreen";
@@ -18,6 +18,7 @@ import { useAppControls } from "@/hooks/useAppControls";
 import { useReminderPolling, type Reminder } from "@/hooks/useReminderPolling";
 import { useDeviceChannelContext } from "@/components/DeviceChannelProvider";
 import { sendVoiceQuery, checkHealth, APIError } from "@/lib/api";
+import { getApiUrl } from "@/lib/api-url";
 import { getOrCreateDeviceId } from "@/lib/device-id";
 import { loadChildName, saveChildName } from "@/lib/child-profile";
 import { Emotion, RecordingState, Settings, VoiceQueryResponse, Character } from "@/types";
@@ -144,7 +145,25 @@ export default function Home() {
   const [calling, setCalling] = useState<{ callee: string; isIncoming: boolean; avatar?: string } | null>(null);
 
   // ── Pairing QR modal ────────────────────────────────────────────────────
+  const [deviceId] = useState(() => getOrCreateDeviceId());
   const [showPairing, setShowPairing] = useState(false);
+  const [parentConnection, setParentConnection] = useState({ loading: true, count: 0, error: false });
+
+  const refreshParentConnection = useCallback(async () => {
+    setParentConnection((current) => ({ ...current, loading: true, error: false }));
+    try {
+      const response = await fetch(`${getApiUrl()}/pairing/status/${encodeURIComponent(deviceId)}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const parents = await response.json() as Array<{ parent_device_id: string }>;
+      setParentConnection({ loading: false, count: parents.length, error: false });
+    } catch {
+      setParentConnection((current) => ({ ...current, loading: false, error: true }));
+    }
+  }, [deviceId]);
+
+  useEffect(() => {
+    if (showSettings) void refreshParentConnection();
+  }, [showSettings, refreshParentConnection]);
 
   // ── Explore mode ────────────────────────────────────────────────────────
   const [exploreScene, setExploreScene] = useState<ExploreScene>(null);
@@ -157,12 +176,15 @@ export default function Home() {
 
   // ── Parent-set reminders (polled from the backend) ─────────────────────
   const [activeReminder, setActiveReminder] = useState<Reminder | null>(null);
-  const [deviceId] = useState(() => getOrCreateDeviceId());
 
   // ── Child name — set remotely by the parent app right after pairing ────
   const [childName, setChildName] = useState("");
   const [showPaired, setShowPaired] = useState(false);
   useEffect(() => { setChildName(loadChildName()); }, []);
+
+  // ── Incoming voice note from the parent app ─────────────────────────────
+  const [incomingVoiceNote, setIncomingVoiceNote] = useState(false);
+  const voiceNoteAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const busyRef          = useRef(false);
   const adventureSliderRef = useRef<HTMLDivElement | null>(null);
@@ -286,7 +308,22 @@ export default function Home() {
       const callerAvatar = typeof lastMessage.callerAvatar === "string" ? lastMessage.callerAvatar : undefined;
       setCalling({ callee: callerName, isIncoming: true, avatar: callerAvatar });
     }
-  }, [lastMessage, router, calling, speak]);
+    if (lastMessage.type === "voice-message" && lastMessage.senderRole === "parent" && typeof lastMessage.id === "string") {
+      const messageId = lastMessage.id;
+      setIncomingVoiceNote(true);
+      setTimeout(() => setIncomingVoiceNote(false), 8000);
+      fetch(`${getApiUrl()}/voice-messages/${deviceId}/${messageId}/audio`)
+        .then(res => (res.ok ? res.blob() : Promise.reject(new Error(`HTTP ${res.status}`))))
+        .then(blob => {
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          voiceNoteAudioRef.current = audio;
+          audio.onended = () => URL.revokeObjectURL(url);
+          void audio.play().catch(() => {});
+        })
+        .catch(() => {});
+    }
+  }, [lastMessage, router, calling, speak, deviceId]);
 
   // Stop any in-progress ringtone as soon as the call screen closes.
   useEffect(() => {
@@ -460,6 +497,40 @@ export default function Home() {
 
   const isRec    = recordingState === "recording";
   const isProc   = recordingState === "processing" || recordingState === "requesting";
+
+  // ── Adventure slider ─────────────────────────────────────────────────────
+  const adventureItems = [
+    { label: "Music", icon: Music2, route: "/songs", tone: "coral", enabled: appControls?.songs_enabled !== false },
+    { label: "Stories", icon: BookOpen, route: "/stories", tone: "violet", enabled: appControls?.stories_enabled !== false },
+    { label: "Exercise", icon: Dumbbell, route: "/exercise", tone: "mint", enabled: appControls?.yoga_enabled !== false },
+    { label: "Games", icon: Gamepad2, route: "/games", tone: "sun", enabled: true },
+    { label: "Moral Game", icon: HeartHandshake, route: "/moral-game", tone: "rose", enabled: true },
+    { label: "Explore", icon: Compass, action: () => setShowExplorePicker(true), tone: "sky", enabled: true },
+    { label: "Voice", icon: Voicemail, route: "/voice-messages", tone: "plum", enabled: true },
+  ].filter(item => item.enabled);
+
+  const [activeAdventure, setActiveAdventure] = useState(0);
+
+  const handleSliderScroll = useCallback(() => {
+    const el = adventureSliderRef.current;
+    if (!el || !el.children.length) return;
+    const center = el.scrollLeft + el.clientWidth / 2;
+    let closest = 0;
+    let minDist = Infinity;
+    Array.from(el.children).forEach((child, i) => {
+      const node = child as HTMLElement;
+      const dist = Math.abs(node.offsetLeft + node.offsetWidth / 2 - center);
+      if (dist < minDist) { minDist = dist; closest = i; }
+    });
+    setActiveAdventure(closest);
+  }, []);
+
+  const scrollToAdventure = useCallback((index: number) => {
+    const el = adventureSliderRef.current;
+    const child = el?.children[index] as HTMLElement | undefined;
+    if (!el || !child) return;
+    el.scrollTo({ left: child.offsetLeft - 8, behavior: lowPower ? "auto" : "smooth" });
+  }, [lowPower]);
 
   // Status text
   const statusText = useMemo(() => {
@@ -680,6 +751,59 @@ export default function Home() {
         )}
       </AnimatePresence>
 
+      {/* ── Incoming voice note toast ────────────────────────────────────── */}
+      <AnimatePresence>
+        {incomingVoiceNote && (
+          <motion.div
+            className="fixed top-6 left-1/2 z-40 w-[90vw] max-w-sm -translate-x-1/2"
+            initial={{ opacity: 0, y: -40, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0,   scale: 1   }}
+            exit={{   opacity: 0, y: -30,  scale: 0.95 }}
+            transition={{ type: "spring", stiffness: 300, damping: 22 }}
+          >
+            <div className="rounded-3xl px-5 py-4 flex items-center gap-4"
+              style={{
+                background: "linear-gradient(135deg, #7C3AED, #A855F7, #D8B4FE)",
+                boxShadow: "0 0 40px rgba(124,58,237,0.5), 0 8px 32px rgba(0,0,0,0.4)",
+              }}
+            >
+              <motion.div
+                className="text-4xl flex-shrink-0"
+                animate={{ rotate: [0, -8, 8, -8, 0] }}
+                transition={{ duration: 1, repeat: Infinity, ease: "easeInOut" }}
+              >
+                💌
+              </motion.div>
+
+              <div className="flex-1">
+                <p className="text-white font-bold text-sm leading-snug">
+                  Voice message from your parent!
+                </p>
+                <p className="text-white/80 text-xs mt-0.5">
+                  Playing it now — listen up! 🎧
+                </p>
+              </div>
+
+              <motion.button
+                onClick={() => setIncomingVoiceNote(false)}
+                className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0"
+                whileTap={{ scale: 0.85 }}
+              >
+                <X className="w-3.5 h-3.5 text-white" />
+              </motion.button>
+            </div>
+
+            <motion.div
+              className="h-1 rounded-full mt-1.5 mx-1"
+              initial={{ scaleX: 1 }}
+              animate={{ scaleX: 0 }}
+              transition={{ duration: 8, ease: "linear" }}
+              style={{ transformOrigin: "left", background: "rgba(255,255,255,0.6)" }}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── Parent reminder toast ────────────────────────────────────────── */}
       <AnimatePresence>
         {activeReminder && (
@@ -815,46 +939,43 @@ export default function Home() {
             <motion.div key="voice" className="monto-stage monto-stage-dashboard grid grid-cols-1 lg:grid-cols-[minmax(300px,0.72fr)_minmax(520px,1.28fr)] items-stretch gap-3 sm:gap-5 w-full flex-1 rounded-[34px] p-3 sm:p-4"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
 
-              <div className="monto-character-card rounded-[28px] p-5 flex flex-col items-center gap-3">
-                <div className="relative flex items-center justify-center w-full">
-                  <motion.div
-                    className="relative z-10"
-                    animate={isRec && !lowPower ? { scale: [1, 1.03, 1] } : {}}
-                    transition={{ duration: 0.3, repeat: Infinity }}
-                  >
-                    <motion.div
-                      className="monto-avatar-podium"
-                      animate={isRec && !lowPower ? { scale: [1, 1.025, 1] } : { scale: 1 }}
-                      transition={{ duration: 0.7, repeat: isRec && !lowPower ? Infinity : 0 }}
-                    >
-                      <Avatar emotion={isSpeaking ? "talking" : emotion} character={character} size={290} />
+              <div className="monto-character-card rounded-[28px] p-4 sm:p-5 flex flex-col items-center">
+                <div className="monto-companion-header">
+                  <div>
+                    <p className="monto-eyebrow">Your AI buddy</p>
+                    <h2 className="font-kids text-2xl text-white">Meet Monto</h2>
+                  </div>
+                  <div className={cn("monto-live-pill", isRec && "is-listening", isSpeaking && "is-speaking")}>
+                    <span />
+                    {isRec ? "Listening" : isSpeaking ? "Talking" : "Ready"}
+                  </div>
+                </div>
+                <div className="monto-avatar-stage relative flex items-center justify-center w-full">
+                  <motion.div className="relative z-10 flex w-full justify-center" animate={isRec && !lowPower ? { scale: [1, 1.03, 1] } : {}} transition={{ duration: 0.3, repeat: Infinity }}>
+                    <motion.div className="monto-avatar-podium flex w-full justify-center" animate={isRec && !lowPower ? { scale: [1, 1.025, 1] } : { scale: 1 }} transition={{ duration: 0.7, repeat: isRec && !lowPower ? Infinity : 0 }}>
+                      <Avatar emotion={isSpeaking ? "talking" : emotion} character={character} size={430} />
                     </motion.div>
                   </motion.div>
                 </div>
-                <div className="w-full flex flex-col items-center gap-2 text-center">
-                  <p className="text-[10px] uppercase tracking-[0.28em] text-sky-200/55 font-extrabold">Your friend</p>
-                  <p className="font-kids text-3xl text-white">Monto</p>
+                <div className="monto-companion-footer">
+                  <div className="monto-mood-orb"><Sparkles className="h-4 w-4" /></div>
+                  <div className="min-w-0">
+                    <p className="font-kids text-xl leading-none text-white">Monto</p>
+                    <p className="mt-1 truncate text-[11px] font-semibold text-sky-100/55">{isRec ? "I’m all ears — tell me anything!" : isSpeaking ? "Sharing something magical…" : "Ready to learn, play and explore"}</p>
+                  </div>
                 </div>
               </div>
 
               <div className="monto-console monto-main-console rounded-[28px] p-4 sm:p-6 flex flex-col gap-4 min-h-[480px]">
                 <div className="monto-adventure-wrap">
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <p className="text-[10px] uppercase tracking-[0.3em] text-sky-200/50 font-extrabold">Pick an adventure</p>
+                  <div className="monto-adventure-header">
+                    <div className="monto-adventure-heading">
+                      <p className="monto-adventure-title">Pick an adventure</p>
                       <span className="monto-slide-guide">
-                        Swipe adventures <ChevronRight className="h-3.5 w-3.5" />
+                        Swipe <ChevronRight className="h-3.5 w-3.5" />
                       </span>
-                      <div className="monto-slider-nav" aria-label="Adventure slider controls">
-                        <button onClick={() => adventureSliderRef.current?.scrollBy({ left: -210, behavior: lowPower ? "auto" : "smooth" })} aria-label="Previous adventures">
-                          <ChevronLeft className="h-4 w-4" />
-                        </button>
-                        <button onClick={() => adventureSliderRef.current?.scrollBy({ left: 210, behavior: lowPower ? "auto" : "smooth" })} aria-label="Next adventures">
-                          <ChevronRight className="h-4 w-4" />
-                        </button>
-                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="monto-control-pill" role="group" aria-label="Mic and speaker controls">
                       <motion.button
                         onClick={() => {
                           if (!micMuted) recorder.cancelRecording();
@@ -863,11 +984,11 @@ export default function Home() {
                         }}
                         aria-pressed={micMuted}
                         title={micMuted ? "Turn microphone on" : "Mute microphone"}
-                        className={"flex h-9 items-center gap-2 rounded-xl border px-3 text-[11px] font-bold transition " + (micMuted ? "border-rose-400/40 bg-rose-500/20 text-rose-200" : "border-emerald-400/30 bg-emerald-400/10 text-emerald-200")}
-                        whileTap={{ scale: .94 }}>
+                        className={cn("monto-control-seg", micMuted && "is-off")}
+                        whileTap={{ scale: .92 }}>
                         {micMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-                        <span>{micMuted ? "Mic muted" : "Mic on"}</span>
                       </motion.button>
+                      <span className="monto-control-divider" aria-hidden="true" />
                       <motion.button
                         onClick={() => {
                           if (autoSpeak) cancelTTS();
@@ -875,33 +996,68 @@ export default function Home() {
                         }}
                         aria-pressed={!autoSpeak}
                         title={autoSpeak ? "Mute speaker" : "Turn speaker on"}
-                        className={"flex h-9 items-center gap-2 rounded-xl border px-3 text-[11px] font-bold transition " + (autoSpeak ? "border-sky-400/30 bg-sky-400/10 text-sky-200" : "border-slate-400/20 bg-white/5 text-white/45")}
-                        whileTap={{ scale: .94 }}>
+                        className={cn("monto-control-seg", !autoSpeak && "is-off")}
+                        whileTap={{ scale: .92 }}>
                         {autoSpeak ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-                        <span>{autoSpeak ? "Speaker on" : "Speaker muted"}</span>
                       </motion.button>
                     </div>
                   </div>
-                  <div ref={adventureSliderRef} className="monto-adventure-grid monto-adventure-slider">
-                    {[
-                      { label: "Music", icon: Music2, route: "/songs", tone: "coral", enabled: appControls?.songs_enabled !== false },
-                      { label: "Stories", icon: BookOpen, route: "/stories", tone: "violet", enabled: appControls?.stories_enabled !== false },
-                      { label: "Move", icon: PersonStanding, route: "/yoga", tone: "mint", enabled: appControls?.yoga_enabled !== false },
-                      { label: "Games", icon: Gamepad2, route: "/games", tone: "sun", enabled: true },
-                      { label: "Moral Game", icon: HeartHandshake, route: "/moral-game", tone: "rose", enabled: true },
-                      { label: "Explore", icon: Compass, action: () => setShowExplorePicker(true), tone: "sky", enabled: true },
-                    ].filter(item => item.enabled).map((item) => (
-                      <motion.button key={item.label} onClick={() => item.action ? item.action() : item.route ? router.push(item.route) : handleMic()}
-                        className={`monto-adventure monto-adventure-${item.tone}`} whileHover={{ y: -3 }} whileTap={{ scale: 0.95 }}>
-                        <item.icon className="monto-adventure-icon" strokeWidth={2.3} />
-                        <span>{item.label}</span>
-                      </motion.button>
+
+                  <div className="monto-slider-shell">
+                    <motion.button
+                      type="button"
+                      className="monto-slider-arrow monto-slider-arrow-prev"
+                      onClick={() => adventureSliderRef.current?.scrollBy({ left: -210, behavior: lowPower ? "auto" : "smooth" })}
+                      aria-label="Previous adventures"
+                      whileTap={{ scale: 0.88 }}>
+                      <ChevronLeft className="h-4 w-4" />
+                    </motion.button>
+
+                    <div
+                      ref={adventureSliderRef}
+                      className="monto-adventure-grid monto-adventure-slider"
+                      onScroll={handleSliderScroll}
+                    >
+                      {adventureItems.map((item) => (
+                        <motion.button key={item.label} onClick={() => item.action ? item.action() : item.route ? router.push(item.route) : handleMic()}
+                          className={`monto-adventure monto-adventure-${item.tone}`} whileHover={{ y: -3 }} whileTap={{ scale: 0.95 }}>
+                          <item.icon className="monto-adventure-icon" strokeWidth={2.3} />
+                          <span>{item.label}</span>
+                        </motion.button>
+                      ))}
+                    </div>
+
+                    <motion.button
+                      type="button"
+                      className="monto-slider-arrow monto-slider-arrow-next"
+                      onClick={() => adventureSliderRef.current?.scrollBy({ left: 210, behavior: lowPower ? "auto" : "smooth" })}
+                      aria-label="Next adventures"
+                      whileTap={{ scale: 0.88 }}>
+                      <ChevronRight className="h-4 w-4" />
+                    </motion.button>
+                  </div>
+
+                  <div className="monto-slider-dots" role="tablist" aria-label="Adventure slides">
+                    {adventureItems.map((item, i) => (
+                      <button
+                        key={item.label}
+                        type="button"
+                        role="tab"
+                        aria-selected={i === activeAdventure}
+                        aria-label={`Go to ${item.label}`}
+                        className={cn("monto-slider-dot", i === activeAdventure && "is-active")}
+                        onClick={() => scrollToAdventure(i)}
+                      />
                     ))}
                   </div>
+
                   <motion.button
                     onClick={handleMic}
                     disabled={isProc || appControls?.maintenance_mode || appControls?.ai_enabled === false || appControls?.microphone_enabled === false}
-                    className="mt-3 w-full rounded-2xl flex items-center justify-center gap-2 py-2.5 font-bold text-sm text-white focus:outline-none disabled:opacity-40"
+                    className={cn(
+                      "monto-mic-charge mt-3 w-full rounded-2xl flex items-center justify-center gap-2 py-2.5 font-bold text-sm text-white focus:outline-none disabled:opacity-40",
+                      isRec && "is-listening",
+                    )}
                     style={{
                       background: isRec
                         ? "linear-gradient(135deg, #EF4444, #DC2626)"
@@ -1054,7 +1210,10 @@ export default function Home() {
               <div className="pt-3 flex items-center justify-center gap-3">
                 <motion.button onClick={handleMic}
                   disabled={isProc || appControls?.maintenance_mode || appControls?.ai_enabled === false || appControls?.microphone_enabled === false}
-                  className="w-16 h-16 rounded-full flex items-center justify-center focus:outline-none disabled:opacity-40"
+                  className={cn(
+                    "monto-mic-charge w-16 h-16 rounded-full flex items-center justify-center focus:outline-none disabled:opacity-40",
+                    isRec && "is-listening",
+                  )}
                   style={{
                     background: isRec
                       ? "linear-gradient(135deg, #EF4444, #DC2626)"
@@ -1088,6 +1247,8 @@ export default function Home() {
         noiseFloor={recorder.noiseFloor}
         calibrating={recorder.calibrating}
         onCalibrate={recorder.calibrate}
+        parentConnection={parentConnection}
+        onPairParent={() => { setShowSettings(false); setShowPairing(true); }}
       />
     </div>
   );

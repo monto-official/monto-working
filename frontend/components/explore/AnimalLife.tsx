@@ -1,25 +1,45 @@
 "use client";
+import { useState } from "react";
 import { motion } from "framer-motion";
 
 interface Props { animal: string; step: number }
 
-const LIFE_CYCLES: Record<string, { stages: { emoji: string; label: string }[]; color: string }> = {
-  butterfly: { color: "#F472B6", stages: [{ emoji: "🥚", label: "Egg" }, { emoji: "🐛", label: "Caterpillar" }, { emoji: "🫛", label: "Cocoon" }, { emoji: "🦋", label: "Butterfly!" }] },
-  frog:      { color: "#4ade80", stages: [{ emoji: "🥚", label: "Egg" }, { emoji: "🐟", label: "Tadpole" }, { emoji: "🐸", label: "Young Frog" }, { emoji: "🐸", label: "Frog!" }] },
-  chicken:   { color: "#FFD700", stages: [{ emoji: "🥚", label: "Egg" }, { emoji: "🐣", label: "Hatching" }, { emoji: "🐥", label: "Chick" }, { emoji: "🐔", label: "Chicken!" }] },
-  dog:       { color: "#F59E0B", stages: [{ emoji: "🐕", label: "Mother Dog" }, { emoji: "🤰", label: "Pregnant" }, { emoji: "🐶", label: "Newborn Puppy" }, { emoji: "🐕", label: "Grown Pup!" }] },
-  cat:       { color: "#A78BFA", stages: [{ emoji: "🐈", label: "Mother Cat" }, { emoji: "🤰", label: "Pregnant" }, { emoji: "🐱", label: "Kitten" }, { emoji: "🐈", label: "Cat!" }] },
+// `image` is the real adult-animal photo — drop a file at that path and it
+// replaces the emoji automatically; until then the emoji is the fallback
+// (see <img onError> below), so nothing ever looks broken.
+const LIFE_CYCLES: Record<string, { image: string; stages: { emoji: string; label: string }[]; color: string }> = {
+  butterfly: { image: "/explore/animals/butterfly.jpg", color: "#F472B6", stages: [{ emoji: "🥚", label: "Egg" }, { emoji: "🐛", label: "Caterpillar" }, { emoji: "🫛", label: "Cocoon" }, { emoji: "🦋", label: "Butterfly!" }] },
+  frog:      { image: "/explore/animals/frog.jpg", color: "#4ade80", stages: [{ emoji: "🥚", label: "Egg" }, { emoji: "🐟", label: "Tadpole" }, { emoji: "🐸", label: "Young Frog" }, { emoji: "🐸", label: "Frog!" }] },
+  chicken:   { image: "/explore/animals/chicken.jpg", color: "#FFD700", stages: [{ emoji: "🥚", label: "Egg" }, { emoji: "🐣", label: "Hatching" }, { emoji: "🐥", label: "Chick" }, { emoji: "🐔", label: "Chicken!" }] },
+  dog:       { image: "/explore/animals/dog.jpg", color: "#F59E0B", stages: [{ emoji: "🐕", label: "Mother Dog" }, { emoji: "🤰", label: "Pregnant" }, { emoji: "🐶", label: "Newborn Puppy" }, { emoji: "🐕", label: "Grown Pup!" }] },
+  cat:       { image: "/explore/animals/cat.jpg", color: "#A78BFA", stages: [{ emoji: "🐈", label: "Mother Cat" }, { emoji: "🤰", label: "Pregnant" }, { emoji: "🐱", label: "Kitten" }, { emoji: "🐈", label: "Cat!" }] },
 };
 
-const DEFAULT = { color: "#60A5FA", stages: [{ emoji: "🥚", label: "Born" }, { emoji: "🐾", label: "Baby" }, { emoji: "🌱", label: "Growing" }, { emoji: "✨", label: "Adult!" }] };
+const DEFAULT = { image: "", color: "#60A5FA", stages: [{ emoji: "🥚", label: "Born" }, { emoji: "🐾", label: "Baby" }, { emoji: "🌱", label: "Growing" }, { emoji: "✨", label: "Adult!" }] };
 
 export function AnimalLife({ animal, step }: Props) {
+  const [imgBroken, setImgBroken] = useState(false);
   const key = Object.keys(LIFE_CYCLES).find(k => animal.toLowerCase().includes(k)) ?? "";
   const cycle = LIFE_CYCLES[key] ?? DEFAULT;
+  const showPhoto = cycle.image && !imgBroken;
 
   return (
-    <div className="relative w-full h-full flex flex-col items-center justify-center p-6 gap-6">
+    <div className="relative w-full h-full flex flex-col items-center justify-center p-6 gap-5">
       <h3 className="text-white font-bold text-lg capitalize">Life Cycle of {key || animal} 🌿</h3>
+
+      {/* Real photo of the grown animal — falls back to the last stage's emoji if missing */}
+      <motion.div
+        className="relative w-28 h-28 rounded-3xl overflow-hidden flex items-center justify-center text-6xl"
+        style={{ border: `2px solid ${cycle.color}90`, boxShadow: `0 0 24px ${cycle.color}50`, background: `${cycle.color}15` }}
+        animate={{ y: [0, -5, 0] }} transition={{ duration: 2, repeat: Infinity }}
+      >
+        {showPhoto ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={cycle.image} alt={key || animal} className="w-full h-full object-cover" onError={() => setImgBroken(true)} />
+        ) : (
+          cycle.stages[cycle.stages.length - 1].emoji
+        )}
+      </motion.div>
 
       {/* Cycle stages */}
       <div className="flex items-center gap-3 flex-wrap justify-center">

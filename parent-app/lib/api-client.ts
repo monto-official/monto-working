@@ -22,6 +22,15 @@ export interface BedtimeSchedule {
   enabled: boolean;
 }
 
+export interface VoiceMessage {
+  id: string;
+  sender_role: "parent" | "child";
+  duration_ms: number | null;
+  mime_type: string;
+  created_at: string;
+  listened_at: string | null;
+}
+
 export interface WeeklyUsageDay {
   day: string;
   hours: number;
@@ -121,4 +130,29 @@ export function saveBedtime(
 
 export function getWeeklyUsage(pairing: PairingData): Promise<WeeklyUsageDay[]> {
   return request(`${pairing.apiUrl}/usage/${pairing.deviceId}/weekly`);
+}
+
+export function listVoiceMessages(pairing: PairingData): Promise<VoiceMessage[]> {
+  return request(`${pairing.apiUrl}/voice-messages/${pairing.deviceId}`);
+}
+
+export async function sendVoiceMessage(
+  pairing: PairingData,
+  blob: Blob,
+  durationMs: number
+): Promise<VoiceMessage> {
+  const form = new FormData();
+  const ext = blob.type.includes("ogg") ? "ogg" : blob.type.includes("mp4") ? "mp4" : "webm";
+  form.append("audio", blob, `note.${ext}`);
+  form.append("sender_role", "parent");
+  form.append("duration_ms", String(Math.round(durationMs)));
+
+  return request(`${pairing.apiUrl}/voice-messages/${pairing.deviceId}`, {
+    method: "POST",
+    body: form,
+  });
+}
+
+export function voiceMessageAudioUrl(pairing: PairingData, messageId: string): string {
+  return `${pairing.apiUrl}/voice-messages/${pairing.deviceId}/${messageId}/audio`;
 }

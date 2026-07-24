@@ -195,6 +195,7 @@ body {
 .monto-adventure-mint { color: #ecfdf5; background: linear-gradient(145deg,#047857,#34d399); }
 .monto-adventure-sun { color: #422006; background: linear-gradient(145deg,#f59e0b,#fde68a); }
 .monto-adventure-sky { color: #eff6ff; background: linear-gradient(145deg,#1d4ed8,#60a5fa); }
+.monto-adventure-plum { color: #faf5ff; background: linear-gradient(145deg,#7c3aed,#c084fc); }
 .monto-greeting { background: linear-gradient(145deg, rgba(14,165,233,.1), rgba(124,58,237,.1)); border: 1px dashed rgba(186,230,253,.18); }
 .monto-talk-button { background: linear-gradient(135deg,#0284c7,#2563eb 55%,#7c3aed); box-shadow: 0 12px 28px rgba(37,99,235,.28), inset 0 1px 0 rgba(255,255,255,.25); }
 @media (max-width: 640px) {
@@ -433,25 +434,80 @@ html[data-low-power="true"] .monto-3d-avatar * { will-change: auto !important; }
   font-weight: 900;
 }
 .monto-adventure-rose { color: #fff1f2; background: linear-gradient(145deg,#e11d48,#fb7185 58%,#fda4af); }
-.monto-slider-nav {
+
+/* Adventure header: title + swipe hint on the left, unified mic/speaker
+   pill on the right — one baseline, no wrap-induced misalignment. */
+.monto-adventure-header { margin-bottom: .7rem; display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.monto-adventure-heading { display: flex; align-items: center; gap: .55rem; min-width: 0; }
+.monto-adventure-title { font-size: .68rem; font-weight: 900; letter-spacing: .28em; text-transform: uppercase; color: rgba(186,230,253,.55); white-space: nowrap; }
+
+.monto-control-pill {
   display: inline-flex;
-  gap: .3rem;
+  align-items: center;
+  flex: none;
   padding: .2rem;
-  border-radius: 13px;
+  gap: .2rem;
+  border-radius: 999px;
   background: rgba(2,12,27,.55);
-  border: 1px solid rgba(125,211,252,.13);
+  border: 1px solid rgba(125,211,252,.15);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
 }
-.monto-slider-nav button {
+.monto-control-seg {
   display: grid;
-  width: 31px;
-  height: 31px;
   place-items: center;
-  border-radius: 10px;
-  color: #bae6fd;
-  background: rgba(56,189,248,.1);
+  width: 2.15rem;
+  height: 2.15rem;
+  border-radius: 999px;
+  color: #a7f3d0;
+  background: rgba(52,211,153,.14);
+  transition: background .18s ease, color .18s ease;
   touch-action: manipulation;
 }
-.monto-slider-nav button:active { background: rgba(56,189,248,.25); transform: scale(.94); }
+.monto-control-seg.is-off { color: #fda4af; background: rgba(244,63,94,.16); }
+.monto-control-seg:active { transform: scale(.94); }
+.monto-control-divider { width: 1px; height: 1.3rem; background: rgba(125,211,252,.15); flex: none; }
+
+/* Slider shell: arrows are pinned to the carousel's own edges instead of
+   living in the header, so nav controls stay visually locked to what
+   they scroll — a small but real alignment fix over the old layout. */
+.monto-slider-shell { position: relative; }
+.monto-slider-arrow {
+  position: absolute;
+  top: 50%;
+  z-index: 5;
+  display: grid;
+  width: 2.15rem;
+  height: 2.15rem;
+  place-items: center;
+  border-radius: 999px;
+  color: #e0f2fe;
+  background: rgba(8,20,38,.78);
+  border: 1px solid rgba(125,211,252,.24);
+  box-shadow: 0 8px 18px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.08);
+  backdrop-filter: blur(6px);
+  touch-action: manipulation;
+  transform: translateY(-50%);
+}
+.monto-slider-arrow:active { background: rgba(56,189,248,.3); }
+.monto-slider-arrow-prev { left: -.2rem; }
+.monto-slider-arrow-next { right: -.2rem; }
+@container (min-width: 480px) {
+  .monto-slider-shell { padding-inline: 1.9rem; }
+  .monto-slider-arrow-prev { left: 0; }
+  .monto-slider-arrow-next { right: 0; }
+}
+@media (max-width: 640px) { .monto-slider-arrow { display: none; } }
+
+.monto-slider-dots { display: flex; align-items: center; justify-content: center; gap: .35rem; margin-top: .55rem; }
+.monto-slider-dot {
+  width: .4rem;
+  height: .4rem;
+  border-radius: 999px;
+  background: rgba(186,230,253,.24);
+  transition: width .2s ease, background .2s ease;
+  touch-action: manipulation;
+}
+.monto-slider-dot.is-active { width: 1.15rem; background: linear-gradient(90deg, #38bdf8, #818cf8); }
 .monto-greeting {
   background:
     radial-gradient(circle at 15% 20%, rgba(56,189,248,.13), transparent 28%),
@@ -460,8 +516,461 @@ html[data-low-power="true"] .monto-3d-avatar * { will-change: auto !important; }
 }
 @media (max-width: 640px) {
   .monto-adventure-slider .monto-adventure { flex-basis: 138px; min-height: 108px; }
-  .monto-slider-nav { display: none; }
 }
 html[data-low-power="true"] .monto-adventure-slider .monto-adventure {
   box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 5px 10px rgba(0,0,0,.14);
 }
+/* Polished companion hero */
+.monto-character-card { overflow: hidden; background: radial-gradient(circle at 50% 40%, rgba(14,165,233,.16), transparent 42%), linear-gradient(165deg, rgba(13,38,67,.96), rgba(6,19,38,.92)); border-color: rgba(125,211,252,.2); box-shadow: inset 0 1px 0 rgba(255,255,255,.09), 0 20px 48px rgba(0,0,0,.18); }
+.monto-character-card::before { width: 19rem; height: 19rem; top: 5rem; }
+.monto-character-card::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(120deg, rgba(255,255,255,.045), transparent 28%); }
+.monto-companion-header { position: relative; z-index: 3; display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 1rem; }
+.monto-eyebrow { margin-bottom: .35rem; font-size: .6rem; font-weight: 900; letter-spacing: .28em; text-transform: uppercase; color: rgba(186,230,253,.52); }
+.monto-live-pill { display: inline-flex; align-items: center; gap: .45rem; padding: .48rem .7rem; border-radius: 999px; border: 1px solid rgba(52,211,153,.24); background: rgba(16,185,129,.1); color: #a7f3d0; font-size: .63rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.monto-live-pill > span { width: .42rem; height: .42rem; border-radius: 50%; background: #34d399; box-shadow: 0 0 0 4px rgba(52,211,153,.1), 0 0 12px rgba(52,211,153,.65); }
+.monto-live-pill.is-listening { border-color: rgba(251,113,133,.3); background: rgba(244,63,94,.12); color: #fecdd3; }
+.monto-live-pill.is-listening > span { background: #fb7185; box-shadow: 0 0 0 4px rgba(251,113,133,.12), 0 0 14px rgba(251,113,133,.7); animation: pulse 1s infinite; }
+.monto-live-pill.is-speaking { border-color: rgba(250,204,21,.3); background: rgba(250,204,21,.1); color: #fef08a; }
+.monto-live-pill.is-speaking > span { background: #facc15; box-shadow: 0 0 0 4px rgba(250,204,21,.1), 0 0 14px rgba(250,204,21,.65); }
+.monto-avatar-stage { z-index: 2; flex: 1; min-height: 340px; margin: .1rem 0; }
+.monto-companion-footer { position: relative; z-index: 3; display: flex; width: 100%; align-items: center; gap: .75rem; border: 1px solid rgba(186,230,253,.13); border-radius: 20px; padding: .85rem; background: rgba(2,12,27,.5); box-shadow: inset 0 1px 0 rgba(255,255,255,.055); backdrop-filter: blur(14px); }
+.monto-mood-orb { display: grid; flex: 0 0 auto; width: 2.35rem; height: 2.35rem; place-items: center; border-radius: 14px; color: #e0f2fe; background: linear-gradient(145deg,#0284c7,#4f46e5); box-shadow: 0 8px 20px rgba(37,99,235,.25), inset 0 1px 0 rgba(255,255,255,.25); }
+@media (min-width: 900px) and (max-height: 760px) { .monto-avatar-stage { min-height: 250px; } .monto-3d-avatar { max-height: 300px; } }
+@media (max-width: 640px) { .monto-avatar-stage { min-height: 300px; } .monto-3d-avatar { max-width: 330px; } }
+/* Cosmic candy color system */
+.monto-home {
+  background:
+    radial-gradient(circle at 8% 12%, rgba(6,182,212,.24), transparent 30%),
+    radial-gradient(circle at 92% 8%, rgba(236,72,153,.2), transparent 28%),
+    radial-gradient(circle at 72% 92%, rgba(124,58,237,.3), transparent 34%),
+    linear-gradient(145deg, #07152d 0%, #10113b 46%, #1d0d3d 100%);
+}
+.monto-aurora { opacity: .5; filter: blur(105px); }
+.monto-aurora-one { background: linear-gradient(135deg,#22d3ee,#2563eb); }
+.monto-aurora-two { background: linear-gradient(135deg,#f43f5e,#8b5cf6); }
+.monto-wordmark {
+  background: linear-gradient(90deg,#67e8f9 0%,#c4b5fd 35%,#f9a8d4 68%,#fde68a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 30px rgba(167,139,250,.22);
+}
+.monto-icon-button {
+  background: linear-gradient(145deg,rgba(20,35,76,.82),rgba(55,20,85,.68));
+  border-color: rgba(196,181,253,.25);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.14),0 7px 20px rgba(5,8,32,.25);
+}
+.monto-icon-button:hover { background: linear-gradient(145deg,rgba(14,165,233,.28),rgba(168,85,247,.26)); border-color: rgba(103,232,249,.48); transform: translateY(-1px); }
+.monto-stage {
+  background: linear-gradient(145deg,rgba(8,24,56,.72),rgba(37,14,65,.64));
+  border-color: rgba(196,181,253,.22);
+  box-shadow: 0 32px 100px rgba(3,7,30,.45),inset 0 1px 0 rgba(255,255,255,.11),0 0 70px rgba(124,58,237,.08);
+}
+.monto-character-card {
+  background:
+    radial-gradient(circle at 50% 46%,rgba(34,211,238,.26),transparent 35%),
+    radial-gradient(circle at 15% 10%,rgba(249,115,22,.12),transparent 24%),
+    linear-gradient(160deg,rgba(10,55,92,.98),rgba(37,20,79,.96));
+  border-color: rgba(103,232,249,.3);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.14),0 22px 50px rgba(1,8,30,.28),0 0 35px rgba(34,211,238,.08);
+}
+.monto-character-card::before { background: radial-gradient(circle,rgba(103,232,249,.3) 0%,rgba(99,102,241,.12) 46%,transparent 70%); }
+.monto-character-card::after { background: linear-gradient(120deg,rgba(255,255,255,.08),transparent 28%,transparent 72%,rgba(244,114,182,.05)); }
+.monto-eyebrow { color: #a5f3fc; }
+.monto-avatar-stage::before {
+  content: "";
+  position: absolute;
+  inset: 8% 4% 7%;
+  border: 1px solid rgba(103,232,249,.14);
+  border-radius: 44% 56% 48% 52%;
+  background: linear-gradient(145deg,rgba(34,211,238,.07),rgba(168,85,247,.09),rgba(244,114,182,.06));
+}
+.monto-companion-footer {
+  border-color: rgba(196,181,253,.22);
+  background: linear-gradient(110deg,rgba(6,33,65,.74),rgba(69,23,91,.58));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.09),0 10px 30px rgba(3,7,28,.18);
+}
+.monto-mood-orb { background: linear-gradient(145deg,#06b6d4,#6366f1 54%,#d946ef); box-shadow: 0 8px 24px rgba(99,102,241,.4),inset 0 1px 0 rgba(255,255,255,.3); }
+.monto-main-console {
+  background:
+    radial-gradient(circle at 94% 4%,rgba(244,114,182,.16),transparent 27%),
+    radial-gradient(circle at 8% 96%,rgba(34,211,238,.15),transparent 28%),
+    linear-gradient(155deg,rgba(20,31,76,.95),rgba(35,17,70,.94));
+  border-color: rgba(196,181,253,.22);
+}
+.monto-adventure { border-color: rgba(255,255,255,.18); box-shadow: inset 0 1px 0 rgba(255,255,255,.3),0 12px 28px rgba(2,6,23,.25); }
+.monto-adventure-coral { background: linear-gradient(145deg,#e11d48,#fb7185 58%,#fda4af); }
+.monto-adventure-violet { background: linear-gradient(145deg,#6d28d9,#8b5cf6 56%,#c4b5fd); }
+.monto-adventure-mint { background: linear-gradient(145deg,#047857,#10b981 56%,#6ee7b7); }
+.monto-adventure-sun { background: linear-gradient(145deg,#f59e0b,#fbbf24 56%,#fde68a); }
+.monto-adventure-sky { background: linear-gradient(145deg,#0369a1,#0ea5e9 56%,#67e8f9); }
+.monto-adventure-rose { background: linear-gradient(145deg,#be123c,#f43f5e 54%,#f9a8d4); }
+.monto-adventure-plum { background: linear-gradient(145deg,#6d28d9,#a855f7 56%,#e9d5ff); }
+.monto-adventure:hover { filter: saturate(1.13) brightness(1.06); box-shadow: inset 0 1px 0 rgba(255,255,255,.4),0 17px 34px rgba(2,6,23,.32),0 0 22px rgba(167,139,250,.13); }
+.monto-adventure-slider .monto-adventure-icon { background: linear-gradient(145deg,rgba(255,255,255,.28),rgba(255,255,255,.12)); border: 1px solid rgba(255,255,255,.17); }
+.monto-slide-guide { color: #cffafe; background: linear-gradient(90deg,rgba(6,182,212,.17),rgba(139,92,246,.15)); border-color: rgba(103,232,249,.25); }
+.monto-slider-nav { background: linear-gradient(145deg,rgba(8,47,73,.7),rgba(76,29,149,.5)); border-color: rgba(196,181,253,.22); }
+.monto-greeting { background: radial-gradient(circle at 15% 20%,rgba(34,211,238,.17),transparent 30%),radial-gradient(circle at 88% 80%,rgba(244,114,182,.14),transparent 34%),linear-gradient(135deg,rgba(37,99,235,.2),rgba(126,34,206,.2)); border-color: rgba(196,181,253,.28); }
+@media (max-width:640px) { .monto-character-card { max-height:none; } }
+html[data-low-power="true"] .monto-home { background: linear-gradient(145deg,#081b35,#17143e 52%,#2a1243); }
+html[data-low-power="true"] .monto-character-card { background: linear-gradient(160deg,#0b3656,#29184f); }
+html[data-low-power="true"] .monto-main-console { background: linear-gradient(155deg,#14264f,#281642); }
+/* Reference-inspired Monto kiosk layout */
+@media (min-width: 1024px) {
+  .monto-stage-dashboard {
+    position: relative;
+    grid-template-columns: minmax(360px,.92fr) minmax(430px,1.08fr) !important;
+    min-height: min(720px,calc(100dvh - 112px));
+    padding: 1.1rem 1.1rem 190px !important;
+    gap: 1.25rem !important;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at 25% 38%,rgba(56,189,248,.25),transparent 29%),
+      radial-gradient(circle at 82% 25%,rgba(244,114,182,.16),transparent 25%),
+      linear-gradient(145deg,rgba(13,44,83,.88),rgba(38,20,75,.86));
+  }
+  .monto-stage-dashboard::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: .32;
+    background-image: radial-gradient(circle,rgba(255,255,255,.55) 0 1.5px,transparent 2px);
+    background-size: 72px 72px;
+    mask-image: linear-gradient(to bottom,#000,transparent 72%);
+  }
+  .monto-stage-dashboard .monto-character-card {
+    overflow: visible;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: .8rem 0 0 !important;
+  }
+  .monto-stage-dashboard .monto-character-card::after { display:none; }
+  .monto-stage-dashboard .monto-character-card::before {
+    width: min(36vw,460px);
+    height: min(36vw,460px);
+    top: 3rem;
+    background: radial-gradient(circle,rgba(103,232,249,.3),rgba(99,102,241,.1) 48%,transparent 72%);
+  }
+  .monto-stage-dashboard .monto-avatar-stage { min-height: 390px; margin-top: -.5rem; }
+  .monto-stage-dashboard .monto-3d-avatar { max-width: 430px; }
+  .monto-stage-dashboard .monto-companion-header { padding: 0 .8rem; }
+  .monto-stage-dashboard .monto-companion-footer {
+    width: auto;
+    min-width: 270px;
+    margin-top: -1rem;
+    padding: .72rem 1rem;
+    border-radius: 18px;
+  }
+  .monto-stage-dashboard .monto-main-console {
+    position: static;
+    min-height: 0;
+    padding: 2rem 1.2rem 1rem !important;
+    gap: 1rem;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    contain: none;
+  }
+  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap {
+    position: absolute;
+    z-index: 8;
+    left: 1.1rem;
+    right: 1.1rem;
+    bottom: 1rem;
+    padding: .8rem 1rem .9rem;
+    border: 1px solid rgba(255,255,255,.24);
+    border-radius: 28px;
+    background: linear-gradient(110deg,rgba(7,29,64,.92),rgba(52,24,91,.9));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.13),0 18px 46px rgba(2,6,23,.38);
+    backdrop-filter: blur(24px);
+  }
+  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap > div:first-child { margin-bottom: .45rem; }
+  .monto-stage-dashboard .monto-adventure-slider { justify-content: center; gap: .75rem; padding: .2rem .1rem .4rem; }
+  .monto-stage-dashboard .monto-adventure-slider .monto-adventure {
+    flex: 1 1 0;
+    max-width: 170px;
+    min-width: 112px;
+    min-height: 82px;
+    padding: .72rem .85rem;
+    border-radius: 21px;
+  }
+  .monto-stage-dashboard .monto-adventure-slider .monto-adventure-icon { width:2.2rem;height:2.2rem;padding:.42rem; }
+  .monto-stage-dashboard .monto-adventure-slider .monto-adventure > span { font-size:.8rem; }
+  .monto-stage-dashboard .monto-adventure-wrap > button { margin-top:.35rem; padding-top:.55rem; padding-bottom:.55rem; }
+  .monto-stage-dashboard .monto-main-console > div:nth-child(2) { order:2; }
+  .monto-stage-dashboard .monto-main-console > div:nth-child(3) { order:1; justify-content:flex-start; padding-top:2rem; }
+  .monto-stage-dashboard .monto-greeting {
+    position: relative;
+    max-width: 440px;
+    margin: 0 auto;
+    padding: 2rem 2.2rem;
+    border: 0;
+    border-radius: 34px 34px 34px 10px;
+    background: linear-gradient(145deg,rgba(255,255,255,.98),rgba(239,246,255,.94));
+    box-shadow: 0 22px 60px rgba(2,8,30,.3),inset 0 1px 0 #fff;
+    text-align: left;
+  }
+  .monto-stage-dashboard .monto-greeting::before {
+    content:"";
+    position:absolute;
+    left:-25px;
+    bottom:18px;
+    border-style:solid;
+    border-width:0 30px 24px 0;
+    border-color:transparent rgba(244,248,255,.96) transparent transparent;
+    transform:skewY(-12deg);
+  }
+  .monto-stage-dashboard .monto-greeting svg { margin-left:0;color:#f59e0b; }
+  .monto-stage-dashboard .monto-greeting p:first-of-type { color:#172554;font-size:clamp(1.35rem,2.1vw,2rem);line-height:1.35; }
+  .monto-stage-dashboard .monto-greeting p:last-child { color:#0f766e;font-size:.85rem;font-weight:800; }
+  .monto-stage-dashboard .monto-main-console > div:nth-child(2) {
+    margin: 0 auto;
+    width: min(100%,440px);
+    padding: .7rem 1rem;
+    border:1px solid rgba(255,255,255,.16);
+    border-radius:18px;
+    background:rgba(8,25,57,.45);
+  }
+}
+@media (min-width:1024px) and (max-height:700px) {
+  .monto-stage-dashboard { min-height:590px;padding-bottom:166px !important; }
+  .monto-stage-dashboard .monto-avatar-stage { min-height:300px; }
+  .monto-stage-dashboard .monto-3d-avatar { max-width:340px;max-height:355px; }
+  .monto-stage-dashboard .monto-companion-footer { display:none; }
+  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap { bottom:.7rem;padding:.55rem .8rem; }
+  .monto-stage-dashboard .monto-adventure-slider .monto-adventure { min-height:72px; }
+}
+@media (max-width:1023px) {
+  .monto-stage-dashboard .monto-main-console { display:flex; }
+  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap { order:3; }
+  .monto-stage-dashboard .monto-main-console > div:nth-child(2) { order:2; }
+  .monto-stage-dashboard .monto-main-console > div:nth-child(3) { order:1; }
+}
+/* Large touch-first bottom picker */
+@media (min-width:1024px) {
+  .monto-stage-dashboard { padding-bottom: 150px !important; }
+  .monto-stage-dashboard .monto-character-card { z-index:3; }
+  .monto-stage-dashboard .monto-avatar-stage { min-height:430px;margin-top:-1rem;margin-bottom:-5rem; }
+  .monto-stage-dashboard .monto-3d-avatar { max-width:460px; }
+  .monto-stage-dashboard .monto-companion-footer { display:none; }
+  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap {
+    z-index:12;
+    left:1.25rem;
+    right:1.25rem;
+    bottom:1rem;
+    padding:1rem 1.15rem 1.05rem;
+    border-radius:32px;
+    border-color:rgba(255,255,255,.3);
+    background:linear-gradient(110deg,rgba(6,32,72,.96),rgba(59,25,99,.95));
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 22px 55px rgba(2,6,23,.48),0 0 40px rgba(99,102,241,.12);
+  }
+  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap > div:first-child { margin-bottom:.65rem; }
+  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap > div:first-child > div:first-child > p { font-size:.7rem;letter-spacing:.26em;color:#e0f2fe; }
+  .monto-stage-dashboard .monto-adventure-slider { gap:.9rem;padding:.25rem .1rem .5rem; }
+  .monto-stage-dashboard .monto-adventure-slider .monto-adventure {
+    flex:1 1 0;
+    max-width:190px;
+    min-width:122px;
+    min-height:116px;
+    padding:1rem;
+    border-radius:27px;
+    justify-content:space-between;
+  }
+  .monto-stage-dashboard .monto-adventure-slider .monto-adventure-icon {
+    width:3rem;
+    height:3rem;
+    padding:.58rem;
+    border-radius:16px;
+  }
+  .monto-stage-dashboard .monto-adventure-slider .monto-adventure > span { font-size:1rem;letter-spacing:.01em; }
+  .monto-stage-dashboard .monto-adventure-wrap > button { min-height:44px;margin-top:.45rem;font-size:.9rem;border-radius:16px; }
+}
+@media (min-width:1024px) and (max-height:700px) {
+  .monto-stage-dashboard { padding-bottom:135px !important; }
+  .monto-stage-dashboard .monto-avatar-stage { min-height:330px;margin-bottom:-5rem; }
+  .monto-stage-dashboard .monto-3d-avatar { max-width:385px;max-height:400px; }
+  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap { padding:.75rem .9rem; }
+  .monto-stage-dashboard .monto-adventure-slider .monto-adventure { min-height:94px;padding:.75rem; }
+  .monto-stage-dashboard .monto-adventure-slider .monto-adventure-icon { width:2.55rem;height:2.55rem;padding:.48rem; }
+  .monto-stage-dashboard .monto-adventure-wrap > button { min-height:38px; }
+}
+@media (max-width:1023px) {
+  .monto-adventure-slider .monto-adventure { flex-basis:168px;min-height:124px;padding:1rem;border-radius:26px; }
+  .monto-adventure-slider .monto-adventure-icon { width:2.8rem;height:2.8rem; }
+  .monto-adventure-slider .monto-adventure > span { font-size:.95rem; }
+}
+/* Balanced picker and floating voice CTA */
+@media (min-width:1024px) {
+  .monto-stage-dashboard { padding-bottom:142px !important; }
+  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap {
+    bottom:1rem;
+    padding:1.65rem 1rem .8rem;
+    border-radius:29px;
+  }
+  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap > div:first-child {
+    margin-bottom:.35rem;
+    min-height:24px;
+  }
+  .monto-stage-dashboard .monto-slide-guide { display:none; }
+  .monto-stage-dashboard .monto-adventure-slider { gap:.7rem;padding:.2rem .1rem .35rem; }
+  .monto-stage-dashboard .monto-adventure-slider .monto-adventure {
+    max-width:174px;
+    min-width:112px;
+    min-height:94px;
+    padding:.78rem .85rem;
+    border-radius:23px;
+  }
+  .monto-stage-dashboard .monto-adventure-slider .monto-adventure-icon {
+    width:2.5rem;
+    height:2.5rem;
+    padding:.46rem;
+    border-radius:14px;
+  }
+  .monto-stage-dashboard .monto-adventure-slider .monto-adventure > span { font-size:.86rem; }
+  .monto-stage-dashboard .monto-adventure-wrap > button {
+    position:absolute;
+    z-index:4;
+    top:-25px;
+    left:calc(50% - 96px);
+    width:192px;
+    min-height:50px;
+    margin:0;
+    padding:.7rem 1.1rem;
+    border:2px solid rgba(255,255,255,.28);
+    border-radius:999px;
+    font-size:.9rem;
+    letter-spacing:.01em;
+    box-shadow:0 14px 35px rgba(37,99,235,.42),inset 0 1px 0 rgba(255,255,255,.32);
+  }
+  .monto-stage-dashboard .monto-slider-nav { margin-left:auto; }
+}
+@media (min-width:1024px) and (max-height:700px) {
+  .monto-stage-dashboard { padding-bottom:122px !important; }
+  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap { padding:1.45rem .75rem .55rem; }
+  .monto-stage-dashboard .monto-adventure-slider .monto-adventure { min-height:78px;padding:.62rem .7rem;border-radius:20px; }
+  .monto-stage-dashboard .monto-adventure-slider .monto-adventure-icon { width:2.2rem;height:2.2rem;padding:.4rem; }
+  .monto-stage-dashboard .monto-adventure-slider .monto-adventure > span { font-size:.76rem; }
+  .monto-stage-dashboard .monto-adventure-wrap > button { top:-22px;min-height:44px;width:180px;left:calc(50% - 90px);font-size:.82rem; }
+}
+@media (max-width:1023px) {
+  .monto-adventure-slider .monto-adventure { flex-basis:148px;min-height:108px;padding:.82rem;border-radius:23px; }
+  .monto-adventure-slider .monto-adventure-icon { width:2.45rem;height:2.45rem;padding:.45rem; }
+  .monto-adventure-slider .monto-adventure > span { font-size:.86rem; }
+  .monto-adventure-wrap > button { min-height:48px;border-radius:999px; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Super-hero magical layer — energy ring, mic power-charge, card shine,
+   comic-burst callouts. Additive on top of the cosmic-candy theme above.
+   ══════════════════════════════════════════════════════════════════════ */
+@keyframes hero-ring-spin { to { transform: rotate(360deg); } }
+@keyframes hero-ring-spin-rev { to { transform: rotate(-360deg); } }
+@keyframes hero-ring-pulse {
+  0%, 100% { opacity: .55; filter: blur(0px); }
+  50%      { opacity: 1;   filter: blur(.5px); }
+}
+.monto-hero-ring {
+  position: absolute;
+  inset: 4%;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 1;
+}
+.monto-hero-ring::before,
+.monto-hero-ring::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg,
+    rgba(239,68,68,0) 0deg, rgba(239,68,68,.55) 55deg, rgba(59,130,246,.6) 140deg,
+    rgba(103,232,249,0) 200deg, rgba(217,70,239,.5) 280deg, rgba(239,68,68,0) 340deg);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px) calc(100% - 1px), transparent 100%);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px) calc(100% - 1px), transparent 100%);
+  animation: hero-ring-spin 7s linear infinite, hero-ring-pulse 2.4s ease-in-out infinite;
+}
+.monto-hero-ring::after {
+  inset: 7%;
+  animation: hero-ring-spin-rev 10s linear infinite, hero-ring-pulse 3.2s ease-in-out infinite reverse;
+  opacity: .4;
+}
+.monto-hero-ring.is-active::before { animation-duration: 2.6s, 1.1s; }
+.monto-hero-ring.is-active::after  { animation-duration: 3.6s, 1.5s; }
+html[data-low-power="true"] .monto-hero-ring { display: none; }
+
+/* Mic / talk button power-charge ring */
+@keyframes mic-charge-ring {
+  0%   { transform: scale(1);    opacity: .7; }
+  70%  { transform: scale(1.35); opacity: 0; }
+  100% { transform: scale(1.35); opacity: 0; }
+}
+.monto-mic-charge { position: relative; isolation: isolate; }
+.monto-mic-charge::before {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(from 0deg, #fff, #fef08a, #fff0 40%, #fff0 60%, #fef08a, #fff);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity .25s ease;
+  z-index: -1;
+}
+.monto-mic-charge.is-listening::before { opacity: .9; }
+.monto-mic-charge.is-listening::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  border: 2px solid rgba(239,68,68,.6);
+  animation: mic-charge-ring 1.6s ease-out infinite;
+  z-index: -1;
+}
+html[data-low-power="true"] .monto-mic-charge::before,
+html[data-low-power="true"] .monto-mic-charge::after { animation: none; opacity: 0; }
+
+/* Adventure card hero shine-sweep */
+.monto-adventure { position: relative; overflow: hidden; }
+.monto-adventure::before {
+  content: "";
+  position: absolute;
+  top: -60%; left: -30%;
+  width: 40%; height: 220%;
+  background: linear-gradient(115deg, transparent, rgba(255,255,255,.55), transparent);
+  transform: translateX(-160%) rotate(8deg);
+  pointer-events: none;
+}
+.monto-adventure:hover::before {
+  transform: translateX(430%) rotate(8deg);
+  transition: transform .85s cubic-bezier(.2,.7,.3,1);
+}
+html[data-low-power="true"] .monto-adventure::before { display: none; }
+
+/* Comic-style burst callouts ("POW!", "WOW!"...) */
+@keyframes comic-burst-pop {
+  0%   { transform: scale(.2) rotate(var(--comic-rot,-8deg)); opacity: 0; }
+  18%  { transform: scale(1.15) rotate(var(--comic-rot,-8deg)); opacity: 1; }
+  30%  { transform: scale(1) rotate(var(--comic-rot,-8deg)); opacity: 1; }
+  100% { transform: scale(.85) rotate(var(--comic-rot,-8deg)) translateY(-30px); opacity: 0; }
+}
+.monto-comic-burst {
+  font-family: 'Fredoka One', cursive;
+  font-weight: 900;
+  letter-spacing: .02em;
+  color: #FDE047;
+  -webkit-text-stroke: 2px #DC2626;
+  paint-order: stroke fill;
+  text-shadow: 0 0 18px rgba(220,38,38,.55), 0 4px 0 #7f1d1d;
+  animation: comic-burst-pop 1.1s cubic-bezier(.2,.8,.3,1) forwards;
+  filter: drop-shadow(0 6px 10px rgba(0,0,0,.35));
+}
+
+/* Wordmark heroic glint sweep */
+@keyframes wordmark-glint { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+.monto-wordmark { background-size: 220% 100%; animation: wordmark-glint 6s ease-in-out infinite; }
+html[data-low-power="true"] .monto-wordmark { animation: none; }

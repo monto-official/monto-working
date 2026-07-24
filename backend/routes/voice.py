@@ -38,10 +38,23 @@ def _record_usage_event(session_id: str):
 # ── Language detection ────────────────────────────────────────────────────────
 
 def detect_language(text: str) -> str:
-    """Detect if text is Nepali (Devanagari) or English."""
+    """Detect Unicode or common Romanized Nepali voice transcripts."""
     if any('\u0900' <= ch <= '\u097F' for ch in text):
         return "nepali"
-    return "english"
+    words = set(re.findall(r"[a-z]+", text.lower()))
+    nepali_words = {
+        "ma", "malai", "mero", "hamro", "hami", "timi", "tapai", "timro",
+        "ke", "kina", "kasari", "kasto", "kata", "kahile", "ko", "ho", "hoina",
+        "cha", "chha", "chu", "chhan", "garnu", "gara", "bhanana", "bhannu",
+        "ramro", "dhanyabad", "namaste", "suna", "aaja", "bholi", "hijo",
+        "chau", "chhau", "kasto", "kosto", "timilai", "malai",
+    }
+    # Require two markers to avoid classifying isolated English words such as
+    # "ma" or "go" as Nepali.
+    exact_hits = len(words & nepali_words)
+    joined = " ".join(words)
+    joined_hits = sum(marker in joined for marker in ("timikasto", "timikosto", "timi", "malai", "kasari", "chhau", "chau"))
+    return "nepali" if exact_hits + joined_hits >= 2 else "english"
 
 def _get_nepali_empty_response() -> dict:
     return {

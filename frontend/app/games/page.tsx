@@ -1,8 +1,9 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { ArrowLeft, ChevronRight, Gamepad2, HeartHandshake, Snowflake, Volume2 } from "lucide-react";
+import { ArrowLeft, HeartHandshake, Snowflake, Volume2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { Monto3DAvatar } from "@/components/Monto3DAvatar";
 
 const GAMES = [
   {
@@ -48,32 +49,51 @@ export default function GamesPage() {
       ))}
 
       <div className="relative z-10 mx-auto min-h-[100dvh] w-full max-w-3xl px-5 py-5 sm:px-8">
-        <header className="flex items-center justify-between">
+        <header className="flex items-center gap-2">
           <button onClick={() => router.push("/")} className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/10" aria-label="Back"><ArrowLeft /></button>
-          <div className="text-center"><p className="text-xs font-bold uppercase tracking-[.28em] text-violet-200/70">Monto</p><h1 className="font-kids text-xl font-black">Play Games</h1></div>
-          <div className="flex h-11 w-11 items-center justify-center rounded-full border border-violet-300/20 bg-violet-300/10"><Gamepad2 className="h-5 w-5 text-violet-200" /></div>
+          <button onClick={() => router.push("/")} className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/10" aria-label="Close"><X /></button>
         </header>
 
-        <section className="py-12 text-center sm:py-16">
-          <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}>
-            <p className="text-xs font-black uppercase tracking-[.3em] text-cyan-200/55">Choose your adventure</p>
-            <h2 className="mt-3 text-3xl font-black sm:text-5xl">What should we play?</h2>
-            <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-white/50">Move your body, use your voice, collect stars, and have fun with Monto.</p>
+        <section className="pt-4 pb-10 text-center sm:pb-14">
+          <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", bounce: .4 }} className="mx-auto -mb-2 h-40 w-40 sm:h-48 sm:w-48">
+            <Monto3DAvatar emotion="excited" size={192} />
           </motion.div>
+          <h2 className="text-3xl font-black sm:text-5xl">What should we play?</h2>
 
-          <div className="mt-10 grid gap-5 sm:grid-cols-2">
+          <div className="mt-8 grid gap-5 sm:grid-cols-2">
             {GAMES.map((game, index) => (
-              <motion.button key={game.route} onClick={() => router.push(game.route)} className="group relative overflow-hidden rounded-[2rem] border border-white/10 bg-white/[.07] p-5 text-left" initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .12 + index * .12 }} whileHover={{ y: -6 }} whileTap={{ scale: .97 }} style={{ boxShadow: `0 26px 60px ${game.glow}` }}>
+              <motion.button
+                key={game.route}
+                onClick={() => router.push(game.route)}
+                aria-label={`${game.title} — ${game.subtitle}`}
+                className="group relative overflow-hidden rounded-[2rem] border border-white/10 bg-white/[.07] p-5 text-left"
+                initial={{ opacity: 0, y: 40, scale: .9 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ delay: .15 + index * .12, type: "spring", bounce: .45, duration: .7 }}
+                whileHover={{ y: -8, rotate: index % 2 ? .6 : -.6, transition: { type: "spring", bounce: .6 } }}
+                whileTap={{ scale: .94, rotate: 0 }}
+                style={{ boxShadow: `0 26px 60px ${game.glow}` }}
+              >
                 <div className={`absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r ${game.gradient}`} />
-                <div className="flex items-start justify-between">
-                  <div className={`flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br ${game.gradient} text-4xl shadow-lg`}>{game.emoji}</div>
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 transition group-hover:bg-white/20"><ChevronRight /></div>
+                <motion.span
+                  className="block text-6xl"
+                  animate={{ y: [0, -8, 0], rotate: [-6, 6, -6], scale: [1, 1.06, 1] }}
+                  transition={{ duration: 2.2, delay: index * .3, repeat: Infinity, ease: "easeInOut" }}
+                >
+                  {game.emoji}
+                </motion.span>
+                <h3 className="mt-4 text-2xl font-black">{game.title}</h3>
+                <div className="mt-5 flex items-center justify-between">
+                  <span className="rounded-full border border-white/10 bg-black/15 px-3 py-1.5 text-xs font-bold text-white/60">{game.skills[0]}</span>
+                  <motion.span
+                    className={`flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br ${game.gradient} text-slate-950 shadow-lg`}
+                    whileHover={{ scale: 1.15, rotate: 12 }}
+                    animate={{ scale: [1, 1.08, 1] }}
+                    transition={{ scale: { duration: 1.8, repeat: Infinity, delay: index * .25 } }}
+                  >
+                    <game.icon className="h-5 w-5" />
+                  </motion.span>
                 </div>
-                <game.icon className="mt-8 h-5 w-5 text-white/45" />
-                <h3 className="mt-3 text-2xl font-black">{game.title}</h3>
-                <p className="mt-1 text-sm text-white/50">{game.subtitle}</p>
-                <div className="mt-5 flex flex-wrap gap-2">{game.skills.map(skill => <span key={skill} className="rounded-full border border-white/10 bg-black/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white/55">{skill}</span>)}</div>
-                <div className={`mt-6 flex h-12 items-center justify-center rounded-2xl bg-gradient-to-r ${game.gradient} font-black`}>Play now</div>
               </motion.button>
             ))}
           </div>

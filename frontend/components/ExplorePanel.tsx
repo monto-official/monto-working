@@ -179,6 +179,10 @@ export function ExplorePanel({ scene, transcript, onClose, onNarrate, isSpeaking
   // Ref to track if we already narrated this step (prevent double-fire on re-render)
   const narratedStep = useRef(-1);
 
+  // Keep the latest isSpeaking value available inside timers without re-triggering the effect
+  const isSpeakingRef = useRef(isSpeaking);
+  useEffect(() => { isSpeakingRef.current = isSpeaking; }, [isSpeaking]);
+
   // Auto-play narration for current step — advances ONLY after speech ends
   useEffect(() => {
     if (!scene || !isPlaying) return;
@@ -198,9 +202,22 @@ export function ExplorePanel({ scene, transcript, onClose, onNarrate, isSpeaking
 
     onNarrate(s.narration, advanceStep);
 
-    // Fallback timer in case onDone never fires (e.g. TTS disabled or very long speech)
-    const fallback = setTimeout(advanceStep, s.duration + 2000);
-    return () => clearTimeout(fallback);
+    // Fallback timer in case onDone never fires (e.g. TTS disabled or very long speech).
+    // Never cut speech off mid-sentence: if audio is still actually playing when the
+    // estimated duration elapses, keep re-checking instead of force-advancing.
+    let fallbackTimer: ReturnType<typeof setTimeout>;
+    const scheduleFallback = (delay: number) => {
+      fallbackTimer = setTimeout(() => {
+        if (isSpeakingRef.current) {
+          scheduleFallback(500);
+        } else {
+          advanceStep();
+        }
+      }, delay);
+    };
+    scheduleFallback(s.duration + 2000);
+
+    return () => clearTimeout(fallbackTimer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, isPlaying, scene]);
 

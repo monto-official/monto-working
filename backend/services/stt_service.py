@@ -9,7 +9,9 @@ import os
 import tempfile
 import logging
 import httpx
-from services.groq_key_pool import GroqClientPool, is_retryable_groq_error, load_groq_keys
+from services.groq_key_pool import (
+    GroqClientPool, is_network_groq_error, is_retryable_groq_error, load_groq_keys,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +32,7 @@ class STTService:
 
         # Key pool rotates immediately on quota/auth/server failures.
         self._groq_pool  = GroqClientPool(load_groq_keys(api_key))
-        self._groq_model = os.getenv("GROQ_STT_MODEL", "whisper-large-v3")
+        self._groq_model = os.getenv("GROQ_STT_MODEL", "whisper-large-v3-turbo")
         self._has_groq   = len(self._groq_pool) > 0
         logger.info("STT: %d Groq key(s) available", len(self._groq_pool))
         if self.use_local:
@@ -111,6 +113,12 @@ class STTService:
                     return text
                 except Exception as error:
                     last_error = error
+                    if is_network_groq_error(error):
+                        # DNS/connectivity failures affect every key equally.
+                        # The Groq SDK has already retried this request, so fail
+                        # fast and leave healthy keys out of cooldown.
+                        logger.warning("Groq STT network unavailable (%s)", type(error).__name__)
+                        raise RuntimeError("Speech service network unavailable. Please try again.") from error
                     if not is_retryable_groq_error(error):
                         raise
                     self._groq_pool.mark_failed(key_index, error)

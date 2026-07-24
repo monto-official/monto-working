@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, ChevronRight, Pause, Play, RotateCcw, ShieldCheck, Star, Trophy, Volume2, VolumeX } from "lucide-react";
+import { ArrowLeft, Pause, Play, RotateCcw, Star, Trophy, Volume2, VolumeX } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTTS } from "@/hooks/useTTS";
+import { ExerciseFigureArt } from "@/components/ExerciseFigureArt";
+import { MiniMonto } from "@/components/MiniMonto";
 import type { Settings } from "@/types";
 
 type Phase = "welcome" | "countdown" | "exercise" | "rest" | "finished";
@@ -47,8 +49,13 @@ export default function YogaPage() {
   const exercise = EXERCISES[index];
 
   const progress = useMemo(() => Math.round(((index + (phase === "finished" ? 1 : 0)) / EXERCISES.length) * 100), [index, phase]);
+  const speakingRef = useRef(false);
+  const [speaking, setSpeaking] = useState(false);
   const say = useCallback((text: string, emotion = "excited") => {
-    if (soundOn) void speak(text, emotion, SETTINGS);
+    if (!soundOn) return;
+    speakingRef.current = true;
+    setSpeaking(true);
+    void speak(text, emotion, SETTINGS, undefined, () => { speakingRef.current = false; setSpeaking(false); });
   }, [soundOn, speak]);
 
   const clearClock = useCallback(() => {
@@ -101,6 +108,8 @@ export default function YogaPage() {
     intervalRef.current = setInterval(() => {
       setRemaining(value => {
         if (value > 1) return value - 1;
+        // Hold here until Monto finishes talking — never cut a sentence short.
+        if (speakingRef.current) return value;
         clearClock();
         if (phase === "countdown") startExercise();
         else if (phase === "exercise") completeExercise();
@@ -121,26 +130,29 @@ export default function YogaPage() {
   useEffect(() => {
     if (phase !== "welcome") return;
     say("[excited]\nरमाइलो गर्दै शरीर चलाऔँ! तयार होऊ!", "excited");
-    const t = setTimeout(() => beginCountdown(0), 3500);
-    return () => clearTimeout(t);
+    let cancelled = false;
+    const tryAdvance = () => {
+      if (cancelled) return;
+      if (speakingRef.current) { setTimeout(tryAdvance, 200); return; }
+      beginCountdown(0);
+    };
+    const t = setTimeout(tryAdvance, 3500);
+    return () => { cancelled = true; clearTimeout(t); };
   }, [phase, say, beginCountdown]);
 
   // ...and no tap needed to leave — auto-return home once the celebration plays out.
   useEffect(() => {
     if (phase !== "finished") return;
-    const t = setTimeout(() => { cancel(); router.push("/"); }, 6000);
-    return () => clearTimeout(t);
+    let cancelled = false;
+    const tryLeave = () => {
+      if (cancelled) return;
+      if (speakingRef.current) { setTimeout(tryLeave, 200); return; }
+      cancel();
+      router.push("/");
+    };
+    const t = setTimeout(tryLeave, 6000);
+    return () => { cancelled = true; clearTimeout(t); };
   }, [phase, cancel, router]);
-
-  const skip = () => {
-    if (phase === "finished") return;
-    if (index >= EXERCISES.length - 1) {
-      setPhase("finished");
-      setMessage("आजको बाल PT पूरा भयो!");
-      return;
-    }
-    beginCountdown(index + 1);
-  };
 
   const restart = () => {
     clearClock();
@@ -158,17 +170,6 @@ export default function YogaPage() {
     cancel();
     router.push("/");
   };
-
-  const motionAnimation = phase === "exercise" && !paused ? {
-    march: { y: [0, -18, 0, -18, 0], rotate: [-3, 3, -3] },
-    reach: { scaleY: [1, 1.18, 1], y: [0, -14, 0] },
-    bend: { rotate: [-15, 15, -15] },
-    jump: { y: [0, -28, 0], scale: [1, 1.12, 1] },
-    knee: { y: [0, -16, 0, -16, 0], rotate: [-6, 6, -6] },
-    touch: { rotate: [0, 18, 0], y: [0, 12, 0] },
-    balance: { rotate: [-3, 3, -3] },
-    breathe: { scale: [1, 1.16, 1] },
-  }[exercise.animation] : {};
 
   return (
     <main className="relative min-h-[100dvh] overflow-hidden bg-[#071421] text-white select-none">
@@ -193,7 +194,7 @@ export default function YogaPage() {
               <div className="mx-auto flex h-52 w-52 items-center justify-center rounded-[4rem] border border-white/10 bg-white/10 shadow-[0_30px_85px_rgba(0,0,0,.32)] sm:h-60 sm:w-60" style={{ boxShadow: `0 25px 80px ${exercise.color}30` }}>
                 {phase === "welcome" && <motion.div animate={{ y: [0, -12, 0], rotate: [-4, 4, -4] }} transition={{ duration: 1.2, repeat: Infinity }} className="text-8xl">🏃</motion.div>}
                 {phase === "countdown" && <motion.div key={remaining} initial={{ scale: 1.7, opacity: .3 }} animate={{ scale: 1, opacity: 1 }} className="text-8xl font-black" style={{ color: exercise.color }}>{remaining}</motion.div>}
-                {phase === "exercise" && <motion.div animate={motionAnimation} transition={{ duration: exercise.animation === "breathe" ? 3 : 1, repeat: Infinity, ease: "easeInOut" }} className="text-8xl">{exercise.emoji}</motion.div>}
+                {phase === "exercise" && <ExerciseFigureArt exerciseId={exercise.animation} color={exercise.color} size={176} paused={paused} />}
                 {phase === "rest" && <motion.div animate={{ scale: [1, 1.1, 1] }} transition={{ duration: 2, repeat: Infinity }} className="text-8xl">💧</motion.div>}
                 {phase === "finished" && <motion.div animate={{ y: [0, -10, 0], rotate: [-5, 5, -5] }} transition={{ duration: 1, repeat: Infinity }}><Trophy className="h-28 w-28 text-amber-300" /></motion.div>}
               </div>
@@ -209,14 +210,10 @@ export default function YogaPage() {
         <div className="mx-auto w-full max-w-lg pb-3">
           {phase === "welcome" ? <motion.button whileTap={{ scale: .96 }} onClick={() => beginCountdown(0)} className="flex h-16 w-full items-center justify-center gap-3 rounded-3xl bg-gradient-to-r from-emerald-400 to-cyan-400 text-lg font-black text-slate-950 shadow-[0_18px_45px_rgba(52,211,153,.25)]"><Play className="fill-current" /> सुरु गरौँ</motion.button>
           : phase === "finished" ? <motion.button whileTap={{ scale: .96 }} onClick={restart} className="flex h-16 w-full items-center justify-center gap-3 rounded-3xl bg-gradient-to-r from-amber-300 to-orange-400 text-lg font-black text-slate-950"><RotateCcw /> फेरि खेलौँ</motion.button>
-          : <div className="grid grid-cols-[1fr_1.5fr_1fr] gap-3">
-              <button onClick={restart} className="flex h-14 items-center justify-center rounded-2xl border border-white/10 bg-white/[.06] text-xs font-bold text-white/55"><RotateCcw className="mr-1 h-4 w-4" />Reset</button>
-              <motion.button whileTap={{ scale: .95 }} onClick={() => setPaused(value => !value)} className="flex h-14 items-center justify-center gap-2 rounded-2xl font-black text-slate-950" style={{ background: exercise.color }}>{paused ? <Play className="fill-current" /> : <Pause />}{paused ? "जारी राखौँ" : "रोकौँ"}</motion.button>
-              <button onClick={skip} className="flex h-14 items-center justify-center rounded-2xl border border-white/10 bg-white/[.06] text-xs font-bold text-white/55">अर्को <ChevronRight className="h-4 w-4" /></button>
-            </div>}
-          <div className="mt-4 flex items-start gap-2 rounded-2xl border border-emerald-300/10 bg-emerald-300/[.06] px-3 py-2.5 text-left text-[11px] leading-relaxed text-emerald-50/50"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" /><span>वरिपरि खाली ठाउँ राख। दुख्यो वा चक्कर आयो भने तुरुन्त रोक र ठूलो मान्छेलाई भन।</span></div>
+          : <motion.button whileTap={{ scale: .95 }} onClick={() => setPaused(value => !value)} className="mx-auto flex h-14 w-full max-w-xs items-center justify-center gap-2 rounded-2xl font-black text-slate-950" style={{ background: exercise.color }}>{paused ? <Play className="fill-current" /> : <Pause />}{paused ? "जारी राखौँ" : "रोकौँ"}</motion.button>}
         </div>
       </div>
+      <MiniMonto speaking={speaking} />
     </main>
   );
 }

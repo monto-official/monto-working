@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PhoneOff, PhoneIncoming, PhoneCall, Mic, MicOff, Phone, Clock, QrCode, RefreshCw, CheckCircle2 } from "lucide-react";
+import { PhoneOff, PhoneIncoming, PhoneCall, Mic, MicOff, Phone, Clock, QrCode, RefreshCw, CheckCircle2, ArrowUpRight, ArrowDownLeft } from "lucide-react";
 import { toast } from "sonner";
 import { PhoneShell } from "@/components/PhoneShell";
 import { PageHeader } from "@/components/AppHeader";
@@ -17,6 +17,7 @@ import {
   savePairing,
   clearPairing,
   redeemPairingCode,
+  redeemManualPairingCode,
   notifyChildPaired,
   notifyChildIncomingCall,
   type PairingData,
@@ -24,6 +25,16 @@ import {
 import { PairingScanner } from "@/components/PairingScanner";
 import { ChildAvatar } from "@/components/ChildAvatar";
 import type { ChildProfile } from "@/types";
+import { expandTurnUrls } from "@/lib/turn";
+
+interface CallHistoryEntry {
+  id: string;
+  started_at: string;
+  ended_at?: string | null;
+  duration_seconds?: number | null;
+  status: "ringing" | "connected" | "missed" | "rejected" | "ended";
+  caller_role?: "child" | "parent" | null;
+}
 
 const STATUS_LABEL: Record<string, string> = {
   idle:            "Starting...",
@@ -78,6 +89,7 @@ function PairingPrompt({ onPaired }: { onPaired: (data: PairingData) => void }) 
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [redeeming, setRedeeming] = useState(false);
+  const [manualCode, setManualCode] = useState("");
   // Set once a QR scan redeems successfully but the child's name hasn't been
   // entered yet — holds the pairing data until the name modal is confirmed.
   const [pendingPairing, setPendingPairing] = useState<PairingData | null>(null);
@@ -118,6 +130,24 @@ function PairingPrompt({ onPaired }: { onPaired: (data: PairingData) => void }) 
     [finishPairing]
   );
 
+  const handleManualCode = useCallback(async () => {
+    setRedeeming(true);
+    setScanError(null);
+    try {
+      const data = await redeemManualPairingCode(manualCode);
+      savePairing(data);
+      const existing = loadChildProfile();
+      if (existing.name.trim()) {
+        finishPairing(data, existing.name.trim());
+      } else {
+        setPendingPairing(data);
+      }
+    } catch (err) {
+      setScanError(err instanceof Error ? err.message : "Pairing failed — try again.");
+    } finally {
+      setRedeeming(false);
+    }
+  }, [manualCode, finishPairing]);
   const handleConfirmChildName = useCallback(() => {
     const name = childName.trim();
     if (!name || !pendingPairing) return;
@@ -208,10 +238,26 @@ function ActiveCallScreen({
 }) {
   const { online: deviceOnline } = useDeviceChannel(pairing);
   const [child, setChild] = useState<ChildProfile>(DEFAULT_CHILD);
+  const [callHistory, setCallHistory] = useState<CallHistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+
+  const refreshHistory = useCallback(async () => {
+    try {
+      const response = await fetch(`${pairing.apiUrl}/call/${encodeURIComponent(pairing.deviceId)}/history?limit=50`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json() as { calls?: CallHistoryEntry[] };
+      setCallHistory(data.calls ?? []);
+    } catch {
+      // Calling must remain usable if history is temporarily unavailable.
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [pairing.apiUrl, pairing.deviceId]);
 
   useEffect(() => {
     setChild(loadChildProfile());
-  }, []);
+    void refreshHistory();
+  }, [refreshHistory]);
 
   // Signaling is HTTP polling now (see routes/call_signal.py) — pairing.apiUrl
   // is already a plain http(s) base URL, no ws:// conversion needed.
@@ -219,7 +265,7 @@ function ActiveCallScreen({
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
     ...(pairing.turnUrl
-      ? [{ urls: pairing.turnUrl, username: pairing.turnUsername, credential: pairing.turnPassword }]
+      ? [{ urls: expandTurnUrls(pairing.turnUrl), username: pairing.turnUsername, credential: pairing.turnPassword }]
       : []),
   ];
 
@@ -236,6 +282,12 @@ function ActiveCallScreen({
   const isConnecting = status === "connecting";
   const isReady     = status === "ready";
   const label = error || STATUS_LABEL[status] || status;
+
+  useEffect(() => {
+    if (status !== "ended" && status !== "ready") return;
+    const timer = setTimeout(() => void refreshHistory(), 500);
+    return () => clearTimeout(timer);
+  }, [status, refreshHistory]);
 
   // Ring for as long as the child's call is waiting on this side to
   // accept/reject — stops the moment that resolves either way.
@@ -262,6 +314,18 @@ function ActiveCallScreen({
   const [pendingRing, setPendingRing] = useState(false);
   const pendingRingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const wakeChild = useCallback(() => {
+    const account = loadParentAccount();
+    notifyChildIncomingCall(pairing, account.name || "Your parent", account.avatar);
+  }, [pairing]);
+
+  useEffect(() => {
+    if (!pendingRing || peerOnline || status !== "ready") return;
+    wakeChild();
+    const retry = setInterval(wakeChild, 3000);
+    return () => clearInterval(retry);
+  }, [pendingRing, peerOnline, status, wakeChild]);
+
   // Retries every 2s rather than sending once — the signaling socket has
   // been observed to briefly recycle every ~3s under some networks, which
   // can silently drop a single one-shot send; retrying gives it more
@@ -285,16 +349,19 @@ function ActiveCallScreen({
 
   const handleCallChild = useCallback(() => {
     if (!isReady || pendingRing) return;
-    const account = loadParentAccount();
-    notifyChildIncomingCall(pairing, account.name || "Your parent", account.avatar);
+    wakeChild();
     setPendingRing(true);
-    // Give the child device a full 2 minutes to wake up and come online
-    // before giving up — flaky wifi/reconnects shouldn't cut this short.
     pendingRingTimeoutRef.current = setTimeout(() => {
       setPendingRing(false);
       toast.error("Child's Monto box didn't respond — make sure it's on and connected.");
-    }, 120000);
-  }, [isReady, pendingRing, pairing]);
+    }, 45000);
+  }, [isReady, pendingRing, wakeChild]);
+
+  const cancelPendingCall = useCallback(() => {
+    if (pendingRingTimeoutRef.current) clearTimeout(pendingRingTimeoutRef.current);
+    pendingRingTimeoutRef.current = null;
+    setPendingRing(false);
+  }, []);
 
   return (
     <PhoneShell>
@@ -387,8 +454,12 @@ function ActiveCallScreen({
                 <PhoneCall className="size-8 text-white" />
               </div>
               <p className="text-xs text-muted-foreground max-w-xs">
-                Waking up {child.name ? `${child.name}'s` : "your child's"} Monto box…
+                {peerOnline ? "Child device found. Starting secure audio…" : `Waking up ${child.name ? `${child.name}'s` : "your child's"} Monto box…`}
               </p>
+              <button onClick={cancelPendingCall}
+                className="rounded-full border px-5 py-2 text-sm font-semibold text-muted-foreground active:scale-95 transition">
+                Cancel
+              </button>
             </div>
           ) : (
             <div className="flex flex-col items-center gap-3 text-center">
@@ -405,6 +476,43 @@ function ActiveCallScreen({
             </div>
           )}
         </div>
+
+        {/* Complete call history */}
+        <section className="rounded-2xl border bg-card overflow-hidden">
+          <div className="px-4 py-3 border-b flex items-center justify-between">
+            <div>
+              <h3 className="font-bold">Call history</h3>
+              <p className="text-xs text-muted-foreground">Incoming, outgoing and missed calls</p>
+            </div>
+            <button onClick={() => void refreshHistory()} className="size-9 rounded-full bg-muted flex items-center justify-center" aria-label="Refresh call history">
+              <RefreshCw className="size-4" />
+            </button>
+          </div>
+          <div className="divide-y max-h-72 overflow-y-auto">
+            {historyLoading ? (
+              <p className="p-5 text-sm text-muted-foreground text-center">Loading call history...</p>
+            ) : callHistory.length === 0 ? (
+              <p className="p-5 text-sm text-muted-foreground text-center">No calls yet. Your calls will appear here.</p>
+            ) : callHistory.map((call) => {
+              const outgoing = call.caller_role === "parent";
+              const seconds = call.duration_seconds ?? 0;
+              const durationText = seconds > 0 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : "Not connected";
+              const statusText = call.status === "ended" ? "Completed" : call.status.charAt(0).toUpperCase() + call.status.slice(1);
+              return (
+                <div key={call.id} className="p-4 flex items-center gap-3">
+                  <div className={`size-10 rounded-full flex items-center justify-center ${call.status === "missed" || call.status === "rejected" ? "bg-red-50 text-red-500" : "bg-green-50 text-green-600"}`}>
+                    {outgoing ? <ArrowUpRight className="size-5" /> : <ArrowDownLeft className="size-5" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold">{outgoing ? `You called ${child.name || "Monto"}` : `${child.name || "Monto"} called you`}</p>
+                    <p className="text-xs text-muted-foreground">{new Date(call.started_at).toLocaleString()} / {durationText}</p>
+                  </div>
+                  <span className={`text-[11px] font-semibold ${call.status === "missed" || call.status === "rejected" ? "text-red-500" : "text-green-600"}`}>{statusText}</span>
+                </div>
+              );
+            })}
+          </div>
+        </section>
 
         {/* Instructions */}
         <div className="rounded-2xl bg-muted/50 p-4 text-sm text-muted-foreground space-y-2">

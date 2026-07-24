@@ -1,6 +1,6 @@
 "use client";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Globe, Volume2, Mic, Moon, Sun, Users } from "lucide-react";
+import { X, Globe, Volume2, Mic, Moon, Sun, Users, Smartphone, Link2 } from "lucide-react";
 import { Character, Settings } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -12,6 +12,8 @@ interface SettingsModalProps {
   noiseFloor?: number | null;
   calibrating?: boolean;
   onCalibrate?: () => void;
+  parentConnection?: { loading: boolean; count: number; error?: boolean };
+  onPairParent?: () => void;
 }
 
 export function SettingsModal({
@@ -22,6 +24,8 @@ export function SettingsModal({
   noiseFloor,
   calibrating,
   onCalibrate,
+  parentConnection,
+  onPairParent,
 }: SettingsModalProps) {
   return (
     <AnimatePresence>
@@ -42,7 +46,7 @@ export function SettingsModal({
             className="fixed inset-0 z-50 flex items-center justify-center p-4"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="w-full max-w-sm bg-white dark:bg-gray-900 rounded-3xl shadow-2xl overflow-hidden">
+            <div className="w-full max-w-sm max-h-[92vh] bg-white dark:bg-gray-900 rounded-3xl shadow-2xl overflow-y-auto">
               {/* Header */}
               <div className="flex items-center justify-between p-5 border-b border-gray-200 dark:border-gray-800">
                 <h2 className="text-lg font-bold text-gray-900 dark:text-white">
@@ -58,6 +62,24 @@ export function SettingsModal({
               </div>
 
               <div className="p-5 space-y-6">
+                <div className={`rounded-2xl border p-4 ${parentConnection?.count ? "border-emerald-200 bg-emerald-50 dark:border-emerald-900/70 dark:bg-emerald-950/30" : "border-amber-200 bg-amber-50 dark:border-amber-900/70 dark:bg-amber-950/30"}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className={`relative flex size-11 shrink-0 items-center justify-center rounded-xl ${parentConnection?.count ? "bg-emerald-500" : "bg-amber-500"}`}>
+                        <Smartphone className="size-5 text-white" />
+                        <span className={`absolute -right-1 -top-1 size-3 rounded-full border-2 border-white dark:border-gray-900 ${parentConnection?.count ? "bg-emerald-300" : "bg-gray-400"}`} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-gray-900 dark:text-white">{parentConnection?.loading ? "Checking parent…" : parentConnection?.count ? "Parent device connected" : "Parent device not connected"}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">{parentConnection?.count ? `${parentConnection.count} parent ${parentConnection.count === 1 ? "device" : "devices"} paired` : parentConnection?.error ? "Could not refresh status" : "Pair to enable calls and voice notes"}</p>
+                      </div>
+                    </div>
+                    {!!parentConnection?.count && <span className="rounded-full bg-emerald-500 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white">Connected</span>}
+                  </div>
+                  {!parentConnection?.count && onPairParent && !parentConnection?.loading && (
+                    <button onClick={onPairParent} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-primary-500 to-secondary-500 py-2.5 text-sm font-semibold text-white"><Link2 className="size-4" /> Pair parent device</button>
+                  )}
+                </div>
                 {/* Language */}
                 <div>
                   <div className="flex items-center gap-2 mb-3">

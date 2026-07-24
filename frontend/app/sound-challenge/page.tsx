@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, Check, Mic, MicOff, RotateCcw, Sparkles, Star, Volume2 } from "lucide-react";
+import { ArrowLeft, Check, Mic, MicOff, RotateCcw, Sparkles, Star, Volume2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTTS } from "@/hooks/useTTS";
+import { MiniMonto } from "@/components/MiniMonto";
 import type { Settings } from "@/types";
 
 type Animal = { id: string; name: string; emoji: string; sound: string; color: string; aliases: string[] };
@@ -40,7 +41,13 @@ export default function SoundChallengePage() {
 
   const remaining = 5 - chosen.length;
   const progress = useMemo(() => Array.from({ length: 5 }, (_, index) => index < chosen.length), [chosen.length]);
-  const say = useCallback((text: string, emotion = "excited") => void speak(text, emotion, SETTINGS), [speak]);
+  const speakingRef = useRef(false);
+  const [speaking, setSpeaking] = useState(false);
+  const say = useCallback((text: string, emotion = "excited") => {
+    speakingRef.current = true;
+    setSpeaking(true);
+    void speak(text, emotion, SETTINGS, undefined, () => { speakingRef.current = false; setSpeaking(false); });
+  }, [speak]);
 
   const clearTimer = () => {
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -81,7 +88,7 @@ export default function SoundChallengePage() {
     setMessage(praise);
     say(`[happy]\n${praise} ${current.name} says ${current.sound}!`, "happy");
     clearTimer();
-    timerRef.current = setTimeout(() => {
+    const proceed = () => {
       if (next.length >= 5) {
         setPhase("finished");
         setMessage("You are a Sound Superstar!");
@@ -93,7 +100,14 @@ export default function SoundChallengePage() {
         setMessage(`Great! Name animal number ${next.length + 1}.`);
         say(`[friendly]\nNow name animal number ${next.length + 1}.`, "neutral");
       }
-    }, 2300);
+    };
+    // Give the praise line at least a moment to breathe, then wait for it to
+    // actually finish talking before moving on — never cut it off mid-sentence.
+    const wait = () => {
+      if (speakingRef.current) { timerRef.current = setTimeout(wait, 200); return; }
+      proceed();
+    };
+    timerRef.current = setTimeout(wait, 1800);
   };
 
   const startListening = () => {
@@ -145,7 +159,10 @@ export default function SoundChallengePage() {
 
       <div className="relative z-10 mx-auto flex min-h-[100dvh] w-full max-w-3xl flex-col px-5 py-5 sm:px-8">
         <header className="flex items-center justify-between">
-          <button onClick={() => router.push("/")} className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/10" aria-label="Back"><ArrowLeft /></button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => router.push("/")} className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/10" aria-label="Back"><ArrowLeft /></button>
+            <button onClick={() => router.push("/")} className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/10" aria-label="Close"><X /></button>
+          </div>
           <div className="text-center"><p className="text-xs font-bold uppercase tracking-[.28em] text-emerald-200/70">Monto</p><h1 className="font-kids text-xl font-black">Sound Challenge</h1></div>
           <div className="flex h-11 items-center gap-1 rounded-full border border-amber-300/20 bg-amber-300/10 px-3 font-black text-amber-200"><Star className="h-4 w-4 fill-current" />{chosen.length}</div>
         </header>
@@ -183,9 +200,9 @@ export default function SoundChallengePage() {
           {phase === "imitate" && <motion.button whileTap={{ scale: .96 }} onClick={markImitated} className="flex h-16 w-full items-center justify-center gap-3 rounded-3xl bg-gradient-to-r from-fuchsia-500 to-orange-400 text-lg font-black"><Volume2 /> I made the sound!</motion.button>}
           {phase === "celebrate" && <div className="h-14 text-center font-black text-amber-200">Sound Star earned! ⭐</div>}
           {phase === "finished" && <motion.button whileTap={{ scale: .96 }} onClick={restart} className="flex h-16 w-full items-center justify-center gap-3 rounded-3xl bg-gradient-to-r from-amber-300 to-orange-400 text-lg font-black text-slate-950"><RotateCcw /> Play again</motion.button>}
-          <p className="mt-4 text-center text-[11px] text-white/35">Speak clearly or tap an animal · Keep the volume comfortable</p>
         </div>
       </div>
+      <MiniMonto speaking={speaking} />
     </main>
   );
 }

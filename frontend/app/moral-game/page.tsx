@@ -1,38 +1,58 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, Heart, Mic, MicOff, Play, RotateCcw, Trophy, Volume2, VolumeX } from "lucide-react";
+import { ArrowLeft, Heart, Mic, MicOff, Play, RotateCcw, Trophy, Volume2, VolumeX, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { MiniMonto } from "@/components/MiniMonto";
 
 type Choice = { text: string; emoji: string; kind: boolean; result: string; lesson: string };
 
 const stories = [
   { image: "/moral-game/scene-playground.png", place: "Playground", title: "The New Kid", scene: "🛝", friend: "🧒", question: "A new kid is standing alone. What will you do?", choices: [
     { text: "Invite them to play", emoji: "👋", kind: true, result: "Their worried face turns into a huge smile!", lesson: "Including someone can turn loneliness into friendship." },
+    { text: "Ask a friend to invite them", emoji: "🤝", kind: true, result: "Your friend helps them join the game.", lesson: "Getting help is thoughtful too; next time, try saying hello yourself." },
     { text: "Keep playing", emoji: "🏃", kind: false, result: "The new kid stays alone and looks down.", lesson: "A small hello can help someone feel welcome." },
   ]},
   { image: "/moral-game/scene-classroom.png", place: "Classroom", title: "The Broken Crayon", scene: "🖍️", friend: "👧", question: "You accidentally break Maya's crayon. Nobody saw. What will you do?", choices: [
     { text: "Tell the truth and apologize", emoji: "🤝", kind: true, result: "Maya forgives you, and you fix it together!", lesson: "Telling the truth builds trust, even when it feels scary." },
+    { text: "Ask a teacher to help explain", emoji: "🙋", kind: true, result: "The teacher helps you tell Maya what happened.", lesson: "Asking a trusted adult for help is responsible when honesty feels scary." },
     { text: "Hide it", emoji: "🙈", kind: false, result: "Maya feels confused, and your secret feels heavy.", lesson: "Mistakes are okay. Owning them is brave." },
   ]},
   { image: "/moral-game/scene-lunch.png", place: "Lunch Table", title: "One Cookie Left", scene: "🍪", friend: "🐻", question: "You both reach for the last cookie. What is fair?", choices: [
     { text: "Split it in half", emoji: "🫶", kind: true, result: "You both enjoy a piece and laugh together.", lesson: "Sharing makes a little treat twice as special." },
+    { text: "Use a fair game to decide", emoji: "✋", kind: true, result: "You both agree on the rule and accept the result.", lesson: "A rule everyone agrees to can also be fair." },
     { text: "Grab it quickly", emoji: "✊", kind: false, result: "It tastes good, but your friend looks disappointed.", lesson: "Fairness means thinking about other people's feelings." },
   ]},
   { image: "/moral-game/scene-hallway.png", place: "School Hall", title: "Books Everywhere!", scene: "📚", friend: "🐰", question: "Someone drops their books, but you are late. What will you do?", choices: [
     { text: "Stop and help", emoji: "💪", kind: true, result: "Together, the books are gathered in seconds!", lesson: "Helping hands make hard jobs lighter." },
+    { text: "Call a nearby adult to help", emoji: "📣", kind: true, result: "An adult comes over and helps gather the books.", lesson: "Finding safe help is useful when you cannot stop yourself." },
     { text: "Walk around", emoji: "🚶", kind: false, result: "They struggle alone as books slide away.", lesson: "A minute of your time can make a big difference." },
   ]},
   { image: "/moral-game/scene-football.png", place: "Football Field", title: "Was It a Goal?", scene: "⚽", friend: "🦊", question: "The ball missed, but the referee says goal. What do you say?", choices: [
     { text: "Be honest", emoji: "🌟", kind: true, result: "Both teams cheer your honesty. You feel proud!", lesson: "Real winners choose honesty over an unfair prize." },
+    { text: "Tell my team captain first", emoji: "🗣️", kind: true, result: "Your captain helps explain the mistake to the referee.", lesson: "Speaking to a leader is a good step when speaking up alone feels hard." },
     { text: "Pretend it went in", emoji: "🤫", kind: false, result: "Your team gets a point, but it does not feel right.", lesson: "Winning feels best when everyone plays fairly." },
   ]},
-] as const;
+  { image: "/moral-game/scene-classroom.png", place: "Group Project", title: "A Different Idea", scene: "🌈", friend: "🧑‍🤝‍🧑", question: "Your teammate shares an idea you disagree with. How do you respond?", choices: [
+    { text: "Listen fully, then share my view kindly", emoji: "👂", kind: true, result: "You combine the best parts of both ideas.", lesson: "Respect means listening to understand, even when we disagree." },
+    { text: "Ask the group to vote", emoji: "🗳️", kind: true, result: "The group decides, but first everyone gets a chance to explain.", lesson: "Fair decisions work best when every voice is heard." },
+    { text: "Laugh and call the idea silly", emoji: "😏", kind: false, result: "Your teammate becomes quiet and stops sharing.", lesson: "We can disagree with an idea without embarrassing the person." },
+  ]},
+  { image: "/moral-game/scene-playground.png", place: "Online Game", title: "The Mean Message", scene: "🛡️", friend: "💬", question: "Someone sends a cruel message about your friend. What should you do?", choices: [
+    { text: "Save it, block them, and tell an adult", emoji: "🛡️", kind: true, result: "A trusted adult reports the account and supports your friend.", lesson: "Online cruelty is never your fault. Save evidence and get help." },
+    { text: "Leave the chat and check on my friend", emoji: "💛", kind: true, result: "Your friend feels supported and less alone.", lesson: "Supporting a friend matters; remember to involve a trusted adult too." },
+    { text: "Send a mean message back", emoji: "🔥", kind: false, result: "The argument grows and more people get hurt.", lesson: "Pause, block, and ask for help instead of fighting cruelty with cruelty." },
+  ]},
+  { image: "/moral-game/scene-lunch.png", place: "At Home", title: "The Promise", scene: "✅", friend: "🌱", question: "You promised to tidy up, but your favorite show has started. What now?", choices: [
+    { text: "Keep my promise first, then watch", emoji: "✅", kind: true, result: "The job is done quickly, and you enjoy the show without worrying.", lesson: "Responsibility means keeping promises even when something exciting appears." },
+    { text: "Ask politely to finish after this short part", emoji: "⏰", kind: true, result: "You agree on a clear time and follow through.", lesson: "Plans can change when we communicate honestly and still do our part." },
+    { text: "Pretend I did not hear", emoji: "📺", kind: false, result: "Someone else has to do your job and feels frustrated.", lesson: "Ignoring a promise moves our responsibility onto someone else." },
+  ]},] as const;
 
 export default function MoralGamePage() {
   const router = useRouter();
-  const [started, setStarted] = useState(true);
+  const [started, setStarted] = useState(false);
   const [round, setRound] = useState(0);
   const [score, setScore] = useState(0);
   const [answer, setAnswer] = useState<Choice | null>(null);
@@ -42,6 +62,7 @@ export default function MoralGamePage() {
   const [soundOn, setSoundOn] = useState(true);
   const micStream = useRef<MediaStream | null>(null);
   const calibrationRun = useRef(0);
+  const [speaking, setSpeaking] = useState(false);
   const done = round >= stories.length;
   const story = stories[Math.min(round, stories.length - 1)];
 
@@ -59,8 +80,11 @@ export default function MoralGamePage() {
     const speech = new SpeechSynthesisUtterance(words);
     speech.rate = .88;
     speech.pitch = 1.08;
+    speech.onstart = () => setSpeaking(true);
+    speech.onend = () => setSpeaking(false);
+    speech.onerror = () => setSpeaking(false);
     window.speechSynthesis.speak(speech);
-    return () => window.speechSynthesis.cancel();
+    return () => { window.speechSynthesis.cancel(); setSpeaking(false); };
   }, [answer, done, round, soundOn, story]);
 
   useEffect(() => () => {
@@ -142,7 +166,10 @@ export default function MoralGamePage() {
     {["✨","💛","⭐","🌈","💫","🌼"].map((item, i) => <motion.span key={i} className="absolute select-none text-3xl opacity-20" style={{ left: (5 + i * 18) + "%", top: (12 + (i * 23) % 72) + "%" }} animate={{ y: [0,-18,0], rotate: [-8,8,-8] }} transition={{ duration: 3 + i * .3, repeat: Infinity }}>{item}</motion.span>)}
     <div className="relative z-10 mx-auto flex min-h-[100dvh] w-full max-w-3xl flex-col px-5 py-5 sm:px-8">
       <header className="flex items-center justify-between">
-        <button onClick={() => router.push("/games")} className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/10" aria-label="Back to games"><ArrowLeft /></button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => router.push("/games")} className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/10" aria-label="Back to games"><ArrowLeft /></button>
+          <button onClick={() => router.push("/")} className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/10" aria-label="Close"><X /></button>
+        </div>
         <div className="text-center"><p className="text-[10px] font-black uppercase tracking-[.3em] text-amber-200/70">Monto presents</p><h1 className="text-xl font-black">Moral Adventure</h1></div>
         <div className="flex h-11 items-center gap-1 rounded-full border border-amber-300/20 bg-amber-300/10 px-3 font-black text-amber-200"><Heart className="h-4 w-4 fill-current" />{score}</div>
       </header>
@@ -185,5 +212,6 @@ export default function MoralGamePage() {
         </motion.div>}
       </AnimatePresence></section>
     </div>
+    <MiniMonto speaking={speaking} />
   </main>;
 }

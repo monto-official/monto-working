@@ -48,6 +48,9 @@ const ICE_SERVERS: RTCIceServer[] = [
     : []),
 ];
 
+// Durable backend polling is used for call negotiation and history. Firebase remains
+// available to the always-on control channel that wakes either app.
+const USE_FIREBASE_FOR_CALL_SIGNALING = false;
 const POLL_INTERVAL_MS = 1000;
 
 // Best-effort diagnostic beacon to the backend's /debug/log sink â€” the only
@@ -170,7 +173,7 @@ export function useWebRTCCall({
       // When a TURN server is configured, skip host/srflx candidates
       // entirely and go straight through the relay â€” on a network with
       // AP/client isolation, direct P2P candidates would only ever fail.
-      iceTransportPolicy: hasTurn ? "relay" : "all",
+      iceTransportPolicy: "all",
     });
     pcRef.current = pc;
 
@@ -353,7 +356,7 @@ export function useWebRTCCall({
       }
     };
 
-    if (isFirebaseSignalingConfigured()) {
+    if (USE_FIREBASE_FOR_CALL_SIGNALING && isFirebaseSignalingConfigured()) {
       updateStatus("connecting-ws");
       void createFirebaseSignaling({
         room,
@@ -446,16 +449,17 @@ export function useWebRTCCall({
       noAnswerTimerRef.current = setTimeout(() => {
         noAnswerTimerRef.current = null;
         if (statusRef.current === "in-call") return;
+        sendSignal("missed");
         cleanupPeer();
         updateStatus("ended");
         onCallEnded?.();
         setTimeout(() => updateStatus("ready"), 2000);
-      }, 120000);
+      }, 60000);
     }
     return () => {
       if (noAnswerTimerRef.current) clearTimeout(noAnswerTimerRef.current);
     };
-  }, [status, cleanupPeer, onCallEnded, updateStatus]);
+  }, [status, cleanupPeer, onCallEnded, sendSignal, updateStatus]);
 
   const ringParent = useCallback(() => {
     if (statusRef.current !== "ready") return;

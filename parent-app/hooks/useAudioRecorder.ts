@@ -1,6 +1,7 @@
 "use client";
 import { useState, useRef, useCallback, useEffect } from "react";
-import { RecordingState } from "@/types";
+
+export type RecordingState = "idle" | "requesting" | "recording" | "processing" | "speaking" | "error";
 
 export interface UseAudioRecorderReturn {
   recordingState: RecordingState;

@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { Toaster } from "sonner";
 import { BackButtonGuard } from "@/components/BackButtonGuard";
 import { AuthGate } from "@/components/AuthGate";
+import { IncomingCallRouter } from "@/components/IncomingCallRouter";
+import { VoiceMessageRouter } from "@/components/VoiceMessageRouter";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -30,6 +32,8 @@ export default function RootLayout({
       </head>
       <body className="antialiased">
         <AuthGate>{children}</AuthGate>
+        <IncomingCallRouter />
+        <VoiceMessageRouter />
         <Toaster position="top-center" />
         <BackButtonGuard />
       </body>

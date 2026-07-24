@@ -2,24 +2,76 @@
 
 import Image from "next/image";
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Emotion } from "@/types";
+
+const COMIC_WORDS: Record<string, string[]> = {
+  excited: ["WOW!", "YAY!", "AWESOME!", "ZOOM!"],
+  surprised: ["WHOA!", "POW!", "ZAP!"],
+};
 
 const MODEL_FRAMES = ["/monto-3d.webp", "/monto-talk-open.webp", "/monto-talk-o.webp"];
 const SPEECH_SEQUENCE = [1, 2, 1, 0, 1, 2, 1, 1, 0];
+
+const SPARKLE_POSITIONS = [
+  { top: "6%", left: "10%" },
+  { top: "2%", left: "80%" },
+  { top: "20%", left: "90%" },
+  { top: "32%", left: "2%" },
+  { top: "58%", left: "94%" },
+  { top: "64%", left: "0%" },
+  { top: "10%", left: "46%" },
+  { top: "76%", left: "84%" },
+];
+
+function MagicSparkles() {
+  return (
+    <>
+      {SPARKLE_POSITIONS.map((pos, i) => (
+        <motion.span
+          key={i}
+          className="absolute z-20 select-none pointer-events-none text-base"
+          style={{ top: pos.top, left: pos.left }}
+          initial={{ opacity: 0, scale: 0, y: 0 }}
+          animate={{ opacity: [0, 1, 0], scale: [0, 1, 0.6], y: [0, -16, -24], rotate: [0, 180] }}
+          transition={{ duration: 1.5 + (i % 3) * 0.3, repeat: Infinity, delay: i * 0.22, ease: "easeOut" }}
+        >
+          ✨
+        </motion.span>
+      ))}
+    </>
+  );
+}
 
 export function Monto3DAvatar({ emotion, size = 320 }: { emotion: Emotion; size?: number }) {
   const talking = emotion === "talking";
   const excited = emotion === "excited" || emotion === "happy";
   const sad = emotion === "sad";
   const thinking = emotion === "thinking";
+  const magic = excited || emotion === "surprised" || talking;
   const [frame, setFrame] = useState(0);
   const [lowPower, setLowPower] = useState(false);
+  const [burst, setBurst] = useState<{ word: string; key: number } | null>(null);
+  const prevEmotionRef = useRef<Emotion | null>(null);
+  const burstIdRef = useRef(0);
 
   useEffect(() => {
     const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
     setLowPower(/Raspberry Pi|armv|aarch64/i.test(navigator.userAgent) || (memory !== undefined && memory <= 4));
   }, []);
+
+  useEffect(() => {
+    const words = COMIC_WORDS[emotion];
+    if (words && prevEmotionRef.current !== emotion && !lowPower) {
+      const word = words[Math.floor(Math.random() * words.length)];
+      burstIdRef.current += 1;
+      setBurst({ word, key: burstIdRef.current });
+      const t = setTimeout(() => setBurst(null), 1100);
+      prevEmotionRef.current = emotion;
+      return () => clearTimeout(t);
+    }
+    prevEmotionRef.current = emotion;
+  }, [emotion, lowPower]);
 
   useEffect(() => {
     if (!talking) { setFrame(0); return; }
@@ -34,13 +86,20 @@ export function Monto3DAvatar({ emotion, size = 320 }: { emotion: Emotion; size?
   return (
     <motion.div
       className="monto-3d-avatar relative flex items-end justify-center"
-      style={{ width: size, height: size * 1.08 }}
-      animate={{
-        y: lowPower ? 0 : talking ? [0, -4, 0] : sad ? [3, 7, 3] : [0, -5, 0],
-        rotate: lowPower ? 0 : thinking ? [0, -2.5, 0] : excited ? [0, 1.5, -1.5, 0] : [0, 0.7, 0],
-        scale: lowPower ? 1 : talking ? [1, 1.012, 1] : 1,
+      style={{
+        width: `min(${size}px, 100%)`,
+        aspectRatio: "1 / 1.08",
       }}
-      transition={{ duration: talking ? 1.15 : 3.8, repeat: Infinity, ease: "easeInOut" }}
+      animate={{
+        y: lowPower
+          ? talking ? [0, -2, 0] : [0, -3, 0]
+          : talking ? [0, -4, 0] : sad ? [3, 7, 3] : [0, -5, 0],
+        rotate: lowPower
+          ? talking ? [0, 0.35, 0] : [0, 0.25, 0]
+          : thinking ? [0, -2.5, 0] : excited ? [0, 1.5, -1.5, 0] : [0, 0.7, 0],
+        scale: talking ? [1, lowPower ? 1.006 : 1.012, 1] : 1,
+      }}
+      transition={{ duration: talking ? (lowPower ? 1.35 : 1.15) : (lowPower ? 4.6 : 3.8), repeat: Infinity, ease: "easeInOut" }}
       aria-label={`Monto is ${emotion}`}
     >
       {!lowPower && (
@@ -48,6 +107,22 @@ export function Monto3DAvatar({ emotion, size = 320 }: { emotion: Emotion; size?
           animate={{ opacity: talking ? [0.25, 0.52, 0.25] : [0.18, 0.32, 0.18], scale: talking ? [0.94, 1.05, 0.94] : 1 }}
           transition={{ duration: talking ? 1.1 : 3, repeat: Infinity }} />
       )}
+
+      <div className={`monto-hero-ring${talking || excited ? " is-active" : ""}`} aria-hidden="true" />
+
+      {!lowPower && magic && <MagicSparkles />}
+
+      <AnimatePresence>
+        {burst && (
+          <motion.span
+            key={burst.key}
+            className="monto-comic-burst absolute -top-2 right-[6%] z-30 select-none pointer-events-none text-2xl sm:text-3xl"
+            style={{ "--comic-rot": "-9deg" } as React.CSSProperties}
+          >
+            {burst.word}
+          </motion.span>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence initial={false} mode="popLayout">
         <motion.div key={MODEL_FRAMES[frame]} className="absolute inset-0 z-10 flex items-end justify-center"

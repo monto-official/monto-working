@@ -48,9 +48,12 @@ create table if not exists call_logs (
     started_at        timestamptz not null default now(),
     ended_at          timestamptz,
     duration_seconds  integer,
+    caller_role       text check (caller_role in ('child', 'parent')),
     status            text not null default 'ringing'
                        check (status in ('ringing', 'connected', 'missed', 'rejected', 'ended'))
 );
+alter table call_logs add column if not exists caller_role text
+    check (caller_role in ('child', 'parent'));
 
 -- ── Conversation memory (replaces monto_memory.db) ───────────────────────────
 create table if not exists memory_messages (
@@ -102,6 +105,25 @@ create table if not exists reminders (
     created_at        timestamptz not null default now()
 );
 create index if not exists idx_reminders_device on reminders(child_device_id);
+
+-- ── Voice messages ────────────────────────────────────────────────────────────
+-- Short recorded voice notes sent either direction between a paired parent
+-- and child device. Audio is stored inline as base64 (clips are short — the
+-- recorder auto-stops at 30s — so this avoids standing up a separate blob
+-- storage bucket). Delivery is pushed instantly over the existing
+-- `${deviceId}:control` Firebase channel; this table is the durable record
+-- both apps can re-list from on load.
+create table if not exists voice_messages (
+    id                uuid primary key default gen_random_uuid(),
+    child_device_id   text not null references devices(device_id) on delete cascade,
+    sender_role       text not null check (sender_role in ('parent', 'child')),
+    audio_base64      text not null,
+    mime_type         text not null default 'audio/webm',
+    duration_ms       integer,
+    created_at        timestamptz not null default now(),
+    listened_at       timestamptz
+);
+create index if not exists idx_voice_messages_device on voice_messages(child_device_id, created_at);
 
 -- ── Bedtime schedule ──────────────────────────────────────────────────────────
 -- Schedule storage only — no child-side lock/enforcement yet.
@@ -162,6 +184,7 @@ alter table call_logs           disable row level security;
 alter table memory_messages     disable row level security;
 alter table session_facts       disable row level security;
 alter table reminders           disable row level security;
+alter table voice_messages      disable row level security;
 alter table bedtime_schedules   disable row level security;
 alter table usage_events        disable row level security;
 alter table call_signals        disable row level security;

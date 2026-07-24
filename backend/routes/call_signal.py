@@ -21,7 +21,7 @@ Flow:
 """
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -60,6 +60,38 @@ class PollResponse(BaseModel):
     latest_id: int
 
 
+class CallEventRequest(BaseModel):
+    role: str
+    type: str
+    duration_seconds: Optional[int] = None
+
+
+def _start_call_log(db, room_id: str, caller_role: str) -> None:
+    active = (db.table("call_logs").select("id").eq("child_device_id", room_id)
+              .is_("ended_at", "null").limit(1).execute())
+    if active.data:
+        return
+    row: Dict[str, Any] = {"child_device_id": room_id, "status": "ringing", "caller_role": caller_role}
+    try:
+        db.table("call_logs").insert(row).execute()
+    except Exception:
+        row.pop("caller_role", None)
+        db.table("call_logs").insert(row).execute()
+
+
+def _finish_call_log(db, room_id: str, status: str, duration_seconds: Optional[int] = None) -> None:
+    update: Dict[str, Any] = {"status": status, "ended_at": datetime.now(timezone.utc).isoformat()}
+    if duration_seconds is None:
+        active = (db.table("call_logs").select("started_at").eq("child_device_id", room_id)
+                  .is_("ended_at", "null").order("started_at", desc=True).limit(1).execute())
+        if active.data:
+            started = datetime.fromisoformat(active.data[0]["started_at"].replace("Z", "+00:00"))
+            duration_seconds = max(0, int((datetime.now(timezone.utc) - started).total_seconds()))
+    if duration_seconds is not None:
+        update["duration_seconds"] = max(0, duration_seconds)
+    db.table("call_logs").update(update).eq("child_device_id", room_id).is_("ended_at", "null").execute()
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.post("/{room_id}/signal")
@@ -78,16 +110,16 @@ async def send_signal(room_id: str, req: SignalRequest):
         except Exception as exc:
             logger.warning(f"[CallSignal] clearing old signals failed (non-fatal): {exc}")
         try:
-            db.table("call_logs").insert({"child_device_id": room_id, "status": "ringing"}).execute()
+            _start_call_log(db, room_id, req.role)
         except Exception as exc:
             logger.warning(f"[CallSignal] call_logs insert failed (non-fatal): {exc}")
-    elif req.type in ("accept", "reject", "hangup"):
-        status_map = {"accept": "connected", "reject": "rejected", "hangup": "ended"}
+    elif req.type in ("accept", "reject", "hangup", "missed"):
+        status_map = {"accept": "connected", "reject": "rejected", "hangup": "ended", "missed": "missed"}
         try:
-            update: Dict[str, Any] = {"status": status_map[req.type]}
-            if req.type in ("reject", "hangup"):
-                update["ended_at"] = datetime.now(timezone.utc).isoformat()
-            db.table("call_logs").update(update).eq("child_device_id", room_id).is_("ended_at", "null").execute()
+            if req.type == "accept":
+                db.table("call_logs").update({"status": "connected"}).eq("child_device_id", room_id).is_("ended_at", "null").execute()
+            else:
+                _finish_call_log(db, room_id, status_map[req.type])
         except Exception as exc:
             logger.warning(f"[CallSignal] call_logs update failed (non-fatal): {exc}")
 
@@ -99,6 +131,35 @@ async def send_signal(room_id: str, req: SignalRequest):
     }).execute()
 
     return {"ok": True}
+
+
+@router.post("/{room_id}/event")
+async def record_call_event(room_id: str, req: CallEventRequest):
+    if req.role not in ROLES:
+        raise HTTPException(status_code=400, detail="role must be 'child' or 'parent'")
+    if req.type not in ("ring", "connected", "ended", "rejected", "missed"):
+        raise HTTPException(status_code=400, detail="invalid call event")
+    db = get_supabase()
+    if req.type == "ring":
+        _start_call_log(db, room_id, req.role)
+    elif req.type == "connected":
+        db.table("call_logs").update({"status": "connected"}).eq("child_device_id", room_id).is_("ended_at", "null").execute()
+    else:
+        _finish_call_log(db, room_id, req.type, req.duration_seconds)
+    return {"ok": True}
+
+
+@router.get("/{room_id}/history")
+async def call_history(room_id: str, limit: int = 50):
+    db = get_supabase()
+    limit = min(max(limit, 1), 100)
+    try:
+        result = (db.table("call_logs").select("id,started_at,ended_at,duration_seconds,status,caller_role")
+                  .eq("child_device_id", room_id).order("started_at", desc=True).limit(limit).execute())
+    except Exception:
+        result = (db.table("call_logs").select("id,started_at,ended_at,duration_seconds,status")
+                  .eq("child_device_id", room_id).order("started_at", desc=True).limit(limit).execute())
+    return {"calls": result.data or []}
 
 
 @router.get("/{room_id}/poll", response_model=PollResponse)

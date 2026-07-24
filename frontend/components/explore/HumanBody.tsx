@@ -1,17 +1,21 @@
 "use client";
+import { useState } from "react";
 import { motion } from "framer-motion";
 
 interface Props { step: number }
 
+// `image` — real anatomy photo/illustration per organ. Drop a file at that
+// path and it replaces the emoji automatically (falls back safely if missing).
 const ORGANS = [
-  { emoji: "🧠", name: "Brain", fact: "Controls everything you do!", color: "#A78BFA", top: "6%", left: "50%" },
-  { emoji: "❤️", name: "Heart", fact: "Pumps blood day and night!", color: "#F87171", top: "34%", left: "42%" },
-  { emoji: "🫁", name: "Lungs", fact: "Breathes in fresh air!", color: "#60A5FA", top: "34%", left: "58%" },
-  { emoji: "💪", name: "Muscles & Bones", fact: "Help you run and jump!", color: "#FBBF24", top: "58%", left: "50%" },
-  { emoji: "👀", name: "Five Senses", fact: "Help you explore the world!", color: "#34D399", top: "14%", left: "50%" },
+  { image: "/explore/body/brain.jpg", emoji: "🧠", name: "Brain", fact: "Controls everything you do!", color: "#A78BFA", top: "6%", left: "50%" },
+  { image: "/explore/body/heart.jpg", emoji: "❤️", name: "Heart", fact: "Pumps blood day and night!", color: "#F87171", top: "34%", left: "42%" },
+  { image: "/explore/body/lungs.jpg", emoji: "🫁", name: "Lungs", fact: "Breathes in fresh air!", color: "#60A5FA", top: "34%", left: "58%" },
+  { image: "/explore/body/muscles-bones.jpg", emoji: "💪", name: "Muscles & Bones", fact: "Help you run and jump!", color: "#FBBF24", top: "58%", left: "50%" },
+  { image: "/explore/body/five-senses.jpg", emoji: "👀", name: "Five Senses", fact: "Help you explore the world!", color: "#34D399", top: "14%", left: "50%" },
 ];
 
 export function HumanBody({ step }: Props) {
+  const [broken, setBroken] = useState<Record<number, boolean>>({});
   const finished = step >= ORGANS.length;
   const shown = Math.min(step, ORGANS.length - 1);
 
@@ -34,9 +38,14 @@ export function HumanBody({ step }: Props) {
               style={{ top: o.top, left: o.left, transform: "translate(-50%, -50%)" }}
               animate={{ opacity: reached ? 1 : 0.12, scale: isActive ? 1.3 : reached ? 1 : 0.7 }}
               transition={{ duration: 0.4 }}>
-              <motion.div className="text-3xl" style={{ filter: reached ? `drop-shadow(0 0 12px ${o.color}90)` : "none" }}
+              <motion.div
+                className="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center text-2xl"
+                style={{ filter: reached ? `drop-shadow(0 0 12px ${o.color}90)` : "none", border: reached ? `1.5px solid ${o.color}90` : "none" }}
                 animate={isActive ? { scale: [1, 1.15, 1] } : {}} transition={{ duration: 1, repeat: Infinity }}>
-                {o.emoji}
+                {!broken[i] ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={o.image} alt={o.name} className="w-full h-full object-cover" onError={() => setBroken(prev => ({ ...prev, [i]: true }))} />
+                ) : o.emoji}
               </motion.div>
             </motion.div>
           );

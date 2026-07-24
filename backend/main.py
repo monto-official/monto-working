@@ -33,6 +33,7 @@ from routes.controls   import router as controls_router
 from routes.pairing    import router as pairing_router
 from routes.auth       import router as auth_router
 from routes.reminders  import router as reminders_router
+from routes.voice_messages import router as voice_messages_router
 from routes.bedtime    import router as bedtime_router
 from routes.usage      import router as usage_router
 from routes.call_signal import router as call_signal_router
@@ -129,6 +130,7 @@ app.include_router(controls_router)
 app.include_router(pairing_router)
 app.include_router(auth_router)
 app.include_router(reminders_router)
+app.include_router(voice_messages_router)
 app.include_router(bedtime_router)
 app.include_router(usage_router)
 app.include_router(call_signal_router)

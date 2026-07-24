@@ -147,6 +147,9 @@ class LLMService:
         # Key pool rotates immediately on quota/auth/server failures.
         self._groq_pool  = GroqClientPool(load_groq_keys(api_key))
         self._groq_model = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
+        self._fast_model = os.getenv("GROQ_FAST_MODEL", "openai/gpt-oss-20b")
+        self._reasoning_model = os.getenv("GROQ_REASONING_MODEL", "openai/gpt-oss-120b")
+        self._nepali_model = os.getenv("GROQ_NEPALI_MODEL", "llama-3.3-70b-versatile")
         self._has_groq   = len(self._groq_pool) > 0
         logger.info("LLM: %d Groq key(s) available", len(self._groq_pool))
         if self.use_local:
@@ -155,7 +158,7 @@ class LLMService:
             self._http = httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=3.0))
             logger.info(f"✅ LLM: GPU Ollama ({self.model}) | Groq fallback: {'yes' if self._has_groq else 'no'}")
         else:
-            logger.info(f"✅ LLM: Groq cloud — {self._groq_model}")
+            logger.info("✅ LLM: Groq routing — fast=%s | reasoning=%s | Nepali=%s", self._fast_model, self._reasoning_model, self._nepali_model)
 
     async def get_response(
         self,
@@ -181,7 +184,12 @@ class LLMService:
 
         # Nepali is the default regardless of detected input language. The
         # model changes language only when the user explicitly requests it.
-        lang_instruction = "\n\n[Default to natural Nepali. Change response language only if the user explicitly requests English, Hindi, or Bhojpuri.]"
+        lang_instruction = (
+            "\n\n[The input is Nepali. Reply in natural, child-friendly Nepali using Devanagari script, "
+            "even when the input transcript is Romanized Nepali. Use another language only when explicitly requested.]"
+            if language == "nepali"
+            else "\n\n[Default to natural Nepali in Devanagari script. Change language only if explicitly requested.]"
+        )
         system = SYSTEM_PROMPT + lang_instruction + facts_prompt
         messages = [{"role": "system", "content": system}]
         messages += (history or [])
@@ -196,9 +204,26 @@ class LLMService:
                     return await self._call_groq(messages)
                 raise
         else:
-            return await self._call_groq(messages)
+            selected_model = self._select_groq_model(transcript, language)
+            logger.info("Groq route [%s] -> %s", language, selected_model)
+            return await self._call_groq(messages, selected_model)
 
-    # ── LOCAL GPU (Ollama) ────────────────────────────────────────────────────
+    def _select_groq_model(self, transcript: str, language: str) -> str:
+        """Route voice turns by task while prioritizing natural Nepali."""
+        text = transcript.lower().strip()
+        complex_markers = (
+            "किन", "कसरी", "व्याख्या", "सम्झाऊ", "गणित", "हिसाब", "समस्या",
+            "homework", "explain", "why", "how", "calculate", "solve", "reason",
+            "compare", "difference", "step by step", "because",
+        )
+        is_complex = len(text) > 180 or text.count("?") > 1 or any(marker in text for marker in complex_markers)
+        if is_complex:
+            return self._reasoning_model
+        if language == "nepali":
+            return self._nepali_model
+        return self._fast_model
+
+    # -- LOCAL GPU (Ollama) ────────────────────────────────────────────────────
 
     async def _call_ollama(self, messages: list):
         from models.schemas import LLMResponse
@@ -235,26 +260,31 @@ class LLMService:
 
     # ── GROQ CLOUD (testing) ──────────────────────────────────────────────────
 
-    async def _call_groq(self, messages: list):
+    async def _call_groq(self, messages: list, selected_model: str | None = None):
         last_error: Exception | None = None
-        for key_index, client in self._groq_pool.candidates():
-            try:
-                completion = await client.chat.completions.create(
-                    model=self._groq_model,
-                    messages=messages,
-                    temperature=0.4,
-                    max_tokens=256,
-                )
-                self._groq_pool.mark_success(key_index)
-                raw = completion.choices[0].message.content.strip()
-                logger.info("Groq LLM succeeded with key slot %d", key_index + 1)
-                return self._parse_llm_output(raw)
-            except Exception as error:
-                last_error = error
-                if not is_retryable_groq_error(error):
-                    raise
-                self._groq_pool.mark_failed(key_index, error)
-                logger.warning("Groq LLM key slot %d unavailable (%s); trying next", key_index + 1, type(error).__name__)
+        requested = selected_model or self._groq_model
+        models = list(dict.fromkeys((requested, self._nepali_model, self._fast_model)))
+        for model in models:
+            for key_index, client in self._groq_pool.candidates():
+                try:
+                    completion = await client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        temperature=0.35,
+                        max_tokens=384,
+                        response_format={"type": "json_object"},
+                    )
+                    self._groq_pool.mark_success(key_index)
+                    raw = completion.choices[0].message.content.strip()
+                    logger.info("Groq LLM [%s] succeeded with key slot %d", model, key_index + 1)
+                    return self._parse_llm_output(raw)
+                except Exception as error:
+                    last_error = error
+                    if not is_retryable_groq_error(error):
+                        logger.warning("Groq model %s rejected request (%s); trying fallback", model, type(error).__name__)
+                        break
+                    self._groq_pool.mark_failed(key_index, error)
+                    logger.warning("Groq LLM key slot %d unavailable (%s); trying next", key_index + 1, type(error).__name__)
         if last_error:
             raise last_error
         raise RuntimeError("No Groq LLM API key is configured")

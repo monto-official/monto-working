@@ -13,6 +13,7 @@ import { SONGS, type Song } from "@/lib/media-content";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 import { sendVoiceQuery, APIError } from "@/lib/api";
 import { useDeviceChannelContext } from "@/components/DeviceChannelProvider";
+import { MiniMonto } from "@/components/MiniMonto";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmt(s: number) {
@@ -50,7 +51,7 @@ export default function SongsPage() {
   const [isPlaying, setIsPlaying]         = useState(false);
   const [progress, setProgress]           = useState(0);
   const [duration, setDuration]           = useState(0);
-  const [shuffle, setShuffle]             = useState(false);
+  const [shuffle, setShuffle]             = useState(true);
   const [repeat, setRepeat]               = useState(false);
   const [volume, setVolume]               = useState(1);
 
@@ -248,7 +249,7 @@ export default function SongsPage() {
   useEffect(() => {
     const trackId = new URLSearchParams(window.location.search).get("track");
     const requestedIndex = trackId ? SONGS.findIndex(s => s.id === trackId) : -1;
-    const initialIndex = requestedIndex >= 0 ? requestedIndex : 0;
+    const initialIndex = requestedIndex >= 0 ? requestedIndex : Math.floor(Math.random() * SONGS.length);
     // Small delay so the audio element is ready after navigation
     const t = setTimeout(() => playSong(initialIndex), 300);
     return () => clearTimeout(t);
@@ -302,16 +303,23 @@ export default function SongsPage() {
     <div className="min-h-dvh flex flex-col bg-black select-none">
 
       {/* ── Header ── */}
-      <header className="flex items-center justify-between px-5 pt-safe pt-5 pb-3">
-        <motion.button onClick={() => router.back()} whileTap={{ scale: 0.85 }}
-          className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
-          <ChevronLeft className="w-5 h-5 text-white" />
-        </motion.button>
+      <header className="flex flex-col items-center gap-2 px-5 pt-safe pt-5 pb-3">
+        <div className="flex items-center gap-2 bg-white/5 rounded-full p-1">
+          <motion.button onClick={() => router.back()} whileTap={{ scale: 0.85 }}
+            title="Back" aria-label="Back"
+            className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
+            <ChevronLeft className="w-5 h-5 text-white" />
+          </motion.button>
+          <motion.button onClick={() => { stopSong(); router.push("/"); }} whileTap={{ scale: 0.85 }}
+            title="Close — stop and go home" aria-label="Close — stop and go home"
+            className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center disabled:opacity-30">
+            <X className="w-5 h-5 text-white" />
+          </motion.button>
+        </div>
         <div className="text-center">
-          <p className="text-white font-bold text-xl">🎵 Songs</p>
+          <p className="text-white font-bold text-base">🎵 Songs</p>
           <p className="text-white/40 text-xs">{SONGS.length} tracks</p>
         </div>
-        <div className="w-10" />
       </header>
 
       {/* ── Now-playing card ── */}
@@ -515,6 +523,7 @@ export default function SongsPage() {
           );
         })}
       </div>
+      <MiniMonto />
     </div>
   );
 }

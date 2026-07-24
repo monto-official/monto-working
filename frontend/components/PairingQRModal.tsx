@@ -11,10 +11,12 @@ interface PairingQRModalProps {
 }
 
 const API_URL = getApiUrl();
+const PAIRING_API_URL = (process.env.NEXT_PUBLIC_PAIRING_API_URL || API_URL).replace(/\/$/, "");
 
 export function PairingQRModal({ onClose }: PairingQRModalProps) {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -25,12 +27,12 @@ export function PairingQRModal({ onClose }: PairingQRModalProps) {
     // only carries the code, not raw connection info.
     (async () => {
       try {
-        const res = await fetch(`${API_URL}/pairing/code`, {
+        const res = await fetch(`${PAIRING_API_URL}/pairing/code`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             child_device_id: getOrCreateDeviceId(),
-            api_url: API_URL,
+            api_url: PAIRING_API_URL,
             turn_url: process.env.NEXT_PUBLIC_TURN_URL || undefined,
             turn_username: process.env.NEXT_PUBLIC_TURN_USERNAME || undefined,
             turn_password: process.env.NEXT_PUBLIC_TURN_PASSWORD || undefined,
@@ -39,9 +41,12 @@ export function PairingQRModal({ onClose }: PairingQRModalProps) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
 
-        const payload = JSON.stringify({ v: 2, code: data.code, api: API_URL });
+        const payload = JSON.stringify({ v: 2, code: data.code, api: PAIRING_API_URL });
         const url = await QRCode.toDataURL(payload, { width: 280, margin: 2 });
-        if (!cancelled) setDataUrl(url);
+        if (!cancelled) {
+          setPairingCode(data.code);
+          setDataUrl(url);
+        }
       } catch {
         if (!cancelled) setError(true);
       }

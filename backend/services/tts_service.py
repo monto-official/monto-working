@@ -91,7 +91,7 @@ class TTSService:
         self._voice_map = {
             "female": os.getenv("TTS_VOICE_FEMALE", "EXAVITQu4vr4xnSDxMaL"),
             "male": os.getenv("TTS_VOICE_MALE", "TxGEqnHWrfWFTfGW9XjX"),
-            "monto": os.getenv("TTS_VOICE_MONTO", os.getenv("ELEVENLABS_VOICE_ID", "Dk3lflqf310KiWVmwB9F")),
+            "monto": os.getenv("TTS_VOICE_MONTO", os.getenv("ELEVENLABS_VOICE_ID", "cgSgspJ2msm6clMCkdW9")),
         }
         self._emotion_settings = {
             "happy": VoiceSettings(stability=0.45, similarity_boost=0.80, style=0.35, use_speaker_boost=True),

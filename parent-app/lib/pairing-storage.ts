@@ -2,6 +2,20 @@ import { getOrCreateParentDeviceId } from "./device-id";
 import { sendFirebaseSignal } from "./firebase-signaling";
 
 const STORAGE_KEY = "monto_pairing";
+const PUBLIC_API_URL = process.env.NEXT_PUBLIC_MONTO_API_URL?.replace(/\/$/, "");
+
+function reachableApiUrl(savedUrl: string): string {
+  if (!PUBLIC_API_URL) return savedUrl;
+  try {
+    const host = new URL(savedUrl).hostname;
+    const isLocal = host === "localhost" || host === "127.0.0.1" ||
+      /^10\./.test(host) || /^192\.168\./.test(host) ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
+    return isLocal ? PUBLIC_API_URL : savedUrl;
+  } catch {
+    return PUBLIC_API_URL;
+  }
+}
 
 export interface PairingData {
   deviceId: string;
@@ -18,7 +32,7 @@ export function loadPairing(): PairingData | null {
     if (!raw) return null;
     const data = JSON.parse(raw);
     if (typeof data?.deviceId !== "string" || typeof data?.apiUrl !== "string") return null;
-    return data;
+    return { ...data, apiUrl: reachableApiUrl(data.apiUrl) };
   } catch {
     return null;
   }
@@ -79,7 +93,8 @@ export async function redeemPairingCode(raw: string): Promise<PairingData> {
     throw new Error("That doesn't look like a Monto pairing code — try again.");
   }
 
-  const res = await fetch(`${obj.api}/pairing/redeem`, {
+  const redeemApiUrl = reachableApiUrl(obj.api);
+  const res = await fetch(`${redeemApiUrl}/pairing/redeem`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -102,6 +117,17 @@ export async function redeemPairingCode(raw: string): Promise<PairingData> {
   };
 }
 
+/** Redeem the short code shown below the child's QR image. */
+export function redeemManualPairingCode(code: string): Promise<PairingData> {
+  const normalized = code.trim().toUpperCase();
+  if (!/^[A-Z0-9]{6}$/.test(normalized)) {
+    throw new Error("Enter the 6-character pairing code shown on the Monto box.");
+  }
+  if (!PUBLIC_API_URL) {
+    throw new Error("The public Monto server is not configured.");
+  }
+  return redeemPairingCode(JSON.stringify({ v: 2, code: normalized, api: PUBLIC_API_URL }));
+}
 /**
  * Best-effort push to the child device over the same `${deviceId}:control`
  * channel `useDeviceChannel`/music remote-control uses, so the child app can

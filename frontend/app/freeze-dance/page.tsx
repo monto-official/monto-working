@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, Music2, Play, RotateCcw, Snowflake, Star, Trophy } from "lucide-react";
+import { ArrowLeft, Music2, Play, RotateCcw, Snowflake, Star, Trophy, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { SONGS } from "@/lib/media-content";
 import { useTTS } from "@/hooks/useTTS";
+import { MiniMonto } from "@/components/MiniMonto";
 import type { Settings } from "@/types";
 
 type Phase = "welcome" | "ready" | "dancing" | "frozen" | "celebrate" | "finished";
@@ -59,8 +60,12 @@ export default function FreezeDancePage() {
     timersRef.current = [];
   }, []);
 
+  const speakingRef = useRef(false);
+  const [speaking, setSpeaking] = useState(false);
   const say = useCallback((text: string, emotion = "excited") => {
-    void speak(text, emotion, TTS_SETTINGS);
+    speakingRef.current = true;
+    setSpeaking(true);
+    void speak(text, emotion, TTS_SETTINGS, undefined, () => { speakingRef.current = false; setSpeaking(false); });
   }, [speak]);
 
   const stopEverything = useCallback(() => {
@@ -102,15 +107,23 @@ export default function FreezeDancePage() {
         setMessage(praise.replace(/^\[[^\]]+\]\s*/, ""));
         say(praise, "happy");
         schedule(() => {
-          if (round + 1 >= LEVELS.length) {
-            setPhase("finished");
-            setMessage("Freeze Dance Champion!");
-            say("[excited]\nFantastic! You are the Freeze Dance Champion!", "excited");
-          } else {
-            setRound(value => value + 1);
-            setPhase("ready");
-            setMessage("Ready for a harder round?");
-          }
+          const proceed = () => {
+            if (round + 1 >= LEVELS.length) {
+              setPhase("finished");
+              setMessage("Freeze Dance Champion!");
+              say("[excited]\nFantastic! You are the Freeze Dance Champion!", "excited");
+            } else {
+              setRound(value => value + 1);
+              setPhase("ready");
+              setMessage("Ready for a harder round?");
+            }
+          };
+          // Wait for the praise line to actually finish before moving on.
+          const wait = () => {
+            if (speakingRef.current) { schedule(wait, 200); return; }
+            proceed();
+          };
+          wait();
         }, 2600);
       }
     };
@@ -170,7 +183,10 @@ export default function FreezeDancePage() {
 
       <div className="relative z-10 mx-auto flex min-h-[100dvh] w-full max-w-3xl flex-col px-5 py-5 sm:px-8">
         <header className="flex items-center justify-between">
-          <button onClick={leave} className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/10" aria-label="Back"><ArrowLeft /></button>
+          <div className="flex items-center gap-2">
+            <button onClick={leave} className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/10" aria-label="Back"><ArrowLeft /></button>
+            <button onClick={leave} className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/10" aria-label="Close"><X /></button>
+          </div>
           <div className="text-center"><p className="text-xs font-bold uppercase tracking-[.28em] text-cyan-200/70">Monto</p><h1 className="font-kids text-xl font-black">Freeze Dance Party</h1></div>
           <div className="flex h-11 items-center gap-1 rounded-full border border-amber-300/20 bg-amber-300/10 px-3 font-black text-amber-200"><Star className="h-4 w-4 fill-current" />{stars}</div>
         </header>
@@ -193,7 +209,6 @@ export default function FreezeDancePage() {
 
               <p className="mt-7 text-xs font-black uppercase tracking-[.3em]" style={{ color: phase === "frozen" ? "#A5F3FC" : level.color }}>{phase === "dancing" ? MOVES[moveIndex] : phase === "frozen" ? "FREEZE!" : level.name}</p>
               <h2 className="mx-auto mt-3 max-w-lg text-2xl font-black leading-tight sm:text-4xl">{message}</h2>
-              {phase === "frozen" && <p className="mt-3 text-sm text-cyan-100/60">Keep your body still. Smiling is allowed!</p>}
             </motion.div>
           </AnimatePresence>
         </section>
@@ -205,9 +220,9 @@ export default function FreezeDancePage() {
           {phase === "frozen" && <div className="h-14 text-center text-sm font-bold text-cyan-100/60">Hold that pose…</div>}
           {phase === "celebrate" && <div className="h-14 text-center font-black text-amber-200">Ice Star earned! ⭐</div>}
           {phase === "finished" && <motion.button whileTap={{ scale: .96 }} onClick={restart} className="flex h-16 w-full items-center justify-center gap-3 rounded-3xl bg-gradient-to-r from-amber-300 to-orange-400 text-lg font-black text-slate-950"><RotateCcw /> Play again</motion.button>}
-          <p className="mt-4 text-center text-[11px] text-white/35">Move safely · Keep space around you · Stop if anything hurts</p>
         </div>
       </div>
+      <MiniMonto speaking={speaking} />
     </main>
   );
 }

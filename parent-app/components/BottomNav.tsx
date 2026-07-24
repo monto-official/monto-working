@@ -1,13 +1,14 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Bell, Phone, Music } from "lucide-react";
+import { Home, Bell, Phone, Music, Voicemail } from "lucide-react";
 
 const items = [
   { href: "/", label: "Home", icon: Home },
   { href: "/reminders", label: "Reminders", icon: Bell },
   { href: "/call", label: "Call", icon: Phone },
   { href: "/music", label: "Music", icon: Music },
+  { href: "/voice", label: "Voice", icon: Voicemail },
 ] as const;
 
 export function BottomNav() {
