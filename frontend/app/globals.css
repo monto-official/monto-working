@@ -169,288 +169,138 @@ body {
 }
 .dust-float { animation: dust-float linear infinite; will-change: transform, opacity; }
 
-/* Monto child home — playful, calm, and deliberately tactile */
+/* ═══════════════════════════════════════════════════════════
+   Monto child home — light, warm, kid-friendly kiosk theme
+   (cream background, red brand accent, flat pastel cards)
+   ═══════════════════════════════════════════════════════════ */
 .monto-home {
-  background:
-    radial-gradient(circle at 50% -10%, rgba(37, 99, 235, .22), transparent 42%),
-    linear-gradient(160deg, #07111f 0%, #081a2e 48%, #10152c 100%);
-  color: white;
-}
-.monto-aurora { position: fixed; border-radius: 999px; filter: blur(90px); pointer-events: none; opacity: .34; }
-.monto-aurora-one { width: 34rem; height: 34rem; background: #0ea5e9; left: -18rem; top: 8rem; }
-.monto-aurora-two { width: 30rem; height: 30rem; background: #7c3aed; right: -16rem; bottom: -8rem; }
-.monto-noise { position: fixed; inset: 0; pointer-events: none; opacity: .16; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.16'/%3E%3C/svg%3E"); }
-.monto-wordmark { text-shadow: 0 3px 0 rgba(14,165,233,.25), 0 0 28px rgba(125,211,252,.28); }
-.monto-icon-button { width: 2.35rem; height: 2.35rem; border-radius: 999px; display: flex; align-items: center; justify-content: center; background: rgba(7,19,35,.64); border: 1px solid rgba(186,230,253,.16); box-shadow: inset 0 1px 0 rgba(255,255,255,.08); transition: .2s ease; }
-.monto-icon-button:hover { background: rgba(14,165,233,.14); border-color: rgba(125,211,252,.35); }
-.monto-stage { background: rgba(4,15,29,.58); border: 1px solid rgba(186,230,253,.13); box-shadow: 0 28px 90px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.06); backdrop-filter: blur(28px); }
-.monto-character-card { position: relative; background: linear-gradient(165deg, rgba(14,165,233,.12), rgba(9,22,42,.72)); border: 1px solid rgba(125,211,252,.16); box-shadow: inset 0 1px 0 rgba(255,255,255,.07); }
-.monto-character-card::before { content: ""; position: absolute; width: 15rem; height: 15rem; top: 4rem; border-radius: 999px; background: radial-gradient(circle, rgba(56,189,248,.2), transparent 66%); }
-.monto-listening-card { background: rgba(3,12,25,.6); border: 1px solid rgba(125,211,252,.12); box-shadow: inset 0 1px 0 rgba(255,255,255,.04); }
-.monto-console { background: linear-gradient(165deg, rgba(12,29,52,.86), rgba(8,18,35,.8)); border: 1px solid rgba(186,230,253,.14); box-shadow: inset 0 1px 0 rgba(255,255,255,.06); }
-.monto-adventure { min-height: 76px; border-radius: 20px; display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; padding: .75rem; font-size: .72rem; font-weight: 900; letter-spacing: .01em; border: 1px solid rgba(255,255,255,.1); box-shadow: inset 0 1px 0 rgba(255,255,255,.15), 0 8px 20px rgba(0,0,0,.12); transition: box-shadow .2s ease; }
-.monto-adventure:hover { box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 12px 28px rgba(0,0,0,.22); }
-.monto-adventure-coral { color: #fff1f2; background: linear-gradient(145deg,#be123c,#fb7185); }
-.monto-adventure-violet { color: #f5f3ff; background: linear-gradient(145deg,#6d28d9,#a78bfa); }
-.monto-adventure-mint { color: #ecfdf5; background: linear-gradient(145deg,#047857,#34d399); }
-.monto-adventure-sun { color: #422006; background: linear-gradient(145deg,#f59e0b,#fde68a); }
-.monto-adventure-sky { color: #eff6ff; background: linear-gradient(145deg,#1d4ed8,#60a5fa); }
-.monto-adventure-plum { color: #faf5ff; background: linear-gradient(145deg,#7c3aed,#c084fc); }
-.monto-greeting { background: linear-gradient(145deg, rgba(14,165,233,.1), rgba(124,58,237,.1)); border: 1px dashed rgba(186,230,253,.18); }
-.monto-talk-button { background: linear-gradient(135deg,#0284c7,#2563eb 55%,#7c3aed); box-shadow: 0 12px 28px rgba(37,99,235,.28), inset 0 1px 0 rgba(255,255,255,.25); }
-@media (max-width: 640px) {
-  .monto-stage { border-radius: 26px; }
-  .monto-character-card { max-height: 390px; }
-  .monto-adventure { min-height: 68px; padding: .65rem; font-size: .65rem; border-radius: 17px; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .monto-aurora, .float, .text-shimmer { animation: none !important; }
+  background: url('/monto-scene-bg.jpg') center 60% / cover no-repeat;
+  color: #1E293B;
 }
 
-/* 3D Monto presentation stage */
-.monto-avatar-podium { position: relative; z-index: 1; isolation: isolate; }
-.monto-avatar-podium::before { content: ""; position: absolute; z-index: -1; inset: 13% 4% 8%; border-radius: 46% 54% 52% 48%; background: radial-gradient(circle at 50% 38%, rgba(103,232,249,.2), rgba(37,99,235,.08) 48%, transparent 72%); filter: blur(6px); }
-.monto-avatar-podium::after { content: ""; position: absolute; left: 17%; right: 17%; bottom: 2%; height: 12%; border-radius: 50%; background: radial-gradient(ellipse, rgba(56,189,248,.2), rgba(2,8,23,.58) 64%, transparent 72%); transform: perspective(90px) rotateX(62deg); z-index: -1; }
-.monto-3d-avatar { transform-origin: 50% 88%; will-change: transform; }
-
-
-/* Raspberry Pi / low-memory rendering path */
-html[data-low-power="true"] .monto-noise,
-html[data-low-power="true"] .monto-aurora { display: none !important; }
-html[data-low-power="true"] .glass,
-html[data-low-power="true"] .monto-stage { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
-html[data-low-power="true"] .monto-stage { background: #08182b; box-shadow: 0 14px 36px rgba(0,0,0,.28); }
-html[data-low-power="true"] .monto-character-card,
-html[data-low-power="true"] .monto-console { background: #0b1d33; }
-html[data-low-power="true"] .monto-3d-avatar img { filter: drop-shadow(0 12px 14px rgba(0,0,0,.28)); }
-html[data-low-power="true"] .monto-character-card::before,
-html[data-low-power="true"] .monto-avatar-podium::before { display: none; }
-
-/* Fluid adventure dashboard: sized by the console, not the viewport.
-   Keeps all six destinations on one clean row on Pi/desktop displays. */
-.monto-adventure-wrap { container-type: inline-size; }
-.monto-adventure-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: .75rem;
-}
-.monto-adventure {
-  min-width: 0;
-  min-height: 92px;
-  padding: .9rem;
-  border-radius: 22px;
-  font-size: .78rem;
-  line-height: 1.15;
-  overflow: hidden;
-  touch-action: manipulation;
-}
-.monto-adventure-icon { width: 1.65rem; height: 1.65rem; flex: none; }
-@container (min-width: 430px) {
-  .monto-adventure-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-.monto-adventure-center { display: none; }
-@container (min-width: 680px) {
-  .monto-adventure-grid {
-    position: relative; isolation: isolate;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    grid-template-rows: repeat(3, 82px);
-    column-gap: 1.2rem; row-gap: .75rem; padding: .35rem 0;
-  }
-  .monto-adventure-grid::before {
-    content: ""; position: absolute; z-index: -1; inset: 1rem 8%;
-    border: 1px solid rgba(125,211,252,.18); border-radius: 50%;
-    background: radial-gradient(circle, rgba(56,189,248,.09), transparent 58%);
-    box-shadow: inset 0 0 34px rgba(56,189,248,.05);
-  }
-  .monto-adventure { min-height: 82px; padding: .8rem 1rem; font-size: .82rem; }
-  .monto-adventure-icon { width: 1.7rem; height: 1.7rem; }
-  .monto-adventure:nth-child(1) { grid-column: 1; grid-row: 1; }
-  .monto-adventure:nth-child(2) { grid-column: 3; grid-row: 1; }
-  .monto-adventure:nth-child(3) { grid-column: 1; grid-row: 2; }
-  .monto-adventure:nth-child(4) { grid-column: 3; grid-row: 2; }
-  .monto-adventure:nth-child(5) { grid-column: 1; grid-row: 3; }
-  .monto-adventure:nth-child(6) { grid-column: 3; grid-row: 3; }
-  .monto-adventure-center {
-    grid-column: 2; grid-row: 2; align-self: center; justify-self: center;
-    display: flex; width: 112px; height: 112px; border-radius: 999px;
-    flex-direction: column; align-items: center; justify-content: center;
-    color: #bae6fd; background: radial-gradient(circle at 35% 28%, #1d4ed8, #111b46 72%);
-    border: 2px solid rgba(125,211,252,.32);
-    box-shadow: 0 0 0 8px rgba(56,189,248,.05), 0 14px 32px rgba(0,0,0,.28);
-    text-transform: uppercase; font-size: .68rem; font-weight: 900; letter-spacing: .12em;
-  }
-  .monto-adventure-center small { margin-top: .1rem; color: rgba(186,230,253,.55); font-size: .48rem; letter-spacing: .18em; }
+.monto-wordmark {
+  color: #fff;
+  text-shadow: 0 2px 6px rgba(0,0,0,.15);
 }
 
-/* Raspberry Pi landscape: preserve usable dashboard height and avoid clipping. */
-@media (min-width: 900px) and (max-height: 760px) {
-  .monto-stage-dashboard { gap: .75rem; padding: .75rem; }
-  .monto-main-console { min-height: 0; padding: 1rem; gap: .75rem; }
-  .monto-character-card { min-height: 0; padding: 1rem; }
-  .monto-adventure { min-height: 88px; }
+/* Red header band behind the brand/nav row */
+.monto-header-band {
+  background: linear-gradient(120deg, #E11D48, #DC2626 60%, #BE123C);
+  box-shadow: 0 6px 24px rgba(190,18,60,.28);
 }
-html[data-low-power="true"] .monto-adventure,
-html[data-low-power="true"] .monto-console {
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  transition: none !important;
-}
-html[data-low-power="true"] .monto-adventure {
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 4px 10px rgba(0,0,0,.14);
-}
-/* Ring / slider view switch */
-.monto-layout-switch {
-  display: inline-flex;
-  padding: 3px;
-  gap: 2px;
-  border-radius: 12px;
-  background: rgba(2,12,27,.72);
-  border: 1px solid rgba(125,211,252,.16);
-}
-.monto-layout-switch button {
-  display: inline-flex;
-  min-height: 30px;
-  align-items: center;
-  gap: .38rem;
-  border-radius: 9px;
-  padding: .35rem .62rem;
-  color: rgba(186,230,253,.48);
-  font-size: .62rem;
-  font-weight: 800;
-  transition: background .18s ease, color .18s ease;
-  touch-action: manipulation;
-}
-.monto-layout-switch button.is-active {
-  color: #e0f2fe;
-  background: linear-gradient(135deg, rgba(14,165,233,.3), rgba(79,70,229,.3));
-  box-shadow: inset 0 0 0 1px rgba(125,211,252,.18);
-}
-.monto-ring-symbol { width: 10px; height: 10px; border: 2px solid currentColor; border-radius: 50%; }
-.monto-slider-symbol { width: 13px; height: 8px; border-top: 2px solid currentColor; border-bottom: 2px solid currentColor; }
 
-.monto-adventure-grid.monto-adventure-slider {
-  display: flex;
-  grid-template-columns: none;
-  grid-template-rows: none;
-  gap: .85rem;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: .45rem .15rem .8rem;
-  scroll-snap-type: x mandatory;
-  scroll-padding-inline: .15rem;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(125,211,252,.35) rgba(255,255,255,.05);
-  -webkit-overflow-scrolling: touch;
-}
-.monto-adventure-slider .monto-adventure {
-  flex: 0 0 clamp(126px, 24%, 170px);
-  min-height: 104px;
-  scroll-snap-align: start;
-  grid-column: auto !important;
-  grid-row: auto !important;
-}
-.monto-adventure-slider .monto-adventure-center,
-.monto-adventure-slider::before { display: none !important; }
-.monto-adventure-slider::-webkit-scrollbar { height: 5px; }
-.monto-adventure-slider::-webkit-scrollbar-track { background: rgba(255,255,255,.05); border-radius: 999px; }
-.monto-adventure-slider::-webkit-scrollbar-thumb { background: rgba(125,211,252,.35); border-radius: 999px; }
-html[data-low-power="true"] .monto-layout-switch button { transition: none; }
-/* Permanent slider affordance */
-.monto-slide-guide {
+/* Reusable light pill (header chips, status pills) */
+.monto-light-pill {
   display: inline-flex;
   align-items: center;
-  gap: .15rem;
   border-radius: 999px;
-  padding: .3rem .55rem .3rem .7rem;
-  color: #bae6fd;
-  background: rgba(14,165,233,.12);
-  border: 1px solid rgba(125,211,252,.18);
-  font-size: .61rem;
-  font-weight: 800;
-  letter-spacing: .04em;
-  white-space: nowrap;
+  background: #fff;
+  border: 1px solid #EAE3D6;
+  box-shadow: 0 2px 10px rgba(30,41,59,.05);
+  transition: box-shadow .2s ease, transform .2s ease;
 }
-.monto-slide-guide svg { animation: monto-slide-nudge 1.15s ease-in-out infinite; }
-@keyframes monto-slide-nudge {
-  0%, 100% { transform: translateX(0); opacity: .6; }
-  50% { transform: translateX(4px); opacity: 1; }
+.monto-light-pill:hover { box-shadow: 0 6px 16px rgba(30,41,59,.09); }
+
+.monto-light-accent { color: #E11D48; }
+.monto-light-muted { color: #94A3B8; }
+
+/* Main card shells — frosted glass so the full-screen scene shows through */
+.monto-light-hero {
+  background: rgba(255,255,255,.8);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  border: 1px solid rgba(255,255,255,.55);
+  box-shadow: 0 24px 60px rgba(30,41,59,.18), inset 0 1px 0 rgba(255,255,255,.7);
 }
-.monto-adventure-slider {
-  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 22px), transparent 100%);
-  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 22px), transparent 100%);
+
+.monto-light-mic { transition: transform .15s ease, box-shadow .2s ease; }
+
+/* Clear "window" onto the full-screen scene behind — Monto stands right in it */
+.monto-light-scene {
+  background: linear-gradient(180deg, rgba(255,255,255,.4) 0%, rgba(255,255,255,0) 32%);
+  border: none;
 }
-@media (prefers-reduced-motion: reduce) {
-  .monto-slide-guide svg { animation: none; }
+
+html[data-low-power="true"] .monto-light-hero {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: rgba(255,255,255,.94);
 }
-/* Additional Raspberry Pi rendering budget */
-.monto-main-console { contain: layout paint; }
-.monto-adventure { contain: layout paint; }
-html[data-low-power="true"] .monto-adventure-slider {
-  mask-image: none;
-  -webkit-mask-image: none;
-  scroll-behavior: auto;
+
+/* Opaque light modal shell — used for pickers/dialogs over a dark backdrop */
+.monto-light-modal {
+  background: linear-gradient(180deg, #FFFFFF 0%, #FFFCF6 100%);
+  border: 1px solid rgba(30,41,59,.06);
+  box-shadow: 0 32px 80px rgba(0,0,0,.35), inset 0 1px 0 #fff;
 }
-html[data-low-power="true"] .monto-slide-guide svg { animation: none !important; }
-html[data-low-power="true"] .monto-adventure:hover { transform: none !important; }
-html[data-low-power="true"] .monto-wordmark { text-shadow: none; }
-html[data-low-power="true"] .monto-avatar-podium::after { filter: none; opacity: .55; }
-html[data-low-power="true"] .monto-3d-avatar,
-html[data-low-power="true"] .monto-3d-avatar * { will-change: auto !important; }
-/* Child-friendly carousel refresh */
-.monto-main-console {
-  background:
-    radial-gradient(circle at 92% 4%, rgba(99,102,241,.12), transparent 28%),
-    radial-gradient(circle at 8% 95%, rgba(14,165,233,.09), transparent 30%),
-    linear-gradient(165deg, rgba(11,31,55,.94), rgba(7,18,36,.92));
+
+.monto-light-response {
+  background: #FFFFFF;
+  border: 1px solid rgba(30,41,59,.06);
+  box-shadow: 0 10px 30px rgba(30,41,59,.06);
 }
-.monto-adventure-slider {
-  mask-image: none !important;
-  -webkit-mask-image: none !important;
-  padding: .55rem .2rem .8rem;
-  gap: 1rem;
-  scrollbar-width: none;
+
+.monto-light-statusbar { border-top: 1px solid rgba(30,41,59,.07); }
+
+/* Volume slider */
+.monto-volume-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: #E2E8F0;
+  outline: none;
 }
-.monto-adventure-slider::-webkit-scrollbar { display: none; }
-.monto-adventure-slider .monto-adventure {
-  flex: 0 0 clamp(152px, 28%, 188px);
-  min-height: 124px;
-  padding: 1rem;
-  border-radius: 26px;
-  scroll-snap-align: start;
-  justify-content: space-between;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.26), 0 12px 22px rgba(0,0,0,.2);
+.monto-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: #E11D48;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(30,41,59,.35);
+  cursor: pointer;
 }
-.monto-adventure-slider .monto-adventure-icon {
-  width: 2.55rem;
-  height: 2.55rem;
-  padding: .52rem;
-  border-radius: 14px;
-  background: rgba(255,255,255,.18);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.24);
+.monto-volume-slider::-moz-range-thumb {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: #E11D48;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(30,41,59,.35);
+  cursor: pointer;
 }
-.monto-adventure-slider .monto-adventure > span {
-  font-family: var(--font-nunito), ui-rounded, sans-serif;
-  font-size: .94rem;
+.monto-volume-slider::-moz-range-progress { background: #E11D48; height: 4px; border-radius: 999px; }
+
+/* Live status pill (Online / Listening / Talking) */
+.monto-live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .4rem .8rem;
+  border-radius: 999px;
+  background: #ECFDF5;
+  border: 1px solid #A7F3D0;
+  color: #047857;
+  font-size: .68rem;
   font-weight: 900;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  align-self: flex-start;
 }
-.monto-adventure-rose { color: #fff1f2; background: linear-gradient(145deg,#e11d48,#fb7185 58%,#fda4af); }
+.monto-live-pill > span { width: .42rem; height: .42rem; border-radius: 50%; background: #10B981; box-shadow: 0 0 0 4px rgba(16,185,129,.15); }
+.monto-live-pill.is-listening { background: #FEF2F2; border-color: #FECACA; color: #DC2626; }
+.monto-live-pill.is-listening > span { background: #EF4444; box-shadow: 0 0 0 4px rgba(239,68,68,.15); animation: pulse 1s infinite; }
+.monto-live-pill.is-speaking { background: #FFFBEB; border-color: #FDE68A; color: #B45309; }
+.monto-live-pill.is-speaking > span { background: #F59E0B; box-shadow: 0 0 0 4px rgba(245,158,11,.15); }
 
-/* Adventure header: title + swipe hint on the left, unified mic/speaker
-   pill on the right — one baseline, no wrap-induced misalignment. */
-.monto-adventure-header { margin-bottom: .7rem; display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
-.monto-adventure-heading { display: flex; align-items: center; gap: .55rem; min-width: 0; }
-.monto-adventure-title { font-size: .68rem; font-weight: 900; letter-spacing: .28em; text-transform: uppercase; color: rgba(186,230,253,.55); white-space: nowrap; }
-
+/* Mic / speaker mute toggle pill */
 .monto-control-pill {
   display: inline-flex;
   align-items: center;
-  flex: none;
   padding: .2rem;
   gap: .2rem;
   border-radius: 999px;
-  background: rgba(2,12,27,.55);
-  border: 1px solid rgba(125,211,252,.15);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+  background: #F1F5F9;
+  border: 1px solid #E2E8F0;
 }
 .monto-control-seg {
   display: grid;
@@ -458,412 +308,108 @@ html[data-low-power="true"] .monto-3d-avatar * { will-change: auto !important; }
   width: 2.15rem;
   height: 2.15rem;
   border-radius: 999px;
-  color: #a7f3d0;
-  background: rgba(52,211,153,.14);
+  color: #059669;
+  background: rgba(16,185,129,.12);
   transition: background .18s ease, color .18s ease;
   touch-action: manipulation;
 }
-.monto-control-seg.is-off { color: #fda4af; background: rgba(244,63,94,.16); }
+.monto-control-seg.is-off { color: #DC2626; background: rgba(220,38,38,.12); }
 .monto-control-seg:active { transform: scale(.94); }
-.monto-control-divider { width: 1px; height: 1.3rem; background: rgba(125,211,252,.15); flex: none; }
+.monto-control-divider { width: 1px; height: 1.3rem; background: #E2E8F0; flex: none; }
 
-/* Slider shell: arrows are pinned to the carousel's own edges instead of
-   living in the header, so nav controls stay visually locked to what
-   they scroll — a small but real alignment fix over the old layout. */
-.monto-slider-shell { position: relative; }
-.monto-slider-arrow {
-  position: absolute;
-  top: 50%;
-  z-index: 5;
-  display: grid;
-  width: 2.15rem;
-  height: 2.15rem;
-  place-items: center;
-  border-radius: 999px;
-  color: #e0f2fe;
-  background: rgba(8,20,38,.78);
-  border: 1px solid rgba(125,211,252,.24);
-  box-shadow: 0 8px 18px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.08);
-  backdrop-filter: blur(6px);
-  touch-action: manipulation;
-  transform: translateY(-50%);
-}
-.monto-slider-arrow:active { background: rgba(56,189,248,.3); }
-.monto-slider-arrow-prev { left: -.2rem; }
-.monto-slider-arrow-next { right: -.2rem; }
-@container (min-width: 480px) {
-  .monto-slider-shell { padding-inline: 1.9rem; }
-  .monto-slider-arrow-prev { left: 0; }
-  .monto-slider-arrow-next { right: 0; }
-}
-@media (max-width: 640px) { .monto-slider-arrow { display: none; } }
-
-.monto-slider-dots { display: flex; align-items: center; justify-content: center; gap: .35rem; margin-top: .55rem; }
-.monto-slider-dot {
-  width: .4rem;
-  height: .4rem;
-  border-radius: 999px;
-  background: rgba(186,230,253,.24);
-  transition: width .2s ease, background .2s ease;
+/* Adventure / feature cards */
+.monto-light-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: .5rem;
+  padding: 1.35rem;
+  border-radius: 24px;
+  text-align: left;
+  min-height: 148px;
+  overflow: hidden;
+  border: 1px solid rgba(30,41,59,.05);
+  box-shadow: 0 6px 16px rgba(30,41,59,.05);
+  transition: transform .15s ease, box-shadow .15s ease;
   touch-action: manipulation;
 }
-.monto-slider-dot.is-active { width: 1.15rem; background: linear-gradient(90deg, #38bdf8, #818cf8); }
-.monto-greeting {
-  background:
-    radial-gradient(circle at 15% 20%, rgba(56,189,248,.13), transparent 28%),
-    linear-gradient(135deg, rgba(30,64,175,.2), rgba(109,40,217,.16));
-  border-color: rgba(125,211,252,.22);
-}
-@media (max-width: 640px) {
-  .monto-adventure-slider .monto-adventure { flex-basis: 138px; min-height: 108px; }
-}
-html[data-low-power="true"] .monto-adventure-slider .monto-adventure {
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 5px 10px rgba(0,0,0,.14);
-}
-/* Polished companion hero */
-.monto-character-card { overflow: hidden; background: radial-gradient(circle at 50% 40%, rgba(14,165,233,.16), transparent 42%), linear-gradient(165deg, rgba(13,38,67,.96), rgba(6,19,38,.92)); border-color: rgba(125,211,252,.2); box-shadow: inset 0 1px 0 rgba(255,255,255,.09), 0 20px 48px rgba(0,0,0,.18); }
-.monto-character-card::before { width: 19rem; height: 19rem; top: 5rem; }
-.monto-character-card::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(120deg, rgba(255,255,255,.045), transparent 28%); }
-.monto-companion-header { position: relative; z-index: 3; display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 1rem; }
-.monto-eyebrow { margin-bottom: .35rem; font-size: .6rem; font-weight: 900; letter-spacing: .28em; text-transform: uppercase; color: rgba(186,230,253,.52); }
-.monto-live-pill { display: inline-flex; align-items: center; gap: .45rem; padding: .48rem .7rem; border-radius: 999px; border: 1px solid rgba(52,211,153,.24); background: rgba(16,185,129,.1); color: #a7f3d0; font-size: .63rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
-.monto-live-pill > span { width: .42rem; height: .42rem; border-radius: 50%; background: #34d399; box-shadow: 0 0 0 4px rgba(52,211,153,.1), 0 0 12px rgba(52,211,153,.65); }
-.monto-live-pill.is-listening { border-color: rgba(251,113,133,.3); background: rgba(244,63,94,.12); color: #fecdd3; }
-.monto-live-pill.is-listening > span { background: #fb7185; box-shadow: 0 0 0 4px rgba(251,113,133,.12), 0 0 14px rgba(251,113,133,.7); animation: pulse 1s infinite; }
-.monto-live-pill.is-speaking { border-color: rgba(250,204,21,.3); background: rgba(250,204,21,.1); color: #fef08a; }
-.monto-live-pill.is-speaking > span { background: #facc15; box-shadow: 0 0 0 4px rgba(250,204,21,.1), 0 0 14px rgba(250,204,21,.65); }
-.monto-avatar-stage { z-index: 2; flex: 1; min-height: 340px; margin: .1rem 0; }
-.monto-companion-footer { position: relative; z-index: 3; display: flex; width: 100%; align-items: center; gap: .75rem; border: 1px solid rgba(186,230,253,.13); border-radius: 20px; padding: .85rem; background: rgba(2,12,27,.5); box-shadow: inset 0 1px 0 rgba(255,255,255,.055); backdrop-filter: blur(14px); }
-.monto-mood-orb { display: grid; flex: 0 0 auto; width: 2.35rem; height: 2.35rem; place-items: center; border-radius: 14px; color: #e0f2fe; background: linear-gradient(145deg,#0284c7,#4f46e5); box-shadow: 0 8px 20px rgba(37,99,235,.25), inset 0 1px 0 rgba(255,255,255,.25); }
-@media (min-width: 900px) and (max-height: 760px) { .monto-avatar-stage { min-height: 250px; } .monto-3d-avatar { max-height: 300px; } }
-@media (max-width: 640px) { .monto-avatar-stage { min-height: 300px; } .monto-3d-avatar { max-width: 330px; } }
-/* Cosmic candy color system */
-.monto-home {
-  background:
-    radial-gradient(circle at 8% 12%, rgba(6,182,212,.24), transparent 30%),
-    radial-gradient(circle at 92% 8%, rgba(236,72,153,.2), transparent 28%),
-    radial-gradient(circle at 72% 92%, rgba(124,58,237,.3), transparent 34%),
-    linear-gradient(145deg, #07152d 0%, #10113b 46%, #1d0d3d 100%);
-}
-.monto-aurora { opacity: .5; filter: blur(105px); }
-.monto-aurora-one { background: linear-gradient(135deg,#22d3ee,#2563eb); }
-.monto-aurora-two { background: linear-gradient(135deg,#f43f5e,#8b5cf6); }
-.monto-wordmark {
-  background: linear-gradient(90deg,#67e8f9 0%,#c4b5fd 35%,#f9a8d4 68%,#fde68a 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  text-shadow: 0 0 30px rgba(167,139,250,.22);
-}
-.monto-icon-button {
-  background: linear-gradient(145deg,rgba(20,35,76,.82),rgba(55,20,85,.68));
-  border-color: rgba(196,181,253,.25);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.14),0 7px 20px rgba(5,8,32,.25);
-}
-.monto-icon-button:hover { background: linear-gradient(145deg,rgba(14,165,233,.28),rgba(168,85,247,.26)); border-color: rgba(103,232,249,.48); transform: translateY(-1px); }
-.monto-stage {
-  background: linear-gradient(145deg,rgba(8,24,56,.72),rgba(37,14,65,.64));
-  border-color: rgba(196,181,253,.22);
-  box-shadow: 0 32px 100px rgba(3,7,30,.45),inset 0 1px 0 rgba(255,255,255,.11),0 0 70px rgba(124,58,237,.08);
-}
-.monto-character-card {
-  background:
-    radial-gradient(circle at 50% 46%,rgba(34,211,238,.26),transparent 35%),
-    radial-gradient(circle at 15% 10%,rgba(249,115,22,.12),transparent 24%),
-    linear-gradient(160deg,rgba(10,55,92,.98),rgba(37,20,79,.96));
-  border-color: rgba(103,232,249,.3);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.14),0 22px 50px rgba(1,8,30,.28),0 0 35px rgba(34,211,238,.08);
-}
-.monto-character-card::before { background: radial-gradient(circle,rgba(103,232,249,.3) 0%,rgba(99,102,241,.12) 46%,transparent 70%); }
-.monto-character-card::after { background: linear-gradient(120deg,rgba(255,255,255,.08),transparent 28%,transparent 72%,rgba(244,114,182,.05)); }
-.monto-eyebrow { color: #a5f3fc; }
-.monto-avatar-stage::before {
+.monto-light-card:hover { box-shadow: 0 14px 30px rgba(30,41,59,.12); }
+.monto-light-card:active { transform: scale(.97); }
+/* Shine sweep on hover — a small polish touch shared by every card */
+.monto-light-card::before {
   content: "";
   position: absolute;
-  inset: 8% 4% 7%;
-  border: 1px solid rgba(103,232,249,.14);
-  border-radius: 44% 56% 48% 52%;
-  background: linear-gradient(145deg,rgba(34,211,238,.07),rgba(168,85,247,.09),rgba(244,114,182,.06));
+  top: -60%; left: -30%;
+  width: 40%; height: 220%;
+  background: linear-gradient(115deg, transparent, rgba(255,255,255,.65), transparent);
+  transform: translateX(-160%) rotate(8deg);
+  pointer-events: none;
 }
-.monto-companion-footer {
-  border-color: rgba(196,181,253,.22);
-  background: linear-gradient(110deg,rgba(6,33,65,.74),rgba(69,23,91,.58));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.09),0 10px 30px rgba(3,7,28,.18);
+.monto-light-card:hover::before { transform: translateX(430%) rotate(8deg); transition: transform .85s cubic-bezier(.2,.7,.3,1); }
+html[data-low-power="true"] .monto-light-card::before { display: none; }
+.monto-light-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 16px;
+  margin-bottom: .2rem;
 }
-.monto-mood-orb { background: linear-gradient(145deg,#06b6d4,#6366f1 54%,#d946ef); box-shadow: 0 8px 24px rgba(99,102,241,.4),inset 0 1px 0 rgba(255,255,255,.3); }
-.monto-main-console {
-  background:
-    radial-gradient(circle at 94% 4%,rgba(244,114,182,.16),transparent 27%),
-    radial-gradient(circle at 8% 96%,rgba(34,211,238,.15),transparent 28%),
-    linear-gradient(155deg,rgba(20,31,76,.95),rgba(35,17,70,.94));
-  border-color: rgba(196,181,253,.22);
+.monto-light-card-title { font-weight: 800; font-size: 1.1rem; color: #1E293B; }
+.monto-light-card-subtitle { font-size: .82rem; font-weight: 700; color: #94A3B8; }
+
+.monto-light-card-coral  { background: #FFE4E9; }
+.monto-light-card-coral  .monto-light-card-icon { background: #FFCBD7; color: #E11D48; }
+.monto-light-card-violet { background: #EDE9FE; }
+.monto-light-card-violet .monto-light-card-icon { background: #DDD6FE; color: #7C3AED; }
+.monto-light-card-mint   { background: #D1FAE5; }
+.monto-light-card-mint   .monto-light-card-icon { background: #A7F3D0; color: #059669; }
+.monto-light-card-sun    { background: #FFEDD5; }
+.monto-light-card-sun    .monto-light-card-icon { background: #FED7AA; color: #EA580C; }
+.monto-light-card-rose   { background: #FCE7F3; }
+.monto-light-card-rose   .monto-light-card-icon { background: #FBCFE8; color: #DB2777; }
+.monto-light-card-sky    { background: #DBEAFE; }
+.monto-light-card-sky    .monto-light-card-icon { background: #BFDBFE; color: #2563EB; }
+.monto-light-card-plum   { background: #E0E7FF; }
+.monto-light-card-plum   .monto-light-card-icon { background: #C7D2FE; color: #4F46E5; }
+.monto-light-card-teal   { background: #CCFBF1; }
+.monto-light-card-teal   .monto-light-card-icon { background: #99F6E4; color: #0D9488; }
+
+/* Real-photo card (e.g. Know Nepal) — image fills the card, label sits on a
+   dark gradient footer for legibility instead of the flat pastel + icon chip. */
+.monto-light-card-photo {
+  background-size: cover;
+  background-position: center;
+  justify-content: flex-end;
+  color: #fff;
 }
-.monto-adventure { border-color: rgba(255,255,255,.18); box-shadow: inset 0 1px 0 rgba(255,255,255,.3),0 12px 28px rgba(2,6,23,.25); }
-.monto-adventure-coral { background: linear-gradient(145deg,#e11d48,#fb7185 58%,#fda4af); }
-.monto-adventure-violet { background: linear-gradient(145deg,#6d28d9,#8b5cf6 56%,#c4b5fd); }
-.monto-adventure-mint { background: linear-gradient(145deg,#047857,#10b981 56%,#6ee7b7); }
-.monto-adventure-sun { background: linear-gradient(145deg,#f59e0b,#fbbf24 56%,#fde68a); }
-.monto-adventure-sky { background: linear-gradient(145deg,#0369a1,#0ea5e9 56%,#67e8f9); }
-.monto-adventure-rose { background: linear-gradient(145deg,#be123c,#f43f5e 54%,#f9a8d4); }
-.monto-adventure-plum { background: linear-gradient(145deg,#6d28d9,#a855f7 56%,#e9d5ff); }
-.monto-adventure:hover { filter: saturate(1.13) brightness(1.06); box-shadow: inset 0 1px 0 rgba(255,255,255,.4),0 17px 34px rgba(2,6,23,.32),0 0 22px rgba(167,139,250,.13); }
-.monto-adventure-slider .monto-adventure-icon { background: linear-gradient(145deg,rgba(255,255,255,.28),rgba(255,255,255,.12)); border: 1px solid rgba(255,255,255,.17); }
-.monto-slide-guide { color: #cffafe; background: linear-gradient(90deg,rgba(6,182,212,.17),rgba(139,92,246,.15)); border-color: rgba(103,232,249,.25); }
-.monto-slider-nav { background: linear-gradient(145deg,rgba(8,47,73,.7),rgba(76,29,149,.5)); border-color: rgba(196,181,253,.22); }
-.monto-greeting { background: radial-gradient(circle at 15% 20%,rgba(34,211,238,.17),transparent 30%),radial-gradient(circle at 88% 80%,rgba(244,114,182,.14),transparent 34%),linear-gradient(135deg,rgba(37,99,235,.2),rgba(126,34,206,.2)); border-color: rgba(196,181,253,.28); }
-@media (max-width:640px) { .monto-character-card { max-height:none; } }
-html[data-low-power="true"] .monto-home { background: linear-gradient(145deg,#081b35,#17143e 52%,#2a1243); }
-html[data-low-power="true"] .monto-character-card { background: linear-gradient(160deg,#0b3656,#29184f); }
-html[data-low-power="true"] .monto-main-console { background: linear-gradient(155deg,#14264f,#281642); }
-/* Reference-inspired Monto kiosk layout */
-@media (min-width: 1024px) {
-  .monto-stage-dashboard {
-    position: relative;
-    grid-template-columns: minmax(360px,.92fr) minmax(430px,1.08fr) !important;
-    min-height: min(720px,calc(100dvh - 112px));
-    padding: 1.1rem 1.1rem 190px !important;
-    gap: 1.25rem !important;
-    overflow: hidden;
-    background:
-      radial-gradient(circle at 25% 38%,rgba(56,189,248,.25),transparent 29%),
-      radial-gradient(circle at 82% 25%,rgba(244,114,182,.16),transparent 25%),
-      linear-gradient(145deg,rgba(13,44,83,.88),rgba(38,20,75,.86));
-  }
-  .monto-stage-dashboard::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    opacity: .32;
-    background-image: radial-gradient(circle,rgba(255,255,255,.55) 0 1.5px,transparent 2px);
-    background-size: 72px 72px;
-    mask-image: linear-gradient(to bottom,#000,transparent 72%);
-  }
-  .monto-stage-dashboard .monto-character-card {
-    overflow: visible;
-    border: 0;
-    background: transparent;
-    box-shadow: none;
-    padding: .8rem 0 0 !important;
-  }
-  .monto-stage-dashboard .monto-character-card::after { display:none; }
-  .monto-stage-dashboard .monto-character-card::before {
-    width: min(36vw,460px);
-    height: min(36vw,460px);
-    top: 3rem;
-    background: radial-gradient(circle,rgba(103,232,249,.3),rgba(99,102,241,.1) 48%,transparent 72%);
-  }
-  .monto-stage-dashboard .monto-avatar-stage { min-height: 390px; margin-top: -.5rem; }
-  .monto-stage-dashboard .monto-3d-avatar { max-width: 430px; }
-  .monto-stage-dashboard .monto-companion-header { padding: 0 .8rem; }
-  .monto-stage-dashboard .monto-companion-footer {
-    width: auto;
-    min-width: 270px;
-    margin-top: -1rem;
-    padding: .72rem 1rem;
-    border-radius: 18px;
-  }
-  .monto-stage-dashboard .monto-main-console {
-    position: static;
-    min-height: 0;
-    padding: 2rem 1.2rem 1rem !important;
-    gap: 1rem;
-    border: 0;
-    background: transparent;
-    box-shadow: none;
-    contain: none;
-  }
-  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap {
-    position: absolute;
-    z-index: 8;
-    left: 1.1rem;
-    right: 1.1rem;
-    bottom: 1rem;
-    padding: .8rem 1rem .9rem;
-    border: 1px solid rgba(255,255,255,.24);
-    border-radius: 28px;
-    background: linear-gradient(110deg,rgba(7,29,64,.92),rgba(52,24,91,.9));
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.13),0 18px 46px rgba(2,6,23,.38);
-    backdrop-filter: blur(24px);
-  }
-  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap > div:first-child { margin-bottom: .45rem; }
-  .monto-stage-dashboard .monto-adventure-slider { justify-content: center; gap: .75rem; padding: .2rem .1rem .4rem; }
-  .monto-stage-dashboard .monto-adventure-slider .monto-adventure {
-    flex: 1 1 0;
-    max-width: 170px;
-    min-width: 112px;
-    min-height: 82px;
-    padding: .72rem .85rem;
-    border-radius: 21px;
-  }
-  .monto-stage-dashboard .monto-adventure-slider .monto-adventure-icon { width:2.2rem;height:2.2rem;padding:.42rem; }
-  .monto-stage-dashboard .monto-adventure-slider .monto-adventure > span { font-size:.8rem; }
-  .monto-stage-dashboard .monto-adventure-wrap > button { margin-top:.35rem; padding-top:.55rem; padding-bottom:.55rem; }
-  .monto-stage-dashboard .monto-main-console > div:nth-child(2) { order:2; }
-  .monto-stage-dashboard .monto-main-console > div:nth-child(3) { order:1; justify-content:flex-start; padding-top:2rem; }
-  .monto-stage-dashboard .monto-greeting {
-    position: relative;
-    max-width: 440px;
-    margin: 0 auto;
-    padding: 2rem 2.2rem;
-    border: 0;
-    border-radius: 34px 34px 34px 10px;
-    background: linear-gradient(145deg,rgba(255,255,255,.98),rgba(239,246,255,.94));
-    box-shadow: 0 22px 60px rgba(2,8,30,.3),inset 0 1px 0 #fff;
-    text-align: left;
-  }
-  .monto-stage-dashboard .monto-greeting::before {
-    content:"";
-    position:absolute;
-    left:-25px;
-    bottom:18px;
-    border-style:solid;
-    border-width:0 30px 24px 0;
-    border-color:transparent rgba(244,248,255,.96) transparent transparent;
-    transform:skewY(-12deg);
-  }
-  .monto-stage-dashboard .monto-greeting svg { margin-left:0;color:#f59e0b; }
-  .monto-stage-dashboard .monto-greeting p:first-of-type { color:#172554;font-size:clamp(1.35rem,2.1vw,2rem);line-height:1.35; }
-  .monto-stage-dashboard .monto-greeting p:last-child { color:#0f766e;font-size:.85rem;font-weight:800; }
-  .monto-stage-dashboard .monto-main-console > div:nth-child(2) {
-    margin: 0 auto;
-    width: min(100%,440px);
-    padding: .7rem 1rem;
-    border:1px solid rgba(255,255,255,.16);
-    border-radius:18px;
-    background:rgba(8,25,57,.45);
-  }
+.monto-light-card-photo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,.72) 100%);
+  pointer-events: none;
 }
-@media (min-width:1024px) and (max-height:700px) {
-  .monto-stage-dashboard { min-height:590px;padding-bottom:166px !important; }
-  .monto-stage-dashboard .monto-avatar-stage { min-height:300px; }
-  .monto-stage-dashboard .monto-3d-avatar { max-width:340px;max-height:355px; }
-  .monto-stage-dashboard .monto-companion-footer { display:none; }
-  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap { bottom:.7rem;padding:.55rem .8rem; }
-  .monto-stage-dashboard .monto-adventure-slider .monto-adventure { min-height:72px; }
+.monto-light-card-photo .monto-light-card-title,
+.monto-light-card-photo .monto-light-card-subtitle { position: relative; z-index: 1; color: #fff; }
+.monto-light-card-photo .monto-light-card-subtitle { color: rgba(255,255,255,.75); }
+
+@media (max-width: 640px) {
+  .monto-light-hero { border-radius: 26px; }
 }
-@media (max-width:1023px) {
-  .monto-stage-dashboard .monto-main-console { display:flex; }
-  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap { order:3; }
-  .monto-stage-dashboard .monto-main-console > div:nth-child(2) { order:2; }
-  .monto-stage-dashboard .monto-main-console > div:nth-child(3) { order:1; }
-}
-/* Large touch-first bottom picker */
-@media (min-width:1024px) {
-  .monto-stage-dashboard { padding-bottom: 150px !important; }
-  .monto-stage-dashboard .monto-character-card { z-index:3; }
-  .monto-stage-dashboard .monto-avatar-stage { min-height:430px;margin-top:-1rem;margin-bottom:-5rem; }
-  .monto-stage-dashboard .monto-3d-avatar { max-width:460px; }
-  .monto-stage-dashboard .monto-companion-footer { display:none; }
-  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap {
-    z-index:12;
-    left:1.25rem;
-    right:1.25rem;
-    bottom:1rem;
-    padding:1rem 1.15rem 1.05rem;
-    border-radius:32px;
-    border-color:rgba(255,255,255,.3);
-    background:linear-gradient(110deg,rgba(6,32,72,.96),rgba(59,25,99,.95));
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 22px 55px rgba(2,6,23,.48),0 0 40px rgba(99,102,241,.12);
-  }
-  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap > div:first-child { margin-bottom:.65rem; }
-  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap > div:first-child > div:first-child > p { font-size:.7rem;letter-spacing:.26em;color:#e0f2fe; }
-  .monto-stage-dashboard .monto-adventure-slider { gap:.9rem;padding:.25rem .1rem .5rem; }
-  .monto-stage-dashboard .monto-adventure-slider .monto-adventure {
-    flex:1 1 0;
-    max-width:190px;
-    min-width:122px;
-    min-height:116px;
-    padding:1rem;
-    border-radius:27px;
-    justify-content:space-between;
-  }
-  .monto-stage-dashboard .monto-adventure-slider .monto-adventure-icon {
-    width:3rem;
-    height:3rem;
-    padding:.58rem;
-    border-radius:16px;
-  }
-  .monto-stage-dashboard .monto-adventure-slider .monto-adventure > span { font-size:1rem;letter-spacing:.01em; }
-  .monto-stage-dashboard .monto-adventure-wrap > button { min-height:44px;margin-top:.45rem;font-size:.9rem;border-radius:16px; }
-}
-@media (min-width:1024px) and (max-height:700px) {
-  .monto-stage-dashboard { padding-bottom:135px !important; }
-  .monto-stage-dashboard .monto-avatar-stage { min-height:330px;margin-bottom:-5rem; }
-  .monto-stage-dashboard .monto-3d-avatar { max-width:385px;max-height:400px; }
-  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap { padding:.75rem .9rem; }
-  .monto-stage-dashboard .monto-adventure-slider .monto-adventure { min-height:94px;padding:.75rem; }
-  .monto-stage-dashboard .monto-adventure-slider .monto-adventure-icon { width:2.55rem;height:2.55rem;padding:.48rem; }
-  .monto-stage-dashboard .monto-adventure-wrap > button { min-height:38px; }
-}
-@media (max-width:1023px) {
-  .monto-adventure-slider .monto-adventure { flex-basis:168px;min-height:124px;padding:1rem;border-radius:26px; }
-  .monto-adventure-slider .monto-adventure-icon { width:2.8rem;height:2.8rem; }
-  .monto-adventure-slider .monto-adventure > span { font-size:.95rem; }
-}
-/* Balanced picker and floating voice CTA */
-@media (min-width:1024px) {
-  .monto-stage-dashboard { padding-bottom:142px !important; }
-  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap {
-    bottom:1rem;
-    padding:1.65rem 1rem .8rem;
-    border-radius:29px;
-  }
-  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap > div:first-child {
-    margin-bottom:.35rem;
-    min-height:24px;
-  }
-  .monto-stage-dashboard .monto-slide-guide { display:none; }
-  .monto-stage-dashboard .monto-adventure-slider { gap:.7rem;padding:.2rem .1rem .35rem; }
-  .monto-stage-dashboard .monto-adventure-slider .monto-adventure {
-    max-width:174px;
-    min-width:112px;
-    min-height:94px;
-    padding:.78rem .85rem;
-    border-radius:23px;
-  }
-  .monto-stage-dashboard .monto-adventure-slider .monto-adventure-icon {
-    width:2.5rem;
-    height:2.5rem;
-    padding:.46rem;
-    border-radius:14px;
-  }
-  .monto-stage-dashboard .monto-adventure-slider .monto-adventure > span { font-size:.86rem; }
-  .monto-stage-dashboard .monto-adventure-wrap > button {
-    position:absolute;
-    z-index:4;
-    top:-25px;
-    left:calc(50% - 96px);
-    width:192px;
-    min-height:50px;
-    margin:0;
-    padding:.7rem 1.1rem;
-    border:2px solid rgba(255,255,255,.28);
-    border-radius:999px;
-    font-size:.9rem;
-    letter-spacing:.01em;
-    box-shadow:0 14px 35px rgba(37,99,235,.42),inset 0 1px 0 rgba(255,255,255,.32);
-  }
-  .monto-stage-dashboard .monto-slider-nav { margin-left:auto; }
-}
-@media (min-width:1024px) and (max-height:700px) {
-  .monto-stage-dashboard { padding-bottom:122px !important; }
-  .monto-stage-dashboard .monto-main-console > .monto-adventure-wrap { padding:1.45rem .75rem .55rem; }
-  .monto-stage-dashboard .monto-adventure-slider .monto-adventure { min-height:78px;padding:.62rem .7rem;border-radius:20px; }
-  .monto-stage-dashboard .monto-adventure-slider .monto-adventure-icon { width:2.2rem;height:2.2rem;padding:.4rem; }
-  .monto-stage-dashboard .monto-adventure-slider .monto-adventure > span { font-size:.76rem; }
-  .monto-stage-dashboard .monto-adventure-wrap > button { top:-22px;min-height:44px;width:180px;left:calc(50% - 90px);font-size:.82rem; }
-}
-@media (max-width:1023px) {
-  .monto-adventure-slider .monto-adventure { flex-basis:148px;min-height:108px;padding:.82rem;border-radius:23px; }
-  .monto-adventure-slider .monto-adventure-icon { width:2.45rem;height:2.45rem;padding:.45rem; }
-  .monto-adventure-slider .monto-adventure > span { font-size:.86rem; }
-  .monto-adventure-wrap > button { min-height:48px;border-radius:999px; }
+@media (prefers-reduced-motion: reduce) {
+  .float, .text-shimmer { animation: none !important; }
 }
 
+/* Raspberry Pi / low-memory rendering path */
+html[data-low-power="true"] .glass { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+html[data-low-power="true"] .monto-light-hero { box-shadow: 0 10px 24px rgba(30,41,59,.08); }
+
 /* ══════════════════════════════════════════════════════════════════════
-   Super-hero magical layer — energy ring, mic power-charge, card shine,
-   comic-burst callouts. Additive on top of the cosmic-candy theme above.
+   Mic power-charge ring, hero energy ring, comic-burst callouts —
+   used by the talk button and the Monto3DAvatar component.
    ══════════════════════════════════════════════════════════════════════ */
 @keyframes hero-ring-spin { to { transform: rotate(360deg); } }
 @keyframes hero-ring-spin-rev { to { transform: rotate(-360deg); } }
@@ -934,23 +480,6 @@ html[data-low-power="true"] .monto-hero-ring { display: none; }
 html[data-low-power="true"] .monto-mic-charge::before,
 html[data-low-power="true"] .monto-mic-charge::after { animation: none; opacity: 0; }
 
-/* Adventure card hero shine-sweep */
-.monto-adventure { position: relative; overflow: hidden; }
-.monto-adventure::before {
-  content: "";
-  position: absolute;
-  top: -60%; left: -30%;
-  width: 40%; height: 220%;
-  background: linear-gradient(115deg, transparent, rgba(255,255,255,.55), transparent);
-  transform: translateX(-160%) rotate(8deg);
-  pointer-events: none;
-}
-.monto-adventure:hover::before {
-  transform: translateX(430%) rotate(8deg);
-  transition: transform .85s cubic-bezier(.2,.7,.3,1);
-}
-html[data-low-power="true"] .monto-adventure::before { display: none; }
-
 /* Comic-style burst callouts ("POW!", "WOW!"...) */
 @keyframes comic-burst-pop {
   0%   { transform: scale(.2) rotate(var(--comic-rot,-8deg)); opacity: 0; }
@@ -970,7 +499,7 @@ html[data-low-power="true"] .monto-adventure::before { display: none; }
   filter: drop-shadow(0 6px 10px rgba(0,0,0,.35));
 }
 
-/* Wordmark heroic glint sweep */
-@keyframes wordmark-glint { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
-.monto-wordmark { background-size: 220% 100%; animation: wordmark-glint 6s ease-in-out infinite; }
-html[data-low-power="true"] .monto-wordmark { animation: none; }
+/* 3D Monto presentation stage */
+.monto-3d-avatar { transform-origin: 50% 88%; will-change: transform; }
+html[data-low-power="true"] .monto-3d-avatar,
+html[data-low-power="true"] .monto-3d-avatar * { will-change: auto !important; }

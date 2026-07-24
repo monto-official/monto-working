@@ -3,15 +3,18 @@ import { motion } from "framer-motion";
 
 interface Props { highlightPlanet?: string }
 
+// Orbit radii are sized to fit inside the animation stage's shorter (height)
+// dimension — the stage is ~288-320px tall, so anything wider than ~130px
+// would clip its top/bottom against the panel's rounded overflow-hidden edge.
 const PLANETS = [
-  { name: "Mercury", r: 52,  size: 6,  color: "#b5b5b5", period: 4,   label: "Mercury — closest to the Sun! ☿" },
-  { name: "Venus",   r: 72,  size: 9,  color: "#e8c97a", period: 7,   label: "Venus — super hot! ♀" },
-  { name: "Earth",   r: 96,  size: 10, color: "#4fa3e0", period: 10,  label: "Earth — our home! 🌍" },
-  { name: "Mars",    r: 122, size: 8,  color: "#c1440e", period: 15,  label: "Mars — the red planet! ♂" },
-  { name: "Jupiter", r: 156, size: 18, color: "#c88b3a", period: 25,  label: "Jupiter — the giant! ♃" },
-  { name: "Saturn",  r: 196, size: 16, color: "#e4d191", period: 35,  label: "Saturn — with rings! ♄" },
-  { name: "Uranus",  r: 232, size: 13, color: "#7de8e8", period: 48,  label: "Uranus — ice giant! ⛢" },
-  { name: "Neptune", r: 262, size: 12, color: "#3f54ba", period: 60,  label: "Neptune — the farthest! ♆" },
+  { name: "Mercury", r: 28,  size: 6,  color: "#b5b5b5", period: 4,   label: "Mercury — closest to the Sun! ☿" },
+  { name: "Venus",   r: 39,  size: 9,  color: "#e8c97a", period: 7,   label: "Venus — super hot! ♀" },
+  { name: "Earth",   r: 51,  size: 10, color: "#4fa3e0", period: 10,  label: "Earth — our home! 🌍" },
+  { name: "Mars",    r: 65,  size: 8,  color: "#c1440e", period: 15,  label: "Mars — the red planet! ♂" },
+  { name: "Jupiter", r: 83,  size: 16, color: "#c88b3a", period: 25,  label: "Jupiter — the giant! ♃" },
+  { name: "Saturn",  r: 104, size: 14, color: "#e4d191", period: 35,  label: "Saturn — with rings! ♄" },
+  { name: "Uranus",  r: 122, size: 11, color: "#7de8e8", period: 48,  label: "Uranus — ice giant! ⛢" },
+  { name: "Neptune", r: 138, size: 10, color: "#3f54ba", period: 60,  label: "Neptune — the farthest! ♆" },
 ];
 
 export function SolarSystem({ highlightPlanet }: Props) {

@@ -75,7 +75,7 @@ export const CATEGORIES: Record<CategoryId, Category> = {
     },
   },
   seaAnimals: {
-    id: "seaAnimals", label: "sea animals", emoji: "🐠",
+    id: "seaAnimals", label: "sea animals", singular: "sea animal", emoji: "🐠",
     words: [
       "shark", "whale", "dolphin", "octopus", "jellyfish", "starfish",
       "seahorse", "crab", "lobster", "squid", "turtle", "clownfish", "stingray",
@@ -88,7 +88,7 @@ export const CATEGORIES: Record<CategoryId, Category> = {
     },
   },
   vegetables: {
-    id: "vegetables", label: "vegetables", emoji: "🥕",
+    id: "vegetables", label: "vegetables", singular: "vegetable", emoji: "🥕",
     words: [
       "carrot", "potato", "onion", "cabbage", "cauliflower", "spinach",
       "brinjal", "eggplant", "pumpkin", "cucumber", "peas", "beans", "radish",
@@ -102,7 +102,7 @@ export const CATEGORIES: Record<CategoryId, Category> = {
     },
   },
   insects: {
-    id: "insects", label: "insects", emoji: "🐝",
+    id: "insects", label: "insects", singular: "insect", emoji: "🐝",
     words: [
       "ant", "bee", "butterfly", "mosquito", "fly", "beetle", "grasshopper",
       "cockroach", "dragonfly", "ladybug", "moth", "cricket", "termite", "wasp",
@@ -114,7 +114,7 @@ export const CATEGORIES: Record<CategoryId, Category> = {
     },
   },
   flowers: {
-    id: "flowers", label: "flowers", emoji: "🌸",
+    id: "flowers", label: "flowers", singular: "flower", emoji: "🌸",
     words: [
       "rose", "lily", "sunflower", "tulip", "daisy", "orchid", "jasmine",
       "marigold", "lotus", "hibiscus", "daffodil", "carnation", "lavender",
@@ -122,7 +122,7 @@ export const CATEGORIES: Record<CategoryId, Category> = {
     ],
   },
   countries: {
-    id: "countries", label: "countries", emoji: "🌍",
+    id: "countries", label: "countries", singular: "country", emoji: "🌍",
     words: [
       "india", "nepal", "usa", "america", "china", "japan", "france", "germany",
       "brazil", "canada", "australia", "russia", "italy", "spain", "mexico",
@@ -132,7 +132,7 @@ export const CATEGORIES: Record<CategoryId, Category> = {
     ],
   },
   bodyParts: {
-    id: "bodyParts", label: "body parts", emoji: "🖐️",
+    id: "bodyParts", label: "body parts", singular: "body part", emoji: "🖐️",
     words: [
       "head", "hand", "leg", "arm", "eye", "ear", "nose", "mouth", "foot",
       "finger", "knee", "shoulder", "elbow", "chest", "back", "hair", "teeth",
@@ -141,7 +141,7 @@ export const CATEGORIES: Record<CategoryId, Category> = {
     ],
   },
   professions: {
-    id: "professions", label: "professions", emoji: "👩‍⚕️",
+    id: "professions", label: "professions", singular: "profession", emoji: "👩‍⚕️",
     words: [
       "doctor", "teacher", "engineer", "police", "farmer", "pilot", "nurse",
       "chef", "lawyer", "singer", "dancer", "driver", "scientist", "firefighter",

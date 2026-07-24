@@ -173,7 +173,7 @@ export function useWebRTCCall({
       // When a TURN server is configured, skip host/srflx candidates
       // entirely and go straight through the relay â€” on a network with
       // AP/client isolation, direct P2P candidates would only ever fail.
-      iceTransportPolicy: "all",
+      iceTransportPolicy: hasTurn ? "relay" : "all",
     });
     pcRef.current = pc;
 

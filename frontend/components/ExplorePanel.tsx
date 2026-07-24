@@ -250,36 +250,32 @@ export function ExplorePanel({ scene, transcript, onClose, onNarrate, isSpeaking
         exit={{ opacity: 0 }}
       >
         {/* Backdrop */}
-        <motion.div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+        <motion.div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose} />
 
         {/* Panel */}
         <motion.div
-          className="relative z-10 w-full max-w-2xl rounded-3xl overflow-hidden"
-          style={{
-            background: "linear-gradient(135deg, rgba(15,15,30,0.97) 0%, rgba(20,10,40,0.97) 100%)",
-            border: "1px solid rgba(255,255,255,0.12)",
-            boxShadow: "0 0 80px rgba(99,102,241,0.3), 0 32px 64px rgba(0,0,0,0.6)",
-            maxHeight: "90vh",
-          }}
+          className="monto-light-modal relative z-10 w-full max-w-2xl rounded-3xl overflow-hidden"
+          style={{ maxHeight: "90vh" }}
           initial={{ y: 80, scale: 0.9, opacity: 0 }}
           animate={{ y: 0, scale: 1, opacity: 1 }}
           exit={{ y: 60, scale: 0.92, opacity: 0 }}
           transition={{ type: "spring", stiffness: 280, damping: 26 }}
         >
           {/* Header */}
-          <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
             <div className="flex items-center gap-3">
-              <div className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
-              <span className="text-white font-bold text-base">{SCENE_TITLES[scene]}</span>
-              <span className="text-xs text-white/40 font-mono">{step + 1}/{totalSteps}</span>
+              <div className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+              <span className="text-slate-800 font-black text-base">{SCENE_TITLES[scene]}</span>
+              <span className="text-xs text-slate-400 font-mono">{step + 1}/{totalSteps}</span>
             </div>
-            <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors">
-              <X className="w-4 h-4 text-white/70" />
+            <button onClick={onClose} className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors">
+              <X className="w-4 h-4 text-slate-500" />
             </button>
           </div>
 
-          {/* Animation area */}
-          <div className="relative h-72 sm:h-80 bg-black/30">
+          {/* Animation area — kept dark, like a little theater screen, so the
+              colorful scene graphics (planets, glows, creatures) stay vivid */}
+          <div className="relative h-72 sm:h-80 bg-slate-900 mx-3 mt-3 rounded-2xl overflow-hidden">
             {scene === "solar-system"   && <SolarSystem highlightPlanet={currentStep?.highlight} />}
             {scene === "photosynthesis" && <Photosynthesis step={animStep} />}
             {scene === "animal-life"    && <AnimalLife animal={animalName} step={animStep} />}
@@ -290,33 +286,32 @@ export function ExplorePanel({ scene, transcript, onClose, onNarrate, isSpeaking
             {scene === "know-nepal"     && <NepalWorld step={animStep} />}
 
             {/* Explore mode badge */}
-            <div className="absolute top-3 left-3 px-2 py-1 rounded-lg text-xs font-semibold" style={{ background: "rgba(99,102,241,0.3)", border: "1px solid rgba(99,102,241,0.4)", color: "#a5b4fc" }}>
+            <div className="absolute top-3 left-3 px-2 py-1 rounded-lg text-xs font-semibold" style={{ background: "rgba(225,29,72,0.25)", border: "1px solid rgba(225,29,72,0.4)", color: "#fda4af" }}>
               🔭 Explore Mode
             </div>
           </div>
 
           {/* Narration card */}
-          <div className="px-5 py-4 border-t border-white/10">
+          <div className="px-5 py-4">
             <AnimatePresence mode="wait">
               <motion.div
                 key={step}
-                className="flex items-start gap-3 p-3 rounded-2xl"
-                style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)" }}
+                className="flex items-start gap-3 p-3 rounded-2xl bg-rose-50 border border-rose-100"
                 initial={{ opacity: 0, x: 16 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -16 }}
                 transition={{ duration: 0.3 }}
               >
-                <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: "linear-gradient(135deg, #818CF8, #6366F1)" }}>
+                <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: "linear-gradient(135deg, #FB7185, #E11D48)" }}>
                   <span className="text-white text-xs font-bold">M</span>
                 </div>
-                <p className="text-white text-sm leading-relaxed font-medium flex-1">
+                <p className="text-slate-700 text-sm leading-relaxed font-medium flex-1">
                   {currentStep?.narration ?? "Tap ▶ Start to begin the lesson! 🚀"}
                 </p>
                 {isSpeaking && (
                   <div className="flex items-center gap-0.5 shrink-0 mt-1">
                     {[1,2,3,2,1].map((h, i) => (
-                      <motion.div key={i} className="w-1 rounded-full bg-indigo-400"
+                      <motion.div key={i} className="w-1 rounded-full bg-rose-400"
                         animate={{ height: [h * 3, h * 8, h * 3] }}
                         transition={{ duration: 0.4, delay: i * 0.08, repeat: Infinity }} />
                     ))}
@@ -330,9 +325,8 @@ export function ExplorePanel({ scene, transcript, onClose, onNarrate, isSpeaking
           <div className="px-5 pb-5 flex items-center gap-3">
             {/* Prev */}
             <button onClick={handlePrev} disabled={step === 0}
-              className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all disabled:opacity-30"
-              style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)" }}>
-              <ChevronLeft className="w-4 h-4 text-white" />
+              className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all disabled:opacity-30 bg-slate-100 hover:bg-slate-200 border border-slate-200">
+              <ChevronLeft className="w-4 h-4 text-slate-600" />
             </button>
 
             {/* Play/Pause */}
@@ -340,7 +334,7 @@ export function ExplorePanel({ scene, transcript, onClose, onNarrate, isSpeaking
               <motion.button
                 onClick={startLesson}
                 className="flex-1 h-10 rounded-2xl flex items-center justify-center gap-2 font-semibold text-sm text-white transition-all"
-                style={{ background: "linear-gradient(135deg, #6366F1, #8B5CF6)", boxShadow: "0 0 24px rgba(99,102,241,0.4)" }}
+                style={{ background: "linear-gradient(135deg, #FB7185, #E11D48)", boxShadow: "0 6px 18px rgba(225,29,72,0.35)" }}
                 whileTap={{ scale: 0.96 }}
               >
                 ▶ {step === 0 ? "Start" : "Resume"}
@@ -348,8 +342,7 @@ export function ExplorePanel({ scene, transcript, onClose, onNarrate, isSpeaking
             ) : (
               <motion.button
                 onClick={() => setIsPlaying(false)}
-                className="flex-1 h-10 rounded-2xl flex items-center justify-center gap-2 font-semibold text-sm text-white/80 transition-all"
-                style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)" }}
+                className="flex-1 h-10 rounded-2xl flex items-center justify-center gap-2 font-semibold text-sm text-slate-600 transition-all bg-slate-100 hover:bg-slate-200 border border-slate-200"
                 whileTap={{ scale: 0.96 }}
               >
                 ⏸ Pause
@@ -358,17 +351,16 @@ export function ExplorePanel({ scene, transcript, onClose, onNarrate, isSpeaking
 
             {/* Next */}
             <button onClick={handleNext} disabled={!scene || step >= SCRIPTS[scene](transcript).length - 1}
-              className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all disabled:opacity-30"
-              style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)" }}>
-              <ChevronRight className="w-4 h-4 text-white" />
+              className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all disabled:opacity-30 bg-slate-100 hover:bg-slate-200 border border-slate-200">
+              <ChevronRight className="w-4 h-4 text-slate-600" />
             </button>
           </div>
 
           {/* Progress bar */}
-          <div className="h-1 bg-white/10">
+          <div className="h-1 bg-slate-100">
             <motion.div
               className="h-full rounded-full"
-              style={{ background: "linear-gradient(90deg, #6366F1, #8B5CF6)" }}
+              style={{ background: "linear-gradient(90deg, #FB7185, #E11D48)" }}
               animate={{ width: `${totalSteps > 0 ? ((step + 1) / totalSteps) * 100 : 0}%` }}
               transition={{ duration: 0.4 }}
             />

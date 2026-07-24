@@ -23,14 +23,14 @@ export function StoriesScreen({ onClose }: StoriesScreenProps) {
 
   const readStory = useCallback((story: Story) => {
     stopReading();
-    const words = story.url.split(" ");
+    const words = story.title.split(" ");
     wordsRef.current = words;
     setActiveStory(story);
     setWordIndex(0);
 
     if (!window.speechSynthesis) return;
 
-    const utter = new SpeechSynthesisUtterance(story.url);
+    const utter = new SpeechSynthesisUtterance(story.title);
     utter.rate  = 0.85;
     utter.pitch = 1.1;
     utter.lang  = "en-US";
@@ -44,7 +44,7 @@ export function StoriesScreen({ onClose }: StoriesScreenProps) {
 
     utter.onboundary = (e) => {
       if (e.name === "word") {
-        const idx = story.url.slice(0, e.charIndex).split(" ").length - 1;
+        const idx = story.title.slice(0, e.charIndex).split(" ").length - 1;
         setWordIndex(Math.max(0, idx));
       }
     };
@@ -68,7 +68,7 @@ export function StoriesScreen({ onClose }: StoriesScreenProps) {
 
   useEffect(() => () => { window.speechSynthesis?.cancel(); }, []);
 
-  const words = activeStory ? activeStory.url.split(" ") : [];
+  const words = activeStory ? activeStory.title.split(" ") : [];
 
   return (
     <motion.div
@@ -106,7 +106,7 @@ export function StoriesScreen({ onClose }: StoriesScreenProps) {
               </motion.div>
               <div className="flex-1 min-w-0">
                 <p className="text-white font-semibold text-sm">{activeStory.title}</p>
-                <p className="text-white/50 text-xs">{activeStory.description}</p>
+                <p className="text-white/50 text-xs">{activeStory.lang === "ne" ? "Nepali story" : activeStory.lang === "hi" ? "Hindi story" : "English story"}</p>
               </div>
             </div>
 
@@ -180,10 +180,10 @@ export function StoriesScreen({ onClose }: StoriesScreenProps) {
                       </div>
                     )}
                   </div>
-                  <p className="text-white/40 text-xs leading-snug">{story.description}</p>
+                  <p className="text-white/40 text-xs leading-snug">{story.lang === "ne" ? "Nepali audio story" : story.lang === "hi" ? "Hindi audio story" : "English audio story"}</p>
                   <div className="flex items-center gap-3 mt-2">
                     <span className="text-white/30 text-xs flex items-center gap-1">
-                      <BookOpen className="w-3 h-3" /> {story.duration}
+                      <BookOpen className="w-3 h-3" /> Audio story
                     </span>
                     {active
                       ? <span className="text-xs font-semibold" style={{ color:story.color }}>

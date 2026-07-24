@@ -2,8 +2,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Volume2, VolumeX, Mic, MicOff, Sparkles, MessageCircle, X, ChevronLeft, ChevronRight, QrCode, Settings as SettingsIcon, CheckCircle2, Music2, BookOpen, Dumbbell, Compass, Snowflake, Gamepad2, HeartHandshake, Voicemail } from "lucide-react";
+import { Volume2, VolumeX, Mic, MicOff, Sparkles, MessageCircle, X, Settings as SettingsIcon, CheckCircle2, Music2, BookOpen, Dumbbell, Compass, Gamepad2, HeartHandshake, Voicemail, User, Clock } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
+import { RocketFlyby } from "@/components/RocketFlyby";
 import { HangingAvatar } from "@/components/HangingAvatar";
 import { CallScreen } from "@/components/CallScreen";
 import { SettingsModal } from "@/components/SettingsModal";
@@ -61,6 +62,38 @@ const EMOTION_CONFIG = {
   talking:   { color: "#818CF8", glow: "#6366F1", bg: "#1E1B4B", emojis: ["🔊","💬","✨"] },
 } as const;
 
+// ── Insult detection — English + Hindi/Nepali (Devanagari) ─────────────────────
+// If the child says something unkind to Monto, he reacts sad/crying rather than
+// treating it like any other query — regardless of what emotion the backend picks.
+const INSULT_PATTERNS = [
+  /\byou\s*(?:'?re|\s+are)\s+(?:so\s+)?(?:bad|stupid|dumb|ugly|useless|annoying|horrible|terrible|the\s+worst)\b/i,
+  /\bi\s+hate\s+you\b/i,
+  /\byou\s+suck\b/i,
+  /\bshut\s+up\b/i,
+  /\byou\s*(?:'?re|\s+are)\s+not\s+(?:good|nice|smart)\b/i,
+  /(?:तुम|तू|तुझे|आप)\s*(?:बुरे|बुरी|बुरा|खराब|बेकार|गंदे|गंदा|बेवकूफ|मूर्ख)/,
+  /नफरत/,
+  /चुप\s*रहो/,
+];
+function detectsInsult(text: string): boolean {
+  return INSULT_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+// ── Explore topic picker — cards. Only "Know Nepal" has real bundled photos
+// (frontend/public/explore/nepal); the rest use a themed icon chip since no
+// photo assets exist for them yet in the project.
+const EXPLORE_TOPICS = [
+  { scene: "solar-system" as const, label: "Solar System", subtitle: "Planets & Space", emoji: "🪐", tone: "violet", transcript: "solar system planets" },
+  { scene: "photosynthesis" as const, label: "Plants & Food", subtitle: "How They Grow", emoji: "🌿", tone: "mint", transcript: "how plants make food" },
+  { scene: "animal-life" as const, label: "Animal Life", subtitle: "Life Cycles", emoji: "🦋", tone: "coral", transcript: "animal life cycle butterfly" },
+  { scene: "water-cycle" as const, label: "Water Cycle", subtitle: "Rain & Rivers", emoji: "💧", tone: "sky", transcript: "water cycle rain" },
+  { scene: "dinosaurs" as const, label: "Dinosaurs", subtitle: "Prehistoric World", emoji: "🦖", tone: "sun", transcript: "dinosaurs" },
+  { scene: "ocean-life" as const, label: "Ocean Life", subtitle: "Under the Sea", emoji: "🐋", tone: "teal", transcript: "ocean sea creatures" },
+  { scene: "human-body" as const, label: "Your Body", subtitle: "How You Work", emoji: "🧠", tone: "rose", transcript: "human body" },
+  { scene: "know-nepal" as const, label: "Know Nepal", subtitle: "Culture & History", photo: "/explore/nepal/everest.jpg", transcript: "know nepal history culture tradition geography wildlife" },
+];
+
+
 const GREETING_MESSAGES = [
   "Hi! I'm Monto, your AI friend! 🌟",
   "Ask me anything! I love chatting! 😊",
@@ -116,6 +149,17 @@ export default function Home() {
   const [recordingState, setRS]       = useState<RecordingState>("idle");
   const [apiError, setApiError]       = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking]   = useState(false);
+  const [replayingId, setReplayingId] = useState<string | null>(null);
+  const [volume, setVolumeState]      = useState(0.85);
+  const [now, setNow]                 = useState<Date | null>(null);
+  const [idleFlying, setIdleFlying]   = useState(false);
+  const lastActivityRef               = useRef(Date.now());
+
+  useEffect(() => {
+    setNow(new Date());
+    const timer = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
   const [online, setOnline]           = useState<boolean | null>(null);
   const [autoSpeak, setAutoSpeak]     = useState(true);
   const [micMuted, setMicMuted]       = useState(false);
@@ -187,14 +231,18 @@ export default function Home() {
   const voiceNoteAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const busyRef          = useRef(false);
-  const adventureSliderRef = useRef<HTMLDivElement | null>(null);
   const ringtoneRef       = useRef<HTMLAudioElement | null>(null);
   const silenceTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasSpokenRef     = useRef(false);
   const recordingStateRef = useRef<RecordingState>("idle");
   const router           = useRouter();
   const recorder = useAudioRecorder();
-  const { speak, cancel: cancelTTS } = useTTS();
+  const { speak, cancel: cancelTTS, setVolume: setTTSVolume } = useTTS();
+
+  const handleVolumeChange = useCallback((v: number) => {
+    setVolumeState(v);
+    setTTSVolume(v);
+  }, [setTTSVolume]);
   const conversation = useConversation();
   const settings: Settings = { language: lang, voice: "female", character, autoSpeak, darkMode: true };
   const controlDocument = useAppControls();
@@ -343,7 +391,10 @@ export default function Home() {
       const result = await sendVoiceQuery(blob);
       setTranscript(result.transcript);
       setResponse(result);
-      setEmotion(result.emotion as Emotion);
+      // If the child said something unkind, Monto reacts sad/crying no matter
+      // what emotion the backend assigned to its reply.
+      const finalEmotion: Emotion = detectsInsult(result.transcript) ? "sad" : (result.emotion as Emotion);
+      setEmotion(finalEmotion);
       conversation.addUserMessage(result.transcript);
       conversation.addAssistantMessage(result);
       setEmojiBurst(b => b + 1);
@@ -380,7 +431,7 @@ export default function Home() {
         busyRef.current = false;
         // Also speak the first narration via Monto
         if (autoSpeak && result.response) {
-          speak(result.response, result.emotion, settings, () => {}, () => { setIsSpeaking(false); setRS("idle"); });
+          speak(result.response, finalEmotion, settings, () => {}, () => { setIsSpeaking(false); setRS("idle"); });
         }
         return;
       }
@@ -388,9 +439,9 @@ export default function Home() {
       if (autoSpeak && result.response) {
         setRS("speaking");
         setIsSpeaking(true);
-        speak(result.response, result.emotion, settings,
+        speak(result.response, finalEmotion, settings,
           () => setIsSpeaking(true),
-          () => { setIsSpeaking(false); setEmotion(result.emotion as Emotion); setRS("idle"); }
+          () => { setIsSpeaking(false); setEmotion(finalEmotion); setRS("idle"); }
         );
       } else {
         setRS("idle");
@@ -498,39 +549,47 @@ export default function Home() {
   const isRec    = recordingState === "recording";
   const isProc   = recordingState === "processing" || recordingState === "requesting";
 
-  // ── Adventure slider ─────────────────────────────────────────────────────
-  const adventureItems = [
-    { label: "Music", icon: Music2, route: "/songs", tone: "coral", enabled: appControls?.songs_enabled !== false },
-    { label: "Stories", icon: BookOpen, route: "/stories", tone: "violet", enabled: appControls?.stories_enabled !== false },
-    { label: "Exercise", icon: Dumbbell, route: "/exercise", tone: "mint", enabled: appControls?.yoga_enabled !== false },
-    { label: "Games", icon: Gamepad2, route: "/games", tone: "sun", enabled: true },
-    { label: "Moral Game", icon: HeartHandshake, route: "/moral-game", tone: "rose", enabled: true },
-    { label: "Explore", icon: Compass, action: () => setShowExplorePicker(true), tone: "sky", enabled: true },
-    { label: "Voice", icon: Voicemail, route: "/voice-messages", tone: "plum", enabled: true },
-  ].filter(item => item.enabled);
+  // ── Idle "rocket flyby" easter egg ───────────────────────────────────────
+  // After a stretch of no activity, Monto hops on a rocket and flies off —
+  // purely decorative, plays once then waits for the next idle stretch.
+  const busyNow = isRec || isProc || isSpeaking || showChat || !!calling || !!exploreScene || showSettings || showPairing || showExplorePicker;
+  useEffect(() => {
+    if (busyNow) { lastActivityRef.current = Date.now(); setIdleFlying(false); }
+  }, [busyNow]);
 
-  const [activeAdventure, setActiveAdventure] = useState(0);
-
-  const handleSliderScroll = useCallback(() => {
-    const el = adventureSliderRef.current;
-    if (!el || !el.children.length) return;
-    const center = el.scrollLeft + el.clientWidth / 2;
-    let closest = 0;
-    let minDist = Infinity;
-    Array.from(el.children).forEach((child, i) => {
-      const node = child as HTMLElement;
-      const dist = Math.abs(node.offsetLeft + node.offsetWidth / 2 - center);
-      if (dist < minDist) { minDist = dist; closest = i; }
-    });
-    setActiveAdventure(closest);
+  useEffect(() => {
+    const mark = () => { lastActivityRef.current = Date.now(); };
+    window.addEventListener("pointerdown", mark);
+    window.addEventListener("keydown", mark);
+    return () => {
+      window.removeEventListener("pointerdown", mark);
+      window.removeEventListener("keydown", mark);
+    };
   }, []);
 
-  const scrollToAdventure = useCallback((index: number) => {
-    const el = adventureSliderRef.current;
-    const child = el?.children[index] as HTMLElement | undefined;
-    if (!el || !child) return;
-    el.scrollTo({ left: child.offsetLeft - 8, behavior: lowPower ? "auto" : "smooth" });
-  }, [lowPower]);
+  useEffect(() => {
+    const IDLE_THRESHOLD_MS = 22_000;
+    const FLIGHT_DURATION_MS = 4_300;
+    const interval = setInterval(() => {
+      if (busyNow || idleFlying) return;
+      if (Date.now() - lastActivityRef.current > IDLE_THRESHOLD_MS) {
+        setIdleFlying(true);
+        lastActivityRef.current = Date.now();
+        setTimeout(() => setIdleFlying(false), FLIGHT_DURATION_MS);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [busyNow, idleFlying]);
+
+  // ── Adventure slider ─────────────────────────────────────────────────────
+  const adventureItems = [
+    { label: "Music", icon: Music2, route: "/songs", tone: "coral", subtitle: "Songs & Rhymes", enabled: appControls?.songs_enabled !== false },
+    { label: "Stories", icon: BookOpen, route: "/stories", tone: "violet", subtitle: "Listen & Learn", enabled: appControls?.stories_enabled !== false },
+    { label: "Exercise", icon: Dumbbell, route: "/exercise", tone: "mint", subtitle: "Move & Play", enabled: appControls?.yoga_enabled !== false },
+    { label: "Games", icon: Gamepad2, route: "/games", tone: "sun", subtitle: "Fun & Play", enabled: true },
+    { label: "Moral Game", icon: HeartHandshake, route: "/moral-game", tone: "rose", subtitle: "Values & Fun", enabled: true },
+    { label: "Explore", icon: Compass, action: () => setShowExplorePicker(true), tone: "sky", subtitle: "Discover More", enabled: true },
+  ].filter(item => item.enabled);
 
   // Status text
   const statusText = useMemo(() => {
@@ -545,9 +604,6 @@ export default function Home() {
   return (
     <div className="monto-home min-h-dvh flex flex-col relative overflow-hidden select-none">
 
-      <div className="monto-aurora monto-aurora-one" aria-hidden="true" />
-      <div className="monto-aurora monto-aurora-two" aria-hidden="true" />
-      <div className="monto-noise" aria-hidden="true" />
       {!lowPower && <EmojiBurst emotion={emotion} trigger={emojiBurst} />}
 
       {/* ── Spider web overlay ───────────────────────────────────────────── */}
@@ -579,36 +635,22 @@ export default function Home() {
             className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-4"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
           >
-            <motion.div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowExplorePicker(false)} />
+            <motion.div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowExplorePicker(false)} />
             <motion.div
-              className="relative z-10 w-full max-w-md rounded-3xl overflow-hidden p-5"
-              style={{
-                background: "linear-gradient(135deg, rgba(15,15,30,0.97) 0%, rgba(20,10,40,0.97) 100%)",
-                border: "1px solid rgba(255,255,255,0.12)",
-                boxShadow: "0 0 80px rgba(99,102,241,0.3), 0 32px 64px rgba(0,0,0,0.6)",
-              }}
+              className="monto-light-modal relative z-10 w-full max-w-lg rounded-3xl overflow-hidden p-5 sm:p-6"
               initial={{ y: 40, scale: 0.94, opacity: 0 }}
               animate={{ y: 0, scale: 1, opacity: 1 }}
               exit={{ y: 30, scale: 0.96, opacity: 0 }}
               transition={{ type: "spring", stiffness: 280, damping: 26 }}
             >
               <div className="flex items-center justify-between mb-4">
-                <span className="text-white font-bold text-base">🔭 Pick something to explore</span>
-                <button onClick={() => setShowExplorePicker(false)} className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors">
-                  <X className="w-4 h-4 text-white/70" />
+                <span className="text-slate-800 font-black text-lg flex items-center gap-2">🔭 Pick something to explore</span>
+                <button onClick={() => setShowExplorePicker(false)} className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors">
+                  <X className="w-4 h-4 text-slate-500" />
                 </button>
               </div>
-              <div className="grid grid-cols-3 gap-3">
-                {[
-                  { scene: "solar-system" as const, label: "Solar System", emoji: "🪐", transcript: "solar system planets" },
-                  { scene: "photosynthesis" as const, label: "Plants & Food", emoji: "🌿", transcript: "how plants make food" },
-                  { scene: "animal-life" as const, label: "Animal Life", emoji: "🦋", transcript: "animal life cycle butterfly" },
-                  { scene: "water-cycle" as const, label: "Water Cycle", emoji: "💧", transcript: "water cycle rain" },
-                  { scene: "dinosaurs" as const, label: "Dinosaurs", emoji: "🦖", transcript: "dinosaurs" },
-                  { scene: "ocean-life" as const, label: "Ocean Life", emoji: "🐋", transcript: "ocean sea creatures" },
-                  { scene: "human-body" as const, label: "Your Body", emoji: "🧠", transcript: "human body" },
-                  { scene: "know-nepal" as const, label: "Know Nepal", emoji: "🇳🇵", transcript: "know nepal history culture tradition geography wildlife" },
-                ].map((topic) => (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
+                {EXPLORE_TOPICS.map((topic, i) => (
                   <motion.button
                     key={topic.scene}
                     onClick={() => {
@@ -616,12 +658,19 @@ export default function Home() {
                       setExploreTranscript(topic.transcript);
                       setShowExplorePicker(false);
                     }}
+                    initial={{ opacity: 0, y: 12, scale: 0.92 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={{ delay: i * 0.05, type: "spring", stiffness: 320, damping: 24 }}
                     whileHover={{ y: -3 }} whileTap={{ scale: 0.95 }}
-                    className="rounded-2xl p-4 flex flex-col items-center gap-2 text-center text-white text-sm font-semibold"
-                    style={{ background: "rgba(99,102,241,0.14)", border: "1px solid rgba(99,102,241,0.28)" }}
+                    className={cn(
+                      "monto-light-card",
+                      topic.photo ? "monto-light-card-photo" : `monto-light-card-${topic.tone}`,
+                    )}
+                    style={topic.photo ? { backgroundImage: `url(${topic.photo})` } : undefined}
                   >
-                    <span className="text-3xl">{topic.emoji}</span>
-                    <span>{topic.label}</span>
+                    {!topic.photo && <div className="monto-light-card-icon"><span className="text-2xl">{topic.emoji}</span></div>}
+                    <p className="monto-light-card-title">{topic.label}</p>
+                    <p className="monto-light-card-subtitle">{topic.subtitle}</p>
                   </motion.button>
                 ))}
               </div>
@@ -869,24 +918,26 @@ export default function Home() {
       {appControls?.maintenance_mode && (
         <div className="relative z-30 text-center text-[10px] uppercase tracking-widest text-amber-300">Maintenance mode</div>
       )}
-      <header className="relative z-20 flex items-center justify-between w-full max-w-7xl mx-auto px-5 sm:px-7 pt-safe pt-5 pb-3">
+      <div className="monto-header-band relative z-20 w-full">
+      <header className="relative flex items-center justify-between w-full max-w-7xl mx-auto px-5 sm:px-7 pt-safe pt-3 pb-2">
         {/* Status pill */}
-        <motion.div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full glass glass-border"
+        <motion.div className="monto-light-pill flex items-center gap-2 px-4 py-2"
           initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}>
+          <Sparkles className="w-3.5 h-3.5 monto-light-accent" />
+          <span className="text-xs font-bold text-slate-600">
+            {online ? "Online" : "Reconnecting"}
+          </span>
           <motion.div
-            className={cn("w-1.5 h-1.5 rounded-full", online ? "bg-emerald-400" : "bg-amber-400")}
+            className={cn("w-2 h-2 rounded-full", online ? "bg-emerald-500" : "bg-amber-500")}
             animate={{ scale: [1, 1.4, 1] }}
             transition={{ duration: 2, repeat: Infinity }}
           />
-          <span className="text-[10px] text-white/50 font-semibold tracking-wide">
-            {online ? "READY" : "RECONNECTING"}
-          </span>
         </motion.div>
 
         {/* Brand */}
         <motion.div className="text-center" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
           <div className="flex items-center justify-center gap-1.5">
-            <div className="font-kids text-3xl text-white leading-none monto-wordmark">MONTO</div>
+            <div className="font-kids text-2xl sm:text-3xl leading-none monto-wordmark">MONTO</div>
             <motion.div
               className="w-4 h-5 sm:w-5 sm:h-6"
               style={{ transformOrigin: "0% 100%" }}
@@ -896,260 +947,227 @@ export default function Home() {
               <NepalFlag className="w-full h-full" />
             </motion.div>
           </div>
-          <div className="text-[9px] tracking-[0.3em] text-white/40 uppercase mt-0.5">Your little universe</div>
+          <div className="text-[10px] tracking-[0.3em] text-rose-100/80 font-bold uppercase mt-0.5">Learn &bull; Play &bull; Grow</div>
         </motion.div>
 
-        {/* Right side: Settings + Chat toggle */}
+        {/* Right side: Settings + Parent + Chat toggle */}
         <div className="flex items-center gap-2">
           <motion.button
-            onClick={() => setShowPairing(true)}
-            className="monto-icon-button"
-            whileTap={{ scale: 0.85 }}
-            initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}
-            aria-label="Pair with Parent App"
-          >
-            <QrCode className="w-4 h-4 text-white/70" />
-          </motion.button>
-          <motion.button
             onClick={() => setShowSettings(true)}
-            className="monto-icon-button"
-            whileTap={{ scale: 0.85 }}
+            className="monto-light-pill flex items-center gap-1.5 px-3.5 py-2"
+            whileTap={{ scale: 0.92 }}
             initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}
             aria-label="Open settings"
           >
-            <SettingsIcon className="w-4 h-4 text-white/70" />
+            <SettingsIcon className="w-4 h-4 text-slate-500" />
+            <span className="hidden sm:inline text-xs font-bold text-slate-600">Settings</span>
+          </motion.button>
+          <motion.button
+            onClick={() => setShowPairing(true)}
+            className="monto-light-pill flex items-center gap-1.5 px-3.5 py-2"
+            whileTap={{ scale: 0.92 }}
+            initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}
+            aria-label="Pair with Parent App"
+          >
+            <User className="w-4 h-4 text-slate-500" />
+            <span className="hidden sm:inline text-xs font-bold text-slate-600">Parent</span>
+          </motion.button>
+          <motion.button
+            onClick={() => router.push("/voice-messages")}
+            className="monto-light-pill flex items-center justify-center w-9 h-9 px-0"
+            whileTap={{ scale: 0.85 }}
+            initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}
+            aria-label="Voice messages"
+          >
+            <Voicemail className="w-4 h-4 text-slate-500" />
           </motion.button>
           <motion.button
             onClick={() => setShowChat(v => !v)}
-            className="monto-icon-button"
+            className="monto-light-pill flex items-center justify-center w-9 h-9 px-0"
             whileTap={{ scale: 0.85 }}
             initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}
+            aria-label={showChat ? "Close chat" : "Open chat"}
           >
             {showChat
-              ? <X className="w-4 h-4 text-white/70" />
-              : <MessageCircle className="w-4 h-4 text-white/70" />}
+              ? <X className="w-4 h-4 text-slate-500" />
+              : <MessageCircle className="w-4 h-4 text-slate-500" />}
           </motion.button>
         </div>
       </header>
+      </div>
 
       {/* ── Main ────────────────────────────────────────────────────────── */}
       <main className="relative z-10 flex-1 flex flex-col items-center px-4 sm:px-6 lg:px-8 pb-safe pb-6 max-w-7xl mx-auto w-full overflow-hidden">
         <AnimatePresence mode="wait">
           {!showChat ? (
-            <motion.div key="voice" className="monto-stage monto-stage-dashboard grid grid-cols-1 lg:grid-cols-[minmax(300px,0.72fr)_minmax(520px,1.28fr)] items-stretch gap-3 sm:gap-5 w-full flex-1 rounded-[34px] p-3 sm:p-4"
+            <motion.div key="voice" className="monto-light-hero rounded-[34px] p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-[minmax(360px,1.05fr)_minmax(420px,0.95fr)] items-stretch gap-5 lg:gap-7 w-full flex-1 overflow-y-auto"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
 
-              <div className="monto-character-card rounded-[28px] p-4 sm:p-5 flex flex-col items-center">
-                <div className="monto-companion-header">
+              {/* Left: avatar panel */}
+              <div className="monto-light-scene rounded-[28px] p-5 flex flex-col items-center gap-1">
+                <div className="w-full flex items-center justify-between gap-2">
                   <div>
-                    <p className="monto-eyebrow">Your AI buddy</p>
-                    <h2 className="font-kids text-2xl text-white">Meet Monto</h2>
+                    <p className="monto-light-muted text-[11px] font-black uppercase tracking-[0.22em]">Your AI buddy</p>
+                    <h2 className="font-kids text-2xl text-slate-800">Meet Monto</h2>
                   </div>
                   <div className={cn("monto-live-pill", isRec && "is-listening", isSpeaking && "is-speaking")}>
                     <span />
                     {isRec ? "Listening" : isSpeaking ? "Talking" : "Ready"}
                   </div>
                 </div>
-                <div className="monto-avatar-stage relative flex items-center justify-center w-full">
-                  <motion.div className="relative z-10 flex w-full justify-center" animate={isRec && !lowPower ? { scale: [1, 1.03, 1] } : {}} transition={{ duration: 0.3, repeat: Infinity }}>
-                    <motion.div className="monto-avatar-podium flex w-full justify-center" animate={isRec && !lowPower ? { scale: [1, 1.025, 1] } : { scale: 1 }} transition={{ duration: 0.7, repeat: isRec && !lowPower ? Infinity : 0 }}>
-                      <Avatar emotion={isSpeaking ? "talking" : emotion} character={character} size={430} />
-                    </motion.div>
-                  </motion.div>
-                </div>
-                <div className="monto-companion-footer">
-                  <div className="monto-mood-orb"><Sparkles className="h-4 w-4" /></div>
-                  <div className="min-w-0">
-                    <p className="font-kids text-xl leading-none text-white">Monto</p>
-                    <p className="mt-1 truncate text-[11px] font-semibold text-sky-100/55">{isRec ? "I’m all ears — tell me anything!" : isSpeaking ? "Sharing something magical…" : "Ready to learn, play and explore"}</p>
-                  </div>
-                </div>
+                <motion.div className="flex-1 flex items-start justify-center w-full pt-1"
+                  animate={isRec && !lowPower ? { scale: [1, 1.03, 1] } : {}} transition={{ duration: 0.3, repeat: Infinity }}>
+                  <AnimatePresence mode="wait">
+                    {idleFlying && !lowPower ? (
+                      <motion.div key="rocket" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                        <RocketFlyby size={340}>
+                          <Avatar emotion="excited" character={character} size={260} />
+                        </RocketFlyby>
+                      </motion.div>
+                    ) : (
+                      <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                        <Avatar emotion={isSpeaking ? "talking" : emotion} character={character} size={420} />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
+                <p className="text-center text-sm font-bold monto-light-muted px-2">
+                  {idleFlying ? "Wheee — off on a rocket adventure!" : isRec ? "I’m all ears — tell me anything!" : isSpeaking ? "Sharing something magical…" : "Ready to learn, play and explore"}
+                </p>
               </div>
 
-              <div className="monto-console monto-main-console rounded-[28px] p-4 sm:p-6 flex flex-col gap-4 min-h-[480px]">
-                <div className="monto-adventure-wrap">
-                  <div className="monto-adventure-header">
-                    <div className="monto-adventure-heading">
-                      <p className="monto-adventure-title">Pick an adventure</p>
-                      <span className="monto-slide-guide">
-                        Swipe <ChevronRight className="h-3.5 w-3.5" />
-                      </span>
-                    </div>
-                    <div className="monto-control-pill" role="group" aria-label="Mic and speaker controls">
-                      <motion.button
-                        onClick={() => {
-                          if (!micMuted) recorder.cancelRecording();
-                          setMicMuted(value => !value);
-                          setApiError(null);
-                        }}
-                        aria-pressed={micMuted}
-                        title={micMuted ? "Turn microphone on" : "Mute microphone"}
-                        className={cn("monto-control-seg", micMuted && "is-off")}
-                        whileTap={{ scale: .92 }}>
-                        {micMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-                      </motion.button>
-                      <span className="monto-control-divider" aria-hidden="true" />
-                      <motion.button
-                        onClick={() => {
-                          if (autoSpeak) cancelTTS();
-                          setAutoSpeak(value => !value);
-                        }}
-                        aria-pressed={!autoSpeak}
-                        title={autoSpeak ? "Mute speaker" : "Turn speaker on"}
-                        className={cn("monto-control-seg", !autoSpeak && "is-off")}
-                        whileTap={{ scale: .92 }}>
-                        {autoSpeak ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-                      </motion.button>
-                    </div>
-                  </div>
-
-                  <div className="monto-slider-shell">
+              {/* Right: adventures + talk button + status + reply */}
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-black uppercase tracking-[0.25em] monto-light-muted">Pick an adventure</p>
+                  <div className="monto-control-pill" role="group" aria-label="Mic and speaker controls">
                     <motion.button
-                      type="button"
-                      className="monto-slider-arrow monto-slider-arrow-prev"
-                      onClick={() => adventureSliderRef.current?.scrollBy({ left: -210, behavior: lowPower ? "auto" : "smooth" })}
-                      aria-label="Previous adventures"
-                      whileTap={{ scale: 0.88 }}>
-                      <ChevronLeft className="h-4 w-4" />
+                      onClick={() => {
+                        if (!micMuted) recorder.cancelRecording();
+                        setMicMuted(value => !value);
+                        setApiError(null);
+                      }}
+                      aria-pressed={micMuted}
+                      title={micMuted ? "Turn microphone on" : "Mute microphone"}
+                      className={cn("monto-control-seg", micMuted && "is-off")}
+                      whileTap={{ scale: .92 }}>
+                      {micMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
                     </motion.button>
-
-                    <div
-                      ref={adventureSliderRef}
-                      className="monto-adventure-grid monto-adventure-slider"
-                      onScroll={handleSliderScroll}
-                    >
-                      {adventureItems.map((item) => (
-                        <motion.button key={item.label} onClick={() => item.action ? item.action() : item.route ? router.push(item.route) : handleMic()}
-                          className={`monto-adventure monto-adventure-${item.tone}`} whileHover={{ y: -3 }} whileTap={{ scale: 0.95 }}>
-                          <item.icon className="monto-adventure-icon" strokeWidth={2.3} />
-                          <span>{item.label}</span>
-                        </motion.button>
-                      ))}
-                    </div>
-
+                    <span className="monto-control-divider" aria-hidden="true" />
                     <motion.button
-                      type="button"
-                      className="monto-slider-arrow monto-slider-arrow-next"
-                      onClick={() => adventureSliderRef.current?.scrollBy({ left: 210, behavior: lowPower ? "auto" : "smooth" })}
-                      aria-label="Next adventures"
-                      whileTap={{ scale: 0.88 }}>
-                      <ChevronRight className="h-4 w-4" />
+                      onClick={() => {
+                        if (autoSpeak) cancelTTS();
+                        setAutoSpeak(value => !value);
+                      }}
+                      aria-pressed={!autoSpeak}
+                      title={autoSpeak ? "Mute speaker" : "Turn speaker on"}
+                      className={cn("monto-control-seg", !autoSpeak && "is-off")}
+                      whileTap={{ scale: .92 }}>
+                      {autoSpeak ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
                     </motion.button>
                   </div>
-
-                  <div className="monto-slider-dots" role="tablist" aria-label="Adventure slides">
-                    {adventureItems.map((item, i) => (
-                      <button
-                        key={item.label}
-                        type="button"
-                        role="tab"
-                        aria-selected={i === activeAdventure}
-                        aria-label={`Go to ${item.label}`}
-                        className={cn("monto-slider-dot", i === activeAdventure && "is-active")}
-                        onClick={() => scrollToAdventure(i)}
-                      />
-                    ))}
-                  </div>
-
-                  <motion.button
-                    onClick={handleMic}
-                    disabled={isProc || appControls?.maintenance_mode || appControls?.ai_enabled === false || appControls?.microphone_enabled === false}
-                    className={cn(
-                      "monto-mic-charge mt-3 w-full rounded-2xl flex items-center justify-center gap-2 py-2.5 font-bold text-sm text-white focus:outline-none disabled:opacity-40",
-                      isRec && "is-listening",
-                    )}
-                    style={{
-                      background: isRec
-                        ? "linear-gradient(135deg, #EF4444, #DC2626)"
-                        : `linear-gradient(135deg, ${cfg.color}, ${cfg.glow})`,
-                      boxShadow: isRec
-                        ? "0 0 24px rgba(239,68,68,0.45), 0 6px 20px rgba(0,0,0,0.3)"
-                        : `0 0 24px ${cfg.glow}45, 0 6px 20px rgba(0,0,0,0.3)`,
-                    }}
-                    whileHover={{ scale: 1.02, y: -1 }}
-                    whileTap={{ scale: 0.97 }}>
-                    <AnimatePresence mode="wait">
-                      {isProc ? (
-                        <motion.div key="spin" animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}>
-                          <Sparkles className="w-4 h-4" />
-                        </motion.div>
-                      ) : isRec ? (
-                        <motion.div key="stop" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}>
-                          <div className="w-3 h-3 rounded-[3px] bg-white" />
-                        </motion.div>
-                      ) : (
-                        <motion.div key="mic" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}>
-                          <Mic className="w-4 h-4" />
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                    <span>{isRec ? "Listening… tap to finish" : "Tap to talk"}</span>
-                  </motion.button>
                 </div>
+
+                <div className={cn(
+                  "grid grid-cols-2 sm:grid-cols-3 gap-4",
+                  // A lone item left dangling in the last row looks unintentional —
+                  // stretch it to fill the row instead, at whichever breakpoint(s)
+                  // would otherwise leave it alone.
+                  adventureItems.length % 2 === 1 && "[&>*:last-child]:col-span-2",
+                  adventureItems.length % 3 === 1 ? "sm:[&>*:last-child]:col-span-3" : "sm:[&>*:last-child]:col-span-1",
+                )}>
+                  {adventureItems.map((item) => (
+                    <motion.button key={item.label} onClick={() => item.action ? item.action() : item.route ? router.push(item.route) : handleMic()}
+                      className={`monto-light-card monto-light-card-${item.tone}`} whileHover={{ y: -3 }} whileTap={{ scale: 0.95 }}>
+                      <div className="monto-light-card-icon"><item.icon className="w-8 h-8" strokeWidth={2.2} /></div>
+                      <p className="monto-light-card-title">{item.label}</p>
+                      <p className="monto-light-card-subtitle">{item.subtitle}</p>
+                    </motion.button>
+                  ))}
+                </div>
+
+                <motion.button
+                  onClick={handleMic}
+                  disabled={isProc || appControls?.maintenance_mode || appControls?.ai_enabled === false || appControls?.microphone_enabled === false}
+                  className={cn(
+                    "monto-mic-charge monto-light-mic w-full rounded-2xl flex items-center justify-center gap-2 py-3 font-bold text-sm text-white focus:outline-none disabled:opacity-40",
+                    isRec && "is-listening",
+                  )}
+                  style={{
+                    background: isRec ? "linear-gradient(135deg, #EF4444, #DC2626)" : "linear-gradient(135deg, #FB7185, #E11D48)",
+                    boxShadow: isRec ? "0 10px 26px rgba(239,68,68,0.4)" : "0 10px 26px rgba(225,29,72,0.35)",
+                  }}
+                  whileHover={{ scale: 1.02, y: -1 }}
+                  whileTap={{ scale: 0.97 }}>
+                  <AnimatePresence mode="wait">
+                    {isProc ? (
+                      <motion.div key="spin" animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}>
+                        <Sparkles className="w-4 h-4" />
+                      </motion.div>
+                    ) : isRec ? (
+                      <motion.div key="stop" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}>
+                        <div className="w-3 h-3 rounded-[3px] bg-white" />
+                      </motion.div>
+                    ) : (
+                      <motion.div key="mic" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}>
+                        <Mic className="w-4 h-4" />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                  <span>{isRec ? "Listening… tap to finish" : "Tap to talk"}</span>
+                </motion.button>
 
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.32em] text-white/40">Status</p>
-                      <p className={cn(
-                        "text-sm font-semibold",
-                        apiError ? "text-red-300" :
-                        isRec ? "text-red-300" :
-                        isProc ? "text-purple-300" :
-                        isSpeaking ? "text-yellow-300" :
-                        "text-white/70"
-                      )}>
-                        {statusText}
-                      </p>
-                    </div>
-                    <div className="rounded-2xl bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.28em] text-white/40">
+                    <p className={cn(
+                      "text-sm font-semibold",
+                      apiError ? "text-red-500" : isProc ? "text-violet-500" : "monto-light-muted",
+                    )}>
+                      {statusText}
+                    </p>
+                    <div className="monto-light-pill px-3 py-1 text-[11px] font-bold monto-light-muted">
                       {lang === "nepali" ? "नेपाली" : "EN"}
                     </div>
                   </div>
                   {isRec && (
-                    <motion.div className="overflow-hidden rounded-3xl border border-white/10 p-3"
+                    <motion.div className="rounded-2xl border border-slate-200 bg-slate-50 p-3"
                       initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.95 }}>
-                      <AudioBars level={recorder.audioLevel} color={cfg.color} />
+                      <AudioBars level={recorder.audioLevel} color="#E11D48" />
                     </motion.div>
                   )}
                 </div>
 
-                <div className="flex-1 flex flex-col justify-between gap-4">
+                <div className="flex-1">
                   <AnimatePresence mode="wait">
                     {response ? (
                       <motion.div key="response"
-                        className="relative rounded-[28px] glass glass-border p-5 shadow-[0_24px_50px_rgba(0,0,0,0.25)]"
+                        className="monto-light-response relative rounded-[24px] p-5"
                         initial={{ opacity: 0, y: 24, scale: 0.95 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: -16, scale: 0.95 }}
                         transition={{ type: "spring", stiffness: 300, damping: 25 }}
                       >
-                        <div className="absolute top-0 left-0 right-0 h-1 rounded-full bg-gradient-to-r from-transparent via-[#6366f1] to-transparent opacity-80" />
                         {transcript && (
-                          <div className="flex items-center gap-2 mb-4 pb-3 border-b border-white/10">
-                            <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
-                                 style={{ background: `${cfg.color}20` }}>
-                              <Mic className="w-3 h-3" style={{ color: cfg.color }} />
+                          <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-200">
+                            <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 bg-rose-100">
+                              <Mic className="w-3 h-3 text-rose-500" />
                             </div>
-                            <p className="text-white/50 text-xs leading-snug">{transcript}</p>
+                            <p className="text-slate-500 text-xs leading-snug">{transcript}</p>
                           </div>
                         )}
                         <div className="flex items-start gap-3">
                           <motion.div
-                            className="w-10 h-10 rounded-2xl flex items-center justify-center"
-                            style={{ background: `linear-gradient(135deg, ${cfg.color}, ${cfg.glow})` }}
+                            className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0"
+                            style={{ background: "linear-gradient(135deg, #FB7185, #E11D48)" }}
                             animate={isSpeaking ? { scale: [1, 1.12, 1] } : {}}
                             transition={{ duration: 0.5, repeat: Infinity }}
                           >
                             <Sparkles className="w-4 h-4 text-white" />
                           </motion.div>
                           <div className="flex-1">
-                            <div className="flex items-center justify-between gap-2 mb-3">
-                              <p className="text-[11px] uppercase tracking-[0.3em] text-white/40">Monto reply</p>
-                              <span className="text-[11px] uppercase tracking-[0.3em] text-white/30">Thought</span>
-                            </div>
-                            <p className="text-white text-sm leading-relaxed font-medium">
+                            <p className="text-[11px] uppercase tracking-[0.3em] monto-light-muted mb-2">Monto reply</p>
+                            <p className="text-slate-700 text-sm leading-relaxed font-medium">
                               {response.response}
                             </p>
                           </div>
@@ -1157,10 +1175,12 @@ export default function Home() {
                       </motion.div>
                     ) : (
                       <motion.div key="greeting"
-                        className="monto-greeting rounded-[28px] p-6 text-center"
+                        className="monto-light-response rounded-[24px] p-6 text-center"
                         initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0 }}>
-                        <Sparkles className="w-5 h-5 text-amber-300 mx-auto mb-3" /><p className="text-white text-lg sm:text-xl font-extrabold leading-snug">{greeting}</p><p className="text-sky-100/50 text-xs mt-2">Ask a question, tell a joke, or start an adventure.</p>
+                        <Sparkles className="w-5 h-5 monto-light-accent mx-auto mb-3" />
+                        <p className="text-slate-700 text-lg sm:text-xl font-extrabold leading-snug">{greeting}</p>
+                        <p className="monto-light-muted text-xs mt-2">Ask a question, tell a joke, or start an adventure.</p>
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -1170,13 +1190,13 @@ export default function Home() {
 
           ) : (
             /* ── Chat view ──────────────────────────────────────────── */
-            <motion.div key="chat" className="flex flex-col w-full flex-1 overflow-hidden"
+            <motion.div key="chat" className="monto-light-hero rounded-[34px] p-4 sm:p-6 flex flex-col w-full flex-1 overflow-hidden"
               initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
 
               {/* Messages */}
               <div className="flex-1 overflow-y-auto space-y-3 py-3 px-1">
                 {conversation.messages.length === 0 && (
-                  <div className="text-center text-white/30 text-sm mt-8">{greeting}</div>
+                  <div className="text-center monto-light-muted text-sm mt-8">{greeting}</div>
                 )}
                 <AnimatePresence initial={false}>
                   {conversation.messages.map((msg) => {
@@ -1184,22 +1204,41 @@ export default function Home() {
                     const mCfg = EMOTION_CONFIG[(msg.emotion ?? "neutral") as keyof typeof EMOTION_CONFIG] ?? EMOTION_CONFIG.neutral;
                     return (
                       <motion.div key={msg.id}
-                        className={cn("flex", isUser ? "justify-end" : "justify-start")}
+                        className={cn("flex flex-col", isUser ? "items-end" : "items-start")}
                         initial={{ opacity: 0, y: 10, scale: 0.95 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         transition={{ type: "spring", stiffness: 300, damping: 28 }}>
-                        {!isUser && (
-                          <div className="w-7 h-7 rounded-full mr-2 flex-shrink-0 mt-1 flex items-center justify-center"
-                               style={{ background: `linear-gradient(135deg, ${mCfg.color}, ${mCfg.glow})` }}>
-                            <Sparkles className="w-3 h-3 text-white" />
+                        <div className="flex">
+                          {!isUser && (
+                            <div className="w-7 h-7 rounded-full mr-2 flex-shrink-0 mt-1 flex items-center justify-center"
+                                 style={{ background: `linear-gradient(135deg, ${mCfg.color}, ${mCfg.glow})` }}>
+                              <Sparkles className="w-3 h-3 text-white" />
+                            </div>
+                          )}
+                          <div className={cn("max-w-[78%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed font-medium")}
+                               style={isUser
+                                 ? { background: `linear-gradient(135deg, #FB7185, #E11D48)`, color: "white", borderBottomRightRadius: 6 }
+                                 : { background: "#F8FAFC", border: "1px solid #E2E8F0", color: "#334155", borderBottomLeftRadius: 6 }}>
+                            {msg.text}
                           </div>
-                        )}
-                        <div className={cn("max-w-[78%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed font-medium")}
-                             style={isUser
-                               ? { background: `linear-gradient(135deg, #7C3AED, #EC4899)`, color: "white", borderBottomRightRadius: 6 }
-                               : { background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", color: "white", borderBottomLeftRadius: 6 }}>
-                          {msg.text}
                         </div>
+                        {!isUser && (
+                          <button type="button"
+                            onClick={() => {
+                              cancelTTS();
+                              setReplayingId(msg.id);
+                              setIsSpeaking(true);
+                              speak(msg.text, msg.emotion ?? "neutral", settings,
+                                () => setIsSpeaking(true),
+                                () => { setIsSpeaking(false); setReplayingId(null); });
+                            }}
+                            title="Replay"
+                            aria-label="Replay this message"
+                            className="mt-1 ml-9 flex items-center gap-1 text-[11px] font-medium monto-light-muted hover:text-slate-700 transition-colors focus:outline-none">
+                            <Volume2 className={cn("w-3.5 h-3.5", replayingId === msg.id && "animate-pulse monto-light-accent")} />
+                            <span>{replayingId === msg.id ? "Playing…" : "Replay"}</span>
+                          </button>
+                        )}
                       </motion.div>
                     );
                   })}
@@ -1211,14 +1250,14 @@ export default function Home() {
                 <motion.button onClick={handleMic}
                   disabled={isProc || appControls?.maintenance_mode || appControls?.ai_enabled === false || appControls?.microphone_enabled === false}
                   className={cn(
-                    "monto-mic-charge w-16 h-16 rounded-full flex items-center justify-center focus:outline-none disabled:opacity-40",
+                    "monto-mic-charge monto-light-mic w-16 h-16 rounded-full flex items-center justify-center focus:outline-none disabled:opacity-40",
                     isRec && "is-listening",
                   )}
                   style={{
                     background: isRec
                       ? "linear-gradient(135deg, #EF4444, #DC2626)"
-                      : `linear-gradient(135deg, ${cfg.color}, ${cfg.glow})`,
-                    boxShadow: `0 0 30px ${cfg.glow}50`,
+                      : "linear-gradient(135deg, #FB7185, #E11D48)",
+                    boxShadow: "0 10px 26px rgba(225,29,72,0.35)",
                   }}
                   whileTap={{ scale: 0.9 }}>
                   {isProc ? <motion.div animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}>
@@ -1230,6 +1269,25 @@ export default function Home() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Status bar */}
+        <div className="monto-light-statusbar mt-3 w-full flex items-center justify-between gap-4 px-2 py-2">
+          <div className="flex items-center gap-2 text-xs sm:text-sm font-bold text-slate-500">
+            <Clock className="w-4 h-4" />
+            <span>{now ? now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "--:--"}</span>
+            <span className="opacity-40">|</span>
+            <span>Today is {now ? now.toLocaleDateString([], { weekday: "long" }) : "…"}</span>
+          </div>
+          <div className="flex items-center gap-2 flex-1 max-w-[220px]">
+            {volume > 0 ? <Volume2 className="w-4 h-4 text-slate-400 flex-shrink-0" /> : <VolumeX className="w-4 h-4 text-slate-400 flex-shrink-0" />}
+            <input
+              type="range" min={0} max={1} step={0.05} value={volume}
+              onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+              className="monto-volume-slider flex-1"
+              aria-label="Speaker volume"
+            />
+          </div>
+        </div>
       </main>
 
       <AnimatePresence>

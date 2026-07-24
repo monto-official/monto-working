@@ -5,8 +5,14 @@ import { ArrowLeft, Heart, Mic, MicOff, Play, RotateCcw, Trophy, Volume2, Volume
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { MiniMonto } from "@/components/MiniMonto";
+import { Monto3DAvatar } from "@/components/Monto3DAvatar";
+import { useTTS } from "@/hooks/useTTS";
+import type { Settings } from "@/types";
 
 type Choice = { text: string; emoji: string; kind: boolean; result: string; lesson: string };
+
+const TTS_SETTINGS: Settings = { language: "english", voice: "female", autoSpeak: true, darkMode: true };
+const VALUES = ["Kindness", "Honesty", "Fairness", "Helping", "Courage", "Respect", "Online safety", "Responsibility", "Greetings", "Positivity", "Body safety"] as const;
 
 const stories = [
   { image: "/moral-game/scene-playground.png", place: "Playground", title: "The New Kid", scene: "🛝", friend: "🧒", question: "A new kid is standing alone. What will you do?", choices: [
@@ -48,10 +54,27 @@ const stories = [
     { text: "Keep my promise first, then watch", emoji: "✅", kind: true, result: "The job is done quickly, and you enjoy the show without worrying.", lesson: "Responsibility means keeping promises even when something exciting appears." },
     { text: "Ask politely to finish after this short part", emoji: "⏰", kind: true, result: "You agree on a clear time and follow through.", lesson: "Plans can change when we communicate honestly and still do our part." },
     { text: "Pretend I did not hear", emoji: "📺", kind: false, result: "Someone else has to do your job and feels frustrated.", lesson: "Ignoring a promise moves our responsibility onto someone else." },
-  ]},] as const;
+  ]},
+  { image: "/moral-game/scene-playground.png", place: "At Grandma's House", title: "Greeting Grandma", scene: "🙏", friend: "👵", question: "Grandma just arrived to visit! How do you greet her respectfully?", choices: [
+    { text: "Say Namaste with palms together and a bow", emoji: "🙏", kind: true, result: "Grandma's face lights up with joy at your respectful greeting!", lesson: "Namaste is a beautiful way to greet elders — palms together, a little bow, straight from the heart." },
+    { text: "Give a friendly wave and say hi", emoji: "👋", kind: true, result: "Grandma smiles, though a Namaste would make her feel extra special.", lesson: "A wave is friendly, but Namaste shows extra respect to elders and guests." },
+    { text: "Keep playing your game", emoji: "🎮", kind: false, result: "Grandma waits for a greeting that never comes.", lesson: "Greeting someone who arrives shows them you're happy to see them." },
+  ]},
+  { image: "/moral-game/scene-lunch.png", place: "At Home", title: "Rise and Shine", scene: "☀️", friend: "👨‍👩‍👧", question: "You wake up and see your family in the kitchen. What do you do?", choices: [
+    { text: "Smile and say 'Good Morning!' to everyone", emoji: "😃", kind: true, result: "Everyone smiles back — what a happy way to start the day!", lesson: "A cheerful Good Morning can make everyone's whole day brighter." },
+    { text: "Give a sleepy little wave", emoji: "🥱", kind: true, result: "They wave back, though a big smile would spread even more joy.", lesson: "Even a small greeting matters, but a warm one spreads more happiness." },
+    { text: "Walk past without saying anything", emoji: "🚶", kind: false, result: "Everyone wonders if something is wrong.", lesson: "Greeting your family shows them you care, even first thing in the morning." },
+  ]},
+  { image: "/moral-game/scene-hallway.png", place: "Keeping Safe", title: "A Confusing Hug", scene: "🛡️", friend: "🧑", question: "Someone gives you a hug that makes you feel uncomfortable and asks you to keep it a secret. What do you do?", choices: [
+    { text: "Say 'No thank you' and tell a trusted grown-up right away", emoji: "🗣️", kind: true, result: "A trusted grown-up listens, helps you feel safe, and you feel proud you spoke up!", lesson: "Your body belongs to you. If something feels wrong, telling a trusted adult is always the brave, right choice — even if someone asks you to keep it secret." },
+    { text: "Walk away and tell a parent later", emoji: "🚶", kind: true, result: "You feel safe again once you tell someone you trust.", lesson: "It's always okay to walk away from a touch that feels wrong, and telling later still helps." },
+    { text: "Keep the secret because they asked you to", emoji: "🤫", kind: false, result: "You feel worried and confused inside.", lesson: "Never keep a touch a secret if it makes you uncomfortable — always tell a trusted grown-up, no matter what anyone says. It is never your fault." },
+  ]},
+] as const;
 
 export default function MoralGamePage() {
   const router = useRouter();
+  const { speak, cancel } = useTTS();
   const [started, setStarted] = useState(false);
   const [round, setRound] = useState(0);
   const [score, setScore] = useState(0);
@@ -75,17 +98,10 @@ export default function MoralGamePage() {
 
   useEffect(() => {
     if (!soundOn || done) return;
-    window.speechSynthesis.cancel();
     const words = answer ? answer.result + " " + answer.lesson : story.title + ". " + story.question;
-    const speech = new SpeechSynthesisUtterance(words);
-    speech.rate = .88;
-    speech.pitch = 1.08;
-    speech.onstart = () => setSpeaking(true);
-    speech.onend = () => setSpeaking(false);
-    speech.onerror = () => setSpeaking(false);
-    window.speechSynthesis.speak(speech);
-    return () => { window.speechSynthesis.cancel(); setSpeaking(false); };
-  }, [answer, done, round, soundOn, story]);
+    void speak(words, answer?.kind === false ? "thinking" : "happy", TTS_SETTINGS, () => setSpeaking(true), () => setSpeaking(false));
+    return () => { cancel(); setSpeaking(false); };
+  }, [answer, cancel, done, round, soundOn, speak, story]);
 
   useEffect(() => () => {
     calibrationRun.current += 1;
@@ -156,8 +172,13 @@ export default function MoralGamePage() {
     }).catch(() => undefined);
   }, []);
 
+  const startAdventure = () => {
+    setStarted(true);
+    setAnswer(null);
+  };
+
   const toggleSound = () => {
-    if (soundOn) window.speechSynthesis.cancel();
+    if (soundOn) cancel();
     setSoundOn(value => !value);
   };
 
@@ -171,14 +192,25 @@ export default function MoralGamePage() {
           <button onClick={() => router.push("/")} className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/10" aria-label="Close"><X /></button>
         </div>
         <div className="text-center"><p className="text-[10px] font-black uppercase tracking-[.3em] text-amber-200/70">Monto presents</p><h1 className="text-xl font-black">Moral Adventure</h1></div>
-        <div className="flex h-11 items-center gap-1 rounded-full border border-amber-300/20 bg-amber-300/10 px-3 font-black text-amber-200"><Heart className="h-4 w-4 fill-current" />{score}</div>
+        {started ? <div className="flex h-11 min-w-16 items-center justify-center gap-1 rounded-full border border-amber-300/30 bg-amber-300/15 px-3 font-black text-amber-200" aria-label={`${score} heart powers earned`}><Heart className="h-4 w-4 fill-current" />{score}</div> : <div className="h-11 w-11" aria-hidden="true" />}
       </header>
       <section className="flex flex-1 items-center justify-center py-7"><AnimatePresence mode="wait">
-        {!started ? <motion.div key="start" initial={{ opacity: 0, scale: .8 }} animate={{ opacity: 1, scale: 1 }} className="w-full text-center">
-          <motion.div animate={{ y: [0,-12,0], rotate: [-3,3,-3] }} transition={{ repeat: Infinity, duration: 2 }} className="mx-auto flex h-52 w-52 items-center justify-center rounded-[4rem] border border-amber-200/20 bg-amber-300/10 text-8xl shadow-[0_30px_90px_rgba(251,146,60,.2)]">🧭</motion.div>
-          <p className="mt-7 text-xs font-black uppercase tracking-[.3em] text-amber-200">Your choices shape the story</p><h2 className="mt-3 text-4xl font-black">What would you do?</h2>
-          <p className="mx-auto mt-4 max-w-md text-sm leading-6 text-white/60">Choose an action and watch how it makes others feel.</p>
-          <motion.button whileTap={{ scale: .96 }} onClick={() => setStarted(true)} className="mx-auto mt-8 flex h-16 w-full max-w-md items-center justify-center gap-3 rounded-3xl bg-gradient-to-r from-amber-300 via-orange-400 to-rose-500 text-lg font-black text-slate-950"><Play className="fill-current" />Start adventure</motion.button>
+        {!started ? <motion.div key="start" initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} className="grid w-full items-center gap-5 py-2 lg:grid-cols-[.9fr_1.1fr] lg:text-left">
+          <div className="relative mx-auto h-64 w-64 sm:h-72 sm:w-72">
+            <div className="absolute inset-5 rounded-full bg-cyan-300/15 ring-1 ring-cyan-200/25" />
+            <Monto3DAvatar emotion={speaking ? "talking" : "excited"} size={288} />
+            <motion.div animate={{ y: [0, -6, 0] }} transition={{ duration: 2, repeat: Infinity }} className="absolute bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-white px-4 py-2 text-sm font-black text-slate-900 shadow-xl">Hi, I&apos;m Monto!</motion.div>
+          </div>
+          <div className="text-center lg:text-left">
+            <div className="inline-flex items-center gap-2 rounded-full border border-amber-200/25 bg-amber-300/10 px-4 py-2 text-xs font-black uppercase text-amber-200"><Heart className="h-4 w-4 fill-current" /> {stories.length} stories · {stories.length} heart powers</div>
+            <h2 className="mt-5 font-kids text-4xl font-black leading-tight sm:text-5xl">Become a<br className="hidden sm:block" /> Heart Hero!</h2>
+            <p className="mx-auto mt-4 max-w-lg text-base font-medium leading-7 text-white/75 lg:mx-0">Monto will tell you a story. You choose what to do, see how others feel, and learn a power you can use in real life.</p>
+            <div className="mx-auto mt-5 grid max-w-lg grid-cols-2 gap-2 text-left lg:mx-0">
+              {[['💛','Be kind'],['🌟','Tell the truth'],['⚖️','Choose fairly'],['🛡️','Be brave']].map(([icon, label]) => <div key={label} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[.07] px-3 py-3 text-sm font-bold"><span className="text-xl">{icon}</span>{label}</div>)}
+            </div>
+            <motion.button whileHover={{ y: -2 }} whileTap={{ scale: .97 }} onClick={startAdventure} className="mx-auto mt-6 flex h-16 w-full max-w-lg items-center justify-center gap-3 rounded-2xl bg-amber-300 text-lg font-black text-slate-950 shadow-[0_14px_40px_rgba(251,191,36,.28)] lg:mx-0"><Play className="fill-current" />Start my first story</motion.button>
+            <p className="mt-3 text-sm font-semibold text-white/45">No wrong feelings. Monto helps you think and try again.</p>
+          </div>
         </motion.div> : done ? <motion.div key="done" initial={{ opacity: 0, scale: .8 }} animate={{ opacity: 1, scale: 1 }} className="w-full text-center">
           <motion.div animate={{ rotate: [-5,5,-5], scale: [1,1.08,1] }} transition={{ repeat: Infinity, duration: 1.4 }}><Trophy className="mx-auto h-32 w-32 text-amber-300 drop-shadow-[0_0_24px_rgba(251,191,36,.6)]" /></motion.div>
           <h2 className="mt-6 text-4xl font-black">Heart Hero!</h2><p className="mt-3 text-xl font-bold text-amber-200">You collected {score} of {stories.length} hearts.</p>
@@ -195,7 +227,7 @@ export default function MoralGamePage() {
                 {answer ? (answer.kind ? "😊" : "😟") : "🤔"}
               </motion.div>
               <div className="absolute bottom-5 left-5">
-                <p className="text-xs font-black uppercase tracking-[.24em] text-amber-200">Story {round + 1} of {stories.length}</p>
+                <p className="text-xs font-black uppercase tracking-[.24em] text-amber-200">Story {round + 1} of {stories.length} · {VALUES[round]}</p>
                 <h2 className="mt-1 text-2xl font-black drop-shadow-lg sm:text-3xl">{story.title}</h2>
               </div>
             </div>
@@ -206,12 +238,12 @@ export default function MoralGamePage() {
               <div className={"inline-flex rounded-full px-3 py-1 text-xs font-black text-slate-950 " + (answer.kind ? "bg-emerald-400" : "bg-violet-400")}>{answer.kind ? "HEARTWARMING CHOICE!" : "LET'S THINK ABOUT IT"}</div>
               <p className="mt-4 text-sm leading-6 text-white/70">{answer.result}</p>
               <div className="mt-5 rounded-2xl border border-amber-200/15 bg-amber-200/10 p-4"><p className="text-[10px] font-black uppercase tracking-[.22em] text-amber-200">Monto's little lesson</p><p className="mt-2 text-sm font-semibold leading-6">{answer.lesson}</p></div>
-              <motion.button whileTap={{ scale: .97 }} onClick={() => { setAnswer(null); setRound(value => value + 1); }} className="mt-6 h-14 w-full rounded-2xl bg-gradient-to-r from-amber-300 to-orange-400 font-black text-slate-950">{round === stories.length - 1 ? "See my result" : "Next story →"}</motion.button>
+              {answer.kind ? <motion.button whileTap={{ scale: .97 }} onClick={() => { setAnswer(null); setRound(value => value + 1); }} className="mt-6 h-14 w-full rounded-2xl bg-gradient-to-r from-amber-300 to-orange-400 font-black text-slate-950">{round === stories.length - 1 ? "See my heart powers" : "Next story →"}</motion.button> : <motion.button whileTap={{ scale: .97 }} onClick={() => setAnswer(null)} className="mt-6 h-14 w-full rounded-2xl bg-amber-300 font-black text-slate-950">Think again and try another choice</motion.button>}
             </>}</div>
           </div>
         </motion.div>}
       </AnimatePresence></section>
     </div>
-    <MiniMonto speaking={speaking} />
+    {started && <MiniMonto speaking={speaking} />}
   </main>;
 }

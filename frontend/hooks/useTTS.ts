@@ -21,6 +21,7 @@ let _audio:       HTMLAudioElement | null = null;
 let _objectUrl:   string | null = null;
 let _abortCtrl:   AbortController | null = null;
 let _speaking     = false;
+let _volume       = 0.85;
 
 /** Hard-stop and clean up everything — safe to call multiple times */
 function _stopAll() {
@@ -103,6 +104,7 @@ export function useTTS() {
     const audio = new Audio();
     _audio      = audio;
     _speaking   = true;
+    audio.volume = _volume;
 
     // Wire events BEFORE setting src
     audio.onplay  = () => { onStart(); };
@@ -142,7 +144,7 @@ export function useTTS() {
     utterance.lang   = isNe ? "ne-NP" : "en-US";
     utterance.rate   = isNe ? 0.85 : 0.92;
     utterance.pitch  = 1.05;
-    utterance.volume = 1;
+    utterance.volume = _volume;
 
     const voices = window.speechSynthesis.getVoices();
     const voice  = voices.find(v => v.lang.startsWith(isNe ? "ne" : "en-US"));
@@ -186,5 +188,11 @@ export function useTTS() {
   // ── Public: cancel ───────────────────────────────────────────────────────
   const cancel = useCallback(() => { _stopAll(); }, []);
 
-  return { speak, cancel, isSpeaking: () => _speaking };
+  // ── Public: volume (0–1), applied to whatever plays next and live if playing ──
+  const setVolume = useCallback((v: number) => {
+    _volume = Math.min(1, Math.max(0, v));
+    if (_audio) _audio.volume = _volume;
+  }, []);
+
+  return { speak, cancel, setVolume, isSpeaking: () => _speaking };
 }
