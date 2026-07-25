@@ -424,16 +424,31 @@ export default function Home() {
       if (appControls?.calls_enabled !== false && callDad) { setRS("idle"); busyRef.current = false; setCalling({ callee: "dad", isIncoming: false }); return; }
 
       // ── Media detection ─────────────────────────────────────────────────
-      // Flexible intent matching: accepts "play a song", "play song",
-      // "song play", "song chalao", and the same word-order variants for stories.
-      const hasPlayIntent = /\b(play|start|listen|hear|chalao|chala do|bajao|baja do|sunao|suna do)\b/i.test(lower);
-      const hasSongWord = /\b(song|songs|music|tune|gana|gaana|gane|gaane)\b/i.test(lower);
-      const hasStoryIntent = /\b(play|start|tell|read|listen|hear|chalao|sunao|suna do)\b/i.test(lower);
-      const hasStoryWord = /\b(story|stories|bedtime story|tale|kahani|kahaani|katha)\b/i.test(lower);
-      const onlySongWord = /^(please\s+)?(a\s+)?(song|songs|music|tune|gana|gaana)(\s+please)?[.!?]*$/i.test(lower.trim());
-      const onlyStoryWord = /^(please\s+)?(a\s+)?(story|stories|tale|kahani|kahaani|katha)(\s+please)?[.!?]*$/i.test(lower.trim());
-      const playSongs = hasSongWord && (hasPlayIntent || onlySongWord);
-      const playStories = hasStoryWord && (hasStoryIntent || onlyStoryWord);
+      // Broad multilingual intent matching — English, Hindi/Nepali (Latin
+      // transliteration, including common ASR verb-ending variants like
+      // -o/-u/-au), and Devanagari script — so a child can ask for a song
+      // or story in whatever language/script feels natural to them.
+      const PLAY_VERB = /\b(play(?:ing)?|start(?:ed|ing)?|put\s*on|turn(?:ed)?\s*on|resum(?:e|ed|ing)?|continu(?:e|ed|ing)?|queue|begin|hit\s*play|listen|hear|sing|tell|read|narrate|chala(?:o|u|au)?|chala\s*(?:do|dijiye)|baja(?:o|u|au)?|baja\s*do|bajaiye|suna(?:o|u)?|suna\s*do|laga(?:o|u|au)?|laga\s*do|shuru|karo|kar\s*do|gara)\b/i;
+      const PLAY_VERB_DEV = /(चला|बजा|सुन|लगा|शुर|सुर|गर|भन|बता|चाहि|मन\s*लाग्यो|प्ले)/;
+      const hasPlayIntent = PLAY_VERB.test(lower) || PLAY_VERB_DEV.test(lower);
+
+      const hasSongWord = /\b(songs?|music|tracks?|tunes?|playlist|playback|rhymes?|gaanaa?|ganaa?|geet|sangeet)\b/i.test(lower) || /(गीत|गाना|संगीत)/.test(lower);
+      const hasStoryWord = /\b(stor(?:y(?:telling)?|ies)|tales?|fairy\s*tales?|bedtime\s*stor(?:y|ies)|kahani|kahaani|katha)\b/i.test(lower) || /(कथा|कहानी)/.test(lower);
+
+      const onlySongWord = /^(please\s+)?(a\s+|ek\s+|koi\s+)?(songs?|music|tracks?|tunes?|playlist|playback|rhymes?|gaanaa?|ganaa?|geet|sangeet)(\s+please)?[.!?]*$/i.test(lower.trim())
+        || /^(गीत|गाना|संगीत)[.!?]*$/.test(lower.trim())
+        || /^(music|song)\s*time[.!?]*$/i.test(lower.trim());
+      const onlyStoryWord = /^(please\s+)?(a\s+|ek\s+|koi\s+)?(stor(?:y|ies)|tales?|kahani|kahaani|katha)(\s+please)?[.!?]*$/i.test(lower.trim())
+        || /^(कथा|कहानी)[.!?]*$/.test(lower.trim())
+        || /^story\s*time[.!?]*$/i.test(lower.trim());
+      // These name no song/music noun at all, so they can't go through the
+      // hasSongWord gate above — match them as their own literal fallback.
+      const songNoNounPhrase = /^entertainment\s*mode[.!?]*$/i.test(lower.trim())
+        || /^hit\s*play[.!?]*$/i.test(lower.trim())
+        || /^play\s+something(\s+\w+)?[.!?]*$/i.test(lower.trim());
+
+      const playSongs = (hasSongWord && (hasPlayIntent || onlySongWord)) || songNoNounPhrase;
+      const playStories = hasStoryWord && (hasPlayIntent || onlyStoryWord);
       const doYoga      = /(do|start|let'?s do)\s+yoga|yoga\s+time/i.test(lower);
       if (appControls?.songs_enabled !== false && playSongs)   { setRS("idle"); busyRef.current = false; router.push("/songs");   return; }
       if (appControls?.stories_enabled !== false && playStories) { setRS("idle"); busyRef.current = false; router.push("/stories"); return; }
