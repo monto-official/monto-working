@@ -15,6 +15,7 @@ import { sendVoiceQuery, APIError } from "@/lib/api";
 import { useDeviceChannelContext } from "@/components/DeviceChannelProvider";
 import { useTTS } from "@/hooks/useTTS";
 import { MiniMonto } from "@/components/MiniMonto";
+import { registerMedia, unregisterMedia } from "@/lib/media-priority";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmt(s: number) {
@@ -91,6 +92,7 @@ export default function SongsPage() {
     if (!song) return;
 
     if (audioRef.current) {
+      unregisterMedia(audioRef.current);
       audioRef.current.pause();
       audioRef.current.src = "";
     }
@@ -98,6 +100,7 @@ export default function SongsPage() {
     const audio = new Audio(`/songs/${encodeURIComponent(song.file)}`);
     audio.volume = volume;
     audioRef.current = audio;
+    registerMedia(audio);
 
     audio.onloadedmetadata = () => setDuration(audio.duration);
     audio.ontimeupdate     = () => {
@@ -265,7 +268,10 @@ export default function SongsPage() {
   }, []);
 
   // ── Cleanup on unmount ─────────────────────────────────────────────────────
-  useEffect(() => () => { audioRef.current?.pause(); }, []);
+  useEffect(() => () => {
+    if (audioRef.current) unregisterMedia(audioRef.current);
+    audioRef.current?.pause();
+  }, []);
 
   // ── Remote transport control from the parent app (device control channel) ──
   // Kept in a ref so this single effect (keyed only on `lastMessage`) always

@@ -13,6 +13,7 @@ import { sendVoiceQuery, APIError } from "@/lib/api";
 import { useDeviceChannelContext } from "@/components/DeviceChannelProvider";
 import { useTTS } from "@/hooks/useTTS";
 import { MiniMonto } from "@/components/MiniMonto";
+import { registerMedia, unregisterMedia } from "@/lib/media-priority";
 
 function fmt(s: number) {
   if (!isFinite(s)) return "0:00";
@@ -81,6 +82,7 @@ export default function StoriesPage() {
     if (!story) return;
 
     if (audioRef.current) {
+      unregisterMedia(audioRef.current);
       audioRef.current.pause();
       audioRef.current.src = "";
     }
@@ -88,6 +90,7 @@ export default function StoriesPage() {
     const audio = new Audio(`/stories/${encodeURIComponent(story.file)}`);
     audio.volume = volume;
     audioRef.current = audio;
+    registerMedia(audio);
 
     audio.onloadedmetadata = () => setDuration(audio.duration);
     audio.ontimeupdate     = () => {
@@ -236,7 +239,10 @@ export default function StoriesPage() {
     }
   }, [recorder, skip, playStory]);
 
-  useEffect(() => () => { audioRef.current?.pause(); }, []);
+  useEffect(() => () => {
+    if (audioRef.current) unregisterMedia(audioRef.current);
+    audioRef.current?.pause();
+  }, []);
 
   const isRec = recorder.recordingState === "recording";
   const pct   = duration ? (progress / duration) * 100 : 0;

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { DeviceChannelProvider } from "@/components/DeviceChannelProvider";
+import { VoiceNoteToast } from "@/components/VoiceNoteToast";
 
 export const metadata: Metadata = {
   title: "Monto AI — Child-Safe Voice Companion",
@@ -26,7 +27,10 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
-        <DeviceChannelProvider>{children}</DeviceChannelProvider>
+        <DeviceChannelProvider>
+          {children}
+          <VoiceNoteToast />
+        </DeviceChannelProvider>
       </body>
     </html>
   );

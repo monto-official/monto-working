@@ -225,11 +225,6 @@ export default function Home() {
   const [showPaired, setShowPaired] = useState(false);
   useEffect(() => { setChildName(loadChildName()); }, []);
 
-  // ── Incoming voice note from the parent app ─────────────────────────────
-  const [incomingVoiceNote, setIncomingVoiceNote] = useState(false);
-  const [voiceNoteBlocked, setVoiceNoteBlocked]   = useState(false);
-  const voiceNoteAudioRef = useRef<HTMLAudioElement | null>(null);
-
   const busyRef          = useRef(false);
   const ringtoneRef       = useRef<HTMLAudioElement | null>(null);
   const silenceTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -334,7 +329,7 @@ export default function Home() {
 
   // ── Music remote control — parent app can push a "play" command over the
   // always-on device control channel; navigate to /songs with that track ──
-  const { lastMessage } = useDeviceChannelContext();
+  const { lastMessage, incomingVoiceNote } = useDeviceChannelContext();
   useEffect(() => {
     if (!lastMessage) return;
     if (lastMessage.type === "music-command" && lastMessage.action === "play" && lastMessage.trackId) {
@@ -370,24 +365,9 @@ export default function Home() {
       const callerAvatar = typeof lastMessage.callerAvatar === "string" ? lastMessage.callerAvatar : undefined;
       setCalling({ callee: callerName, isIncoming: true, avatar: callerAvatar });
     }
-    if (lastMessage.type === "voice-message" && lastMessage.senderRole === "parent" && typeof lastMessage.id === "string") {
-      const messageId = lastMessage.id;
-      setIncomingVoiceNote(true);
-      setVoiceNoteBlocked(false);
-      setTimeout(() => setIncomingVoiceNote(false), 8000);
-      // Point the <audio> straight at the endpoint instead of awaiting a full
-      // fetch().blob() first — the browser starts decoding/playing as bytes
-      // arrive, so it plays as soon as possible instead of after the whole
-      // file downloads.
-      const audio = new Audio(`${getApiUrl()}/voice-messages/${deviceId}/${messageId}/audio`);
-      voiceNoteAudioRef.current = audio;
-      audio.play().catch(() => {
-        // Autoplay blocked (e.g. no user gesture yet since boot) — let the
-        // toast's "Tap to listen" affordance retry it on a real tap instead
-        // of silently failing while claiming it's playing.
-        setVoiceNoteBlocked(true);
-      });
-    }
+    // Incoming parent voice messages are handled globally in
+    // DeviceChannelProvider (so they play — and pre-empt whatever's
+    // running — no matter which screen the child is on), not here.
   }, [lastMessage, router, calling, speak, deviceId]);
 
   // Stop any in-progress ringtone as soon as the call screen closes.
@@ -874,63 +854,8 @@ export default function Home() {
         )}
       </AnimatePresence>
 
-      {/* ── Incoming voice note toast ────────────────────────────────────── */}
-      <AnimatePresence>
-        {incomingVoiceNote && (
-          <motion.div
-            className="fixed top-6 left-1/2 z-40 w-[90vw] max-w-sm -translate-x-1/2"
-            initial={{ opacity: 0, y: -40, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0,   scale: 1   }}
-            exit={{   opacity: 0, y: -30,  scale: 0.95 }}
-            transition={{ type: "spring", stiffness: 300, damping: 22 }}
-          >
-            <div
-              className="rounded-3xl px-5 py-4 flex items-center gap-4"
-              style={{
-                background: "linear-gradient(135deg, #7C3AED, #A855F7, #D8B4FE)",
-                boxShadow: "0 0 40px rgba(124,58,237,0.5), 0 8px 32px rgba(0,0,0,0.4)",
-                cursor: voiceNoteBlocked ? "pointer" : "default",
-              }}
-              onClick={voiceNoteBlocked
-                ? () => { voiceNoteAudioRef.current?.play().then(() => setVoiceNoteBlocked(false)).catch(() => {}); }
-                : undefined}
-            >
-              <motion.div
-                className="text-4xl flex-shrink-0"
-                animate={{ rotate: [0, -8, 8, -8, 0] }}
-                transition={{ duration: 1, repeat: Infinity, ease: "easeInOut" }}
-              >
-                💌
-              </motion.div>
-
-              <div className="flex-1">
-                <p className="text-white font-bold text-sm leading-snug">
-                  Voice message from your parent!
-                </p>
-                <p className="text-white/80 text-xs mt-0.5">
-                  {voiceNoteBlocked ? "Tap here to listen 🎧" : "Playing it now — listen up! 🎧"}
-                </p>
-              </div>
-
-              <motion.button
-                onClick={(e) => { e.stopPropagation(); setIncomingVoiceNote(false); }}
-                className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0"
-                whileTap={{ scale: 0.85 }}
-              >
-                <X className="w-3.5 h-3.5 text-white" />
-              </motion.button>
-            </div>
-
-            <motion.div
-              className="h-1 rounded-full mt-1.5 mx-1"
-              initial={{ scaleX: 1 }}
-              animate={{ scaleX: 0 }}
-              transition={{ duration: 8, ease: "linear" }}
-              style={{ transformOrigin: "left", background: "rgba(255,255,255,0.6)" }}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Incoming voice note toast now renders globally via VoiceNoteToast
+          in the root layout, so it shows on every screen, not just here. */}
 
       {/* ── Parent reminder toast ────────────────────────────────────────── */}
       <AnimatePresence>
