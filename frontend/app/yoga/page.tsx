@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, Pause, Play, RotateCcw, Star, Trophy, Volume2, VolumeX } from "lucide-react";
+import { Pause, Play, RotateCcw, Star, Trophy, Volume2, VolumeX, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTTS } from "@/hooks/useTTS";
 import type { Settings } from "@/types";
@@ -183,7 +183,7 @@ export default function YogaPage() {
 
       <div className="relative z-10 mx-auto flex min-h-[100dvh] w-full max-w-3xl flex-col px-5 py-5 sm:px-8">
         <header className="flex items-center justify-between">
-          <button onClick={leave} className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/10" aria-label="पछाडि"><ArrowLeft /></button>
+          <button onClick={leave} className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/10" aria-label="बन्द गर्नुहोस्"><X /></button>
           <div className="text-center"><p className="text-[10px] font-black uppercase tracking-[.3em] text-emerald-200/65">Monto नेपाली प्रशिक्षक</p><h1 className="font-kids text-xl font-black">बाल व्यायाम</h1></div>
           <button onClick={() => { setSoundOn(value => !value); if (soundOn) cancel(); }} className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/10" aria-label="आवाज">{soundOn ? <Volume2 /> : <VolumeX />}</button>
         </header>
