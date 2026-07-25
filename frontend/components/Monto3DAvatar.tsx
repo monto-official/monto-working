@@ -13,6 +13,81 @@ const COMIC_WORDS: Record<string, string[]> = {
 const MODEL_FRAMES = ["/monto-3d.webp", "/monto-talk-open.webp", "/monto-talk-o.webp"];
 const SPEECH_SEQUENCE = [1, 2, 1, 0, 1, 2, 1, 1, 0];
 
+export type ExerciseMotionId = "march" | "shoulder" | "reach" | "bend" | "jump" | "knee" | "touch" | "balance" | "breathe";
+
+/** Whole-body transform recipes so Monto himself can lead each PT move —
+ * he's one flat sprite (no bendable limbs), so the motion has to sell the
+ * exercise through bounce/tilt/squash-stretch on the whole avatar instead
+ * of individual joints. Kept in the same spirit as ExerciseFigureArt's
+ * per-exercise recipes so the two feel like the same character set. */
+const EXERCISE_MOTION: Record<ExerciseMotionId, {
+  duration: number;
+  y?: number[]; rotate?: number[]; scaleX?: number[]; scaleY?: number[];
+  ease?: string | [number, number, number, number];
+  times?: number[];
+}> = {
+  march: {
+    duration: 0.8,
+    y: [0, -11, 0, -11, 0],
+    rotate: [-4, 4, -4, 4, -4],
+    scaleY: [1, 0.97, 1, 0.97, 1],
+    ease: [0.34, 1.4, 0.64, 1],
+  },
+  shoulder: {
+    duration: 1.8,
+    y: [0, -4, 0, 4, 0],
+    rotate: [-2, 0, 2, 0, -2],
+    scaleY: [1, 1.025, 1, 0.985, 1],
+    times: [0, 0.25, 0.5, 0.75, 1],
+    ease: [0.45, 0.05, 0.55, 0.95],
+  },
+  reach: {
+    duration: 1.7,
+    y: [0, -15, 0],
+    scaleY: [1, 1.08, 1],
+    ease: [0.45, 0.05, 0.55, 0.95],
+  },
+  bend: {
+    duration: 1.9,
+    rotate: [-14, 14, -14],
+    y: [0, 3, 0],
+    ease: [0.45, 0.05, 0.55, 0.95],
+  },
+  jump: {
+    duration: 1.0,
+    times: [0, 0.22, 0.5, 0.78, 1],
+    y: [0, 6, -32, 6, 0],
+    scaleY: [1, 0.84, 1.16, 0.85, 1],
+    scaleX: [1, 1.07, 0.93, 1.07, 1],
+    ease: [0.34, 1.56, 0.64, 1],
+  },
+  knee: {
+    duration: 0.7,
+    y: [0, -9, 0, -9, 0],
+    rotate: [3, -3, 3, -3, 3],
+    ease: [0.34, 1.4, 0.64, 1],
+  },
+  touch: {
+    duration: 2.0,
+    rotate: [0, 16, 0],
+    y: [0, 10, 0],
+    ease: [0.45, 0.05, 0.55, 0.95],
+  },
+  balance: {
+    duration: 3.2,
+    rotate: [-2, 2, -2],
+    y: [0, -2, 0],
+    ease: [0.45, 0.05, 0.55, 0.95],
+  },
+  breathe: {
+    duration: 4.5,
+    times: [0, 0.35, 0.55, 0.85, 1],
+    scaleY: [1, 1.07, 1.07, 1, 1],
+    scaleX: [1, 0.98, 0.98, 1, 1],
+    ease: [0.45, 0.05, 0.55, 0.95],
+  },
+};
+
 const SPARKLE_POSITIONS = [
   { top: "6%", left: "10%" },
   { top: "2%", left: "80%" },
@@ -43,7 +118,10 @@ function MagicSparkles() {
   );
 }
 
-export function Monto3DAvatar({ emotion, size = 320 }: { emotion: Emotion; size?: number }) {
+export function Monto3DAvatar({ emotion, size = 320, exercise, paused = false }: { emotion: Emotion; size?: number; exercise?: ExerciseMotionId; paused?: boolean }) {
+  const move = exercise ? EXERCISE_MOTION[exercise] : undefined;
+  const moveDuration = paused ? 999 : move?.duration;
+  const moveTimes = paused ? undefined : move?.times;
   const talking = emotion === "talking";
   const excited = emotion === "excited" || emotion === "happy";
   const sad = emotion === "sad";
@@ -90,7 +168,12 @@ export function Monto3DAvatar({ emotion, size = 320 }: { emotion: Emotion; size?
         width: `min(${size}px, 100%)`,
         aspectRatio: "1 / 1.08",
       }}
-      animate={{
+      animate={move ? {
+        y: paused ? 0 : move.y,
+        rotate: paused ? 0 : move.rotate,
+        scaleX: paused ? 1 : move.scaleX,
+        scaleY: paused ? 1 : move.scaleY,
+      } : {
         y: lowPower
           ? talking ? [0, -2, 0] : [0, -3, 0]
           : talking ? [0, -4, 0] : sad ? [3, 7, 3] : [0, -5, 0],
@@ -99,8 +182,10 @@ export function Monto3DAvatar({ emotion, size = 320 }: { emotion: Emotion; size?
           : thinking ? [0, -2.5, 0] : excited ? [0, 1.5, -1.5, 0] : [0, 0.7, 0],
         scale: talking ? [1, lowPower ? 1.006 : 1.012, 1] : 1,
       }}
-      transition={{ duration: talking ? (lowPower ? 1.35 : 1.15) : (lowPower ? 4.6 : 3.8), repeat: Infinity, ease: "easeInOut" }}
-      aria-label={`Monto is ${emotion}`}
+      transition={move
+        ? { duration: moveDuration, repeat: Infinity, ease: move.ease ?? "easeInOut", times: moveTimes }
+        : { duration: talking ? (lowPower ? 1.35 : 1.15) : (lowPower ? 4.6 : 3.8), repeat: Infinity, ease: "easeInOut" }}
+      aria-label={move ? `Monto is doing ${exercise}` : `Monto is ${emotion}`}
     >
       {!lowPower && (
         <motion.div className="absolute inset-[9%] rounded-full bg-cyan-400/20 blur-3xl"
@@ -144,4 +229,3 @@ export function Monto3DAvatar({ emotion, size = 320 }: { emotion: Emotion; size?
     </motion.div>
   );
 }
-

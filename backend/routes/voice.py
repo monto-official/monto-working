@@ -6,7 +6,7 @@ POST /voice/process — used by Raspberry Pi: returns JSON for face + TTS
 import asyncio
 import logging
 import re
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Header, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Header, BackgroundTasks
 from fastapi.responses import Response
 from models.schemas import VoiceQueryResponse
 from services.stt_service import STTService
@@ -47,7 +47,16 @@ def detect_language(text: str) -> str:
         "ke", "kina", "kasari", "kasto", "kata", "kahile", "ko", "ho", "hoina",
         "cha", "chha", "chu", "chhan", "garnu", "gara", "bhanana", "bhannu",
         "ramro", "dhanyabad", "namaste", "suna", "aaja", "bholi", "hijo",
-        "chau", "chhau", "kasto", "kosto", "timilai", "malai",
+        "chau", "chhau", "kasto", "kosto", "timilai",
+        # Common everyday Nepali words missing from the original short list —
+        # their absence made ordinary romanized Nepali sentences fall through
+        # to "english", causing Monto to reply in the wrong language.
+        "sathi", "khana", "khanu", "ghar", "didi", "bhai", "bahini", "dai",
+        "aama", "buwa", "hajur", "papa", "mummy", "school", "padhne", "padhnu",
+        "khelnu", "khelchu", "khelcha", "jane", "aunu", "aaunu", "jancha",
+        "aaucha", "sanchai", "sancho", "thikai", "hunxa", "huncha", "vaneko",
+        "vayo", "bho", "chaina", "hajurlai", "malaai", "tapailai",
+        "kohi", "kehi", "sabai", "dherai", "alikati", "ekdam", "ali",
     }
     # Require two markers to avoid classifying isolated English words such as
     # "ma" or "go" as Nepali.
@@ -98,6 +107,7 @@ def get_tts_service() -> TTSService:
 async def voice_query(
     background_tasks: BackgroundTasks,
     audio:      UploadFile = File(...),
+    language:   str | None = Form(default=None),
     session_id: str        = Header(default="web-default", alias="X-Session-Id"),
     stt:        STTService  = Depends(get_stt_service),
     llm:        LLMService  = Depends(get_llm_service),
@@ -112,7 +122,7 @@ async def voice_query(
     logger.info(f"[{session_id}] Audio: {len(audio_bytes):,} bytes | type: {audio.content_type} | file: {audio.filename}")
 
     try:
-        transcript = await stt.transcribe(audio_bytes, audio.filename or "audio.webm")
+        transcript = await stt.transcribe(audio_bytes, audio.filename or "audio.webm", language=language, translate_to_english=True)
     except Exception as e:
         logger.error(f"STT failed: {e}")
         raise HTTPException(status_code=502, detail=f"Speech recognition failed: {str(e)}")
@@ -181,6 +191,36 @@ async def voice_query(
         response=llm_result.response,
         confidence=llm_result.confidence,
     )
+
+
+@router.post("/transcribe")
+async def voice_transcribe(
+    audio:    UploadFile   = File(...),
+    prompt:   str | None   = Form(default=None),
+    language: str | None   = Form(default=None),
+    stt:      STTService   = Depends(get_stt_service),
+):
+    """STT only — no LLM, no memory. Used by games (e.g. the math quiz) that
+    just need the raw words the child said, not a conversational reply.
+    Callers may pass a `prompt` hint (e.g. biasing Whisper toward number
+    words) and/or a `language` hint (e.g. "ne") since short one-word answers
+    are otherwise easy to mis-transcribe — Whisper's auto language-detection
+    is unreliable on a single spoken word and can guess a random language."""
+    if not audio.filename:
+        raise HTTPException(status_code=400, detail="No audio file provided")
+
+    audio_bytes = await audio.read()
+    if not audio_bytes or len(audio_bytes) < 100:
+        raise HTTPException(status_code=400, detail="Audio file too small")
+
+    try:
+        transcript = await stt.transcribe(audio_bytes, audio.filename or "audio.webm", prompt, language)
+    except Exception as e:
+        logger.error(f"STT failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Speech recognition failed: {str(e)}")
+
+    logger.info(f"[/voice/transcribe] transcript: '{transcript}'")
+    return {"transcript": transcript}
 
 
 @router.post("/process")

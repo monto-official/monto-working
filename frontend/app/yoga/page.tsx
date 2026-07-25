@@ -1,63 +1,69 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, Pause, Play, RotateCcw, Star, Trophy, Volume2, VolumeX } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTTS } from "@/hooks/useTTS";
-import { ExerciseFigureArt } from "@/components/ExerciseFigureArt";
-import { MiniMonto } from "@/components/MiniMonto";
 import type { Settings } from "@/types";
 
 type Phase = "welcome" | "countdown" | "exercise" | "rest" | "finished";
 type Exercise = {
   id: string;
   nepali: string;
-  english: string;
-  emoji: string;
   duration: number;
   instruction: string;
   encouragement: string;
   color: string;
-  animation: "march" | "reach" | "bend" | "jump" | "knee" | "touch" | "balance" | "breathe";
+  gif: string;
 };
 
 const EXERCISES: Exercise[] = [
-  { id: "march", nepali: "ठाउँमै मार्च", english: "March in place", emoji: "🚶", duration: 15, instruction: "ढाड सीधा राखेर पालैपालो घुँडा उठाऔँ। हात पनि अगाडि–पछाडि चलाऔँ।", encouragement: "वाह! घुँडा अलि माथि उठाऔँ!", color: "#38BDF8", animation: "march" },
-  { id: "reach", nepali: "आकाश छुने", english: "Reach for the sky", emoji: "🙆", duration: 12, instruction: "दुवै हात माथि तन्काएर आकाश छुने प्रयास गरौँ। फेरि हात तल ल्याऔँ।", encouragement: "एकदम राम्रो! अझ अग्लो बनौँ!", color: "#A78BFA", animation: "reach" },
-  { id: "bend", nepali: "दायाँ–बायाँ झुक्ने", english: "Side bends", emoji: "🤸", duration: 14, instruction: "खुट्टा अलि फराकिलो राखौँ। बिस्तारै दायाँ र बायाँतिर झुकौँ।", encouragement: "बिस्तारै गरौँ, हतार गर्नु पर्दैन!", color: "#34D399", animation: "bend" },
-  { id: "jump", nepali: "जम्पिङ स्टार", english: "Jumping stars", emoji: "⭐", duration: 15, instruction: "उफ्रँदा हात र खुट्टा खोलौँ, फेरि सँगै ल्याऔँ। आफ्नो वरिपरि खाली ठाउँ राखौँ।", encouragement: "सुपर स्टार! लय मिलाएर उफ्रौँ!", color: "#FB7185", animation: "jump" },
-  { id: "knee", nepali: "घुँडा उठाउने", english: "High knees", emoji: "🦵", duration: 15, instruction: "पालैपालो घुँडा कम्मरसम्म उठाऔँ। सन्तुलनका लागि हात चलाऔँ।", encouragement: "दमदार! अब अर्को घुँडा!", color: "#F59E0B", animation: "knee" },
-  { id: "touch", nepali: "खुट्टाको औँला छुने", english: "Toe touches", emoji: "🙇", duration: 12, instruction: "घुँडा धेरै नबंग्याई बिस्तारै तल झुकौँ र खुट्टाको औँला छुने प्रयास गरौँ।", encouragement: "जति पुग्छ त्यति मात्रै, बल नगर्नू!", color: "#22C55E", animation: "touch" },
-  { id: "balance", nepali: "रुखजस्तै सन्तुलन", english: "Tree balance", emoji: "🌳", duration: 12, instruction: "एउटा खुट्टामा उभिऔँ। गाह्रो भए भित्ता वा कुर्सी समात्न सक्छौँ।", encouragement: "शाबास! तिमी बलियो रुखजस्तै छौ!", color: "#10B981", animation: "balance" },
-  { id: "breathe", nepali: "शान्त सास", english: "Calm breathing", emoji: "🧘", duration: 15, instruction: "नाकबाट बिस्तारै सास लिऔँ, पेट फुलाऔँ, अनि मुखबाट सास छोडौँ।", encouragement: "सुन्दर! शरीरलाई शान्त हुन दिऔँ।", color: "#818CF8", animation: "breathe" },
+  { id: "hands", nepali: "हात तल-माथि", duration: 15, instruction: "दुवै हात तल राखौँ। अब बिस्तारै काँधमाथि उठाऔँ र फेरि तल ल्याऔँ।", encouragement: "राम्रो! हात बिस्तारै तल र माथि गरौँ।", color: "#38BDF8", gif: "/pt/1.gif" },
+  { id: "shoulders", nepali: "काँध माथि-तल", duration: 15, instruction: "हात शरीरको छेउमा राखौँ। दुवै काँध कानतिर माथि उठाऔँ र बिस्तारै तल झारौँ।", encouragement: "शाबास! काँध माथि, अनि तल।", color: "#2DD4BF", gif: "/pt/2.gif" },
+  { id: "arms", nepali: "हात अगाडि-पछाडि", duration: 15, instruction: "दुवै हातलाई बिस्तारै अगाडि उठाऔँ, फेरि शरीरको छेउमा तल ल्याऔँ।", encouragement: "एकदम राम्रो! हात सीधा राखौँ।", color: "#A78BFA", gif: "/pt/3.gif" },
+  { id: "open", nepali: "दुवै हात फैलाउने", duration: 15, instruction: "दुवै हात काँधको उचाइमा छेउतिर फैलाऔँ र फेरि तल ल्याऔँ।", encouragement: "राम्रो गर्दै हुनुहुन्छ! बिस्तारै गरौँ।", color: "#34D399", gif: "/pt/4.gif" },
 ];
+
+const PT_GIFS = ["/pt/1.gif", "/pt/2.gif", "/pt/3.gif", "/pt/4.gif"];
 
 const SETTINGS: Settings = { language: "nepali", voice: "female", autoSpeak: true, darkMode: true };
 
 export default function YogaPage() {
   const router = useRouter();
   const { speak, cancel } = useTTS();
-  const [phase, setPhase] = useState<Phase>("welcome");
+  const [phase, setPhase] = useState<Phase>("exercise");
   const [index, setIndex] = useState(0);
-  const [remaining, setRemaining] = useState(3);
+  const [remaining, setRemaining] = useState(EXERCISES[0].duration);
   const [stars, setStars] = useState(0);
   const [paused, setPaused] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
-  const [message, setMessage] = useState("रमाइलो गर्दै शरीर चलाउन तयार छौ?");
+  const [message, setMessage] = useState(EXERCISES[0].instruction);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const exercise = EXERCISES[index];
+  const [displayedGif, setDisplayedGif] = useState(PT_GIFS[0]);
 
   const progress = useMemo(() => Math.round(((index + (phase === "finished" ? 1 : 0)) / EXERCISES.length) * 100), [index, phase]);
   const speakingRef = useRef(false);
-  const [speaking, setSpeaking] = useState(false);
   const say = useCallback((text: string, emotion = "excited") => {
     if (!soundOn) return;
     speakingRef.current = true;
-    setSpeaking(true);
-    void speak(text, emotion, SETTINGS, undefined, () => { speakingRef.current = false; setSpeaking(false); });
+    void speak(text, emotion, SETTINGS, undefined, () => { speakingRef.current = false; });
   }, [soundOn, speak]);
 
+  useEffect(() => {
+    setDisplayedGif(current => {
+      const choices = PT_GIFS.filter(gif => gif !== current);
+      return choices[Math.floor(Math.random() * choices.length)];
+    });
+  }, [index]);
+
+  const initialVoiceRef = useRef(false);
+  useEffect(() => {
+    if (initialVoiceRef.current || phase !== "exercise") return;
+    initialVoiceRef.current = true;
+    say(`[friendly]\n${exercise.nepali}। ${exercise.instruction}`, "happy");
+  }, [exercise, phase, say]);
   const clearClock = useCallback(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
     intervalRef.current = null;
@@ -92,12 +98,12 @@ export default function YogaPage() {
     if (isLast) {
       setPhase("finished");
       setMessage("आजको बाल PT पूरा भयो!");
-      say("[excited]\nवाह! आजको सबै व्यायाम पूरा भयो। तिमी साँच्चै फिटनेस सुपरस्टार हौ!", "excited");
+      say("[excited]\nवाह! आजको सबै व्यायाम पूरा भयो। तपाईं साँच्चै फिटनेस सुपरस्टार हुनुहुन्छ!", "excited");
     } else {
       setRemaining(5);
       setPhase("rest");
-      setMessage("पानीको एक सानो घुट्को लिन सक्छौ।");
-      say(`[happy]\nशाबास! एउटा तारा पायौ। अब पाँच सेकेन्ड आराम गरौँ।`, "happy");
+      setMessage("पानीको एक सानो घुट्को लिन सक्नुहुन्छ।");
+      say(`[happy]\nशाबास! तपाईंले एउटा तारा पाउनुभयो। अब पाँच सेकेन्ड आराम गरौँ।`, "happy");
     }
   }, [index, say]);
 
@@ -129,7 +135,7 @@ export default function YogaPage() {
   // auto-starts the countdown so kids don't have to stop moving to press a button.
   useEffect(() => {
     if (phase !== "welcome") return;
-    say("[excited]\nरमाइलो गर्दै शरीर चलाऔँ! तयार होऊ!", "excited");
+    say("[excited]\nरमाइलो गर्दै शरीर चलाऔँ! तयार हुनुहोस्!", "excited");
     let cancelled = false;
     const tryAdvance = () => {
       if (cancelled) return;
@@ -159,10 +165,10 @@ export default function YogaPage() {
     cancel();
     setIndex(0);
     setStars(0);
-    setRemaining(3);
+    setRemaining(EXERCISES[0].duration);
     setPaused(false);
-    setPhase("welcome");
-    setMessage("रमाइलो गर्दै शरीर चलाउन तयार छौ?");
+    setPhase("exercise");
+    setMessage("रमाइलो गर्दै शरीर चलाउन तयार हुनुहुन्छ?");
   };
 
   const leave = () => {
@@ -174,12 +180,11 @@ export default function YogaPage() {
   return (
     <main className="relative min-h-[100dvh] overflow-hidden bg-[#071421] text-white select-none">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_12%,rgba(34,197,94,.22),transparent_32%),radial-gradient(circle_at_88%_82%,rgba(59,130,246,.25),transparent_34%),linear-gradient(155deg,#071421,#0d2137_50%,#141737)]" />
-      {["🌿", "⭐", "💪", "🌈", "⚡", "🏃"].map((item, i) => <motion.span key={i} className="absolute select-none text-3xl opacity-10" style={{ left: `${7 + i * 18}%`, top: `${12 + (i * 31) % 75}%` }} animate={{ y: [0, -14, 0], rotate: [-5, 8, -5] }} transition={{ duration: 3 + i * .35, repeat: Infinity }}>{item}</motion.span>)}
 
       <div className="relative z-10 mx-auto flex min-h-[100dvh] w-full max-w-3xl flex-col px-5 py-5 sm:px-8">
         <header className="flex items-center justify-between">
           <button onClick={leave} className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/10" aria-label="पछाडि"><ArrowLeft /></button>
-          <div className="text-center"><p className="text-[10px] font-black uppercase tracking-[.3em] text-emerald-200/65">Monto नेपाली Coach</p><h1 className="font-kids text-xl font-black">बाल PT Exercise</h1></div>
+          <div className="text-center"><p className="text-[10px] font-black uppercase tracking-[.3em] text-emerald-200/65">Monto नेपाली प्रशिक्षक</p><h1 className="font-kids text-xl font-black">बाल व्यायाम</h1></div>
           <button onClick={() => { setSoundOn(value => !value); if (soundOn) cancel(); }} className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/10" aria-label="आवाज">{soundOn ? <Volume2 /> : <VolumeX />}</button>
         </header>
 
@@ -191,15 +196,15 @@ export default function YogaPage() {
         <section className="flex flex-1 flex-col items-center justify-center py-5 text-center">
           <AnimatePresence mode="wait">
             <motion.div key={`${phase}-${index}`} initial={{ opacity: 0, scale: .88, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 1.08 }} className="w-full">
-              <div className="mx-auto flex h-52 w-52 items-center justify-center rounded-[4rem] border border-white/10 bg-white/10 shadow-[0_30px_85px_rgba(0,0,0,.32)] sm:h-60 sm:w-60" style={{ boxShadow: `0 25px 80px ${exercise.color}30` }}>
-                {phase === "welcome" && <motion.div animate={{ y: [0, -12, 0], rotate: [-4, 4, -4] }} transition={{ duration: 1.2, repeat: Infinity }} className="text-8xl">🏃</motion.div>}
+              <div className="relative mx-auto flex h-64 w-full max-w-md items-center justify-center overflow-hidden rounded-3xl border border-white/10 bg-white/10 shadow-[0_30px_85px_rgba(0,0,0,.32)]" style={{ boxShadow: `0 25px 80px ${exercise.color}30` }}>
+                {phase === "welcome" && <img src="/pt/1.gif" alt="Monto PT warm-up" className="h-full w-full object-contain" />}
                 {phase === "countdown" && <motion.div key={remaining} initial={{ scale: 1.7, opacity: .3 }} animate={{ scale: 1, opacity: 1 }} className="text-8xl font-black" style={{ color: exercise.color }}>{remaining}</motion.div>}
-                {phase === "exercise" && <ExerciseFigureArt exerciseId={exercise.animation} color={exercise.color} size={176} paused={paused} />}
-                {phase === "rest" && <motion.div animate={{ scale: [1, 1.1, 1] }} transition={{ duration: 2, repeat: Infinity }} className="text-8xl">💧</motion.div>}
+                {phase === "exercise" && <img src={displayedGif} alt={`Monto ले ${exercise.nepali} देखाउँदै`} className="h-full w-full object-contain" />}
+                {phase === "rest" && <img src="/pt/4.gif" alt="Monto resting" className="h-full w-full object-contain" />}
                 {phase === "finished" && <motion.div animate={{ y: [0, -10, 0], rotate: [-5, 5, -5] }} transition={{ duration: 1, repeat: Infinity }}><Trophy className="h-28 w-28 text-amber-300" /></motion.div>}
               </div>
 
-              <p className="mt-6 text-xs font-black uppercase tracking-[.28em]" style={{ color: exercise.color }}>{phase === "welcome" ? "८ रमाइला exercise" : phase === "rest" ? "आराम" : phase === "finished" ? "पूरा भयो" : `${index + 1} / ${EXERCISES.length} · ${exercise.english}`}</p>
+              <p className="mt-6 text-xs font-black uppercase tracking-[.28em]" style={{ color: exercise.color }}>{phase === "welcome" ? "४ रमाइला व्यायाम" : phase === "rest" ? "आराम" : phase === "finished" ? "पूरा भयो" : `${index + 1} / ${EXERCISES.length}`}</p>
               <h2 className="mt-2 text-3xl font-black sm:text-4xl">{phase === "welcome" ? "Monto सँग चलौँ!" : phase === "rest" ? "आराम गरौँ" : phase === "finished" ? "फिटनेस सुपरस्टार!" : exercise.nepali}</h2>
               <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-white/60 sm:text-base">{message}</p>
               {(phase === "exercise" || phase === "rest" || phase === "countdown") && <motion.div key={remaining} initial={{ scale: 1.25 }} animate={{ scale: 1 }} className="mt-5 text-5xl font-black tabular-nums">{remaining}<span className="ml-1 text-sm text-white/35">सेकेन्ड</span></motion.div>}
@@ -209,11 +214,10 @@ export default function YogaPage() {
 
         <div className="mx-auto w-full max-w-lg pb-3">
           {phase === "welcome" ? <motion.button whileTap={{ scale: .96 }} onClick={() => beginCountdown(0)} className="flex h-16 w-full items-center justify-center gap-3 rounded-3xl bg-gradient-to-r from-emerald-400 to-cyan-400 text-lg font-black text-slate-950 shadow-[0_18px_45px_rgba(52,211,153,.25)]"><Play className="fill-current" /> सुरु गरौँ</motion.button>
-          : phase === "finished" ? <motion.button whileTap={{ scale: .96 }} onClick={restart} className="flex h-16 w-full items-center justify-center gap-3 rounded-3xl bg-gradient-to-r from-amber-300 to-orange-400 text-lg font-black text-slate-950"><RotateCcw /> फेरि खेलौँ</motion.button>
+          : phase === "finished" ? <motion.button whileTap={{ scale: .96 }} onClick={restart} className="flex h-16 w-full items-center justify-center gap-3 rounded-3xl bg-gradient-to-r from-amber-300 to-orange-400 text-lg font-black text-slate-950"><RotateCcw /> फेरि गरौँ</motion.button>
           : <motion.button whileTap={{ scale: .95 }} onClick={() => setPaused(value => !value)} className="mx-auto flex h-14 w-full max-w-xs items-center justify-center gap-2 rounded-2xl font-black text-slate-950" style={{ background: exercise.color }}>{paused ? <Play className="fill-current" /> : <Pause />}{paused ? "जारी राखौँ" : "रोकौँ"}</motion.button>}
         </div>
       </div>
-      <MiniMonto speaking={speaking} />
     </main>
   );
 }

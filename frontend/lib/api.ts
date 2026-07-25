@@ -17,7 +17,8 @@ export class APIError extends Error {
 // ── API CALLS ─────────────────────────────────────────────────────────────────
 
 export async function sendVoiceQuery(
-  audioBlob: Blob
+  audioBlob: Blob,
+  language?: "ne" | "en"
 ): Promise<VoiceQueryResponse> {
   const formData = new FormData();
   const ext = audioBlob.type.includes("ogg")
@@ -26,6 +27,7 @@ export async function sendVoiceQuery(
       ? "mp4"
       : "webm";
   formData.append("audio", audioBlob, `recording.${ext}`);
+  if (language) formData.append("language", language);
 
   let res: Response | null = null;
   let networkError: unknown = null;
@@ -56,6 +58,38 @@ export async function sendVoiceQuery(
   }
 
   return res.json() as Promise<VoiceQueryResponse>;
+}
+
+export async function transcribeAudio(audioBlob: Blob, prompt?: string, language?: string): Promise<string> {
+  const formData = new FormData();
+  const ext = audioBlob.type.includes("ogg")
+    ? "ogg"
+    : audioBlob.type.includes("mp4")
+      ? "mp4"
+      : "webm";
+  formData.append("audio", audioBlob, `recording.${ext}`);
+  if (language) formData.append("language", language);
+  if (prompt) formData.append("prompt", prompt);
+
+  const res = await fetch(`${API_URL}/voice/transcribe`, {
+    method: "POST",
+    headers: { "X-Session-Id": getOrCreateDeviceId() },
+    body: formData,
+  });
+
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try {
+      const err = await res.json();
+      detail = err.detail || detail;
+    } catch {
+      // ignore
+    }
+    throw new APIError(res.status, detail);
+  }
+
+  const data = await res.json() as { transcript: string };
+  return data.transcript;
 }
 
 export async function checkHealth(): Promise<boolean> {

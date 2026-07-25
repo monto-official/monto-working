@@ -13,6 +13,7 @@ import { SONGS, type Song } from "@/lib/media-content";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 import { sendVoiceQuery, APIError } from "@/lib/api";
 import { useDeviceChannelContext } from "@/components/DeviceChannelProvider";
+import { useTTS } from "@/hooks/useTTS";
 import { MiniMonto } from "@/components/MiniMonto";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -45,6 +46,13 @@ function AudioBars({ level, color }: { level: number; color: string }) {
 export default function SongsPage() {
   const router = useRouter();
   const { send, lastMessage } = useDeviceChannelContext();
+  const { cancel: cancelTTS } = useTTS();
+
+  // Monto's TTS audio is a singleton that lives outside React, so it keeps
+  // playing across navigation — if Monto was still talking when we arrived
+  // here (e.g. mid-reply when "play a song" was said), stop it now so it
+  // doesn't overlap the song that's about to start.
+  useEffect(() => { cancelTTS(); }, [cancelTTS]);
 
   // Player state
   const [currentIndex, setCurrentIndex]   = useState<number | null>(null);

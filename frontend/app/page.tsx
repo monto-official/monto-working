@@ -83,14 +83,11 @@ function detectsInsult(text: string): boolean {
 // (frontend/public/explore/nepal); the rest use a themed icon chip since no
 // photo assets exist for them yet in the project.
 const EXPLORE_TOPICS = [
-  { scene: "solar-system" as const, label: "Solar System", subtitle: "Planets & Space", emoji: "🪐", tone: "violet", transcript: "solar system planets" },
-  { scene: "photosynthesis" as const, label: "Plants & Food", subtitle: "How They Grow", emoji: "🌿", tone: "mint", transcript: "how plants make food" },
-  { scene: "animal-life" as const, label: "Animal Life", subtitle: "Life Cycles", emoji: "🦋", tone: "coral", transcript: "animal life cycle butterfly" },
-  { scene: "water-cycle" as const, label: "Water Cycle", subtitle: "Rain & Rivers", emoji: "💧", tone: "sky", transcript: "water cycle rain" },
-  { scene: "dinosaurs" as const, label: "Dinosaurs", subtitle: "Prehistoric World", emoji: "🦖", tone: "sun", transcript: "dinosaurs" },
-  { scene: "ocean-life" as const, label: "Ocean Life", subtitle: "Under the Sea", emoji: "🐋", tone: "teal", transcript: "ocean sea creatures" },
-  { scene: "human-body" as const, label: "Your Body", subtitle: "How You Work", emoji: "🧠", tone: "rose", transcript: "human body" },
-  { scene: "know-nepal" as const, label: "Know Nepal", subtitle: "Culture & History", photo: "/explore/nepal/everest.jpg", transcript: "know nepal history culture tradition geography wildlife" },
+  { scene: "solar-system" as const, label: "Solar System", subtitle: "Planets & Space", emoji: "🪐", tone: "violet", transcript: "solar system planets", url: null },
+  { scene: "animal-life" as const, label: "Animal Life", subtitle: "Life Cycles", emoji: "🦋", tone: "coral", transcript: "animal life cycle butterfly", url: null },
+  { scene: "know-nepal" as const, label: "Know Nepal", subtitle: "Culture & History", photo: "/explore/nepal/everest.jpg", emoji: "🏔️", tone: "sky", transcript: "know nepal history culture tradition geography wildlife", url: null },
+  { scene: "solar-system" as const, label: "Size of Space", subtitle: "Explore the Universe", emoji: "🚀", tone: "violet", transcript: "size of space universe", url: "https://neal.fun/size-of-space/" },
+  { scene: "animal-life" as const, label: "The Deep Sea", subtitle: "Dive Into the Depths", emoji: "🐋", tone: "sky", transcript: "deep sea ocean depths", url: "https://neal.fun/deep-sea/" },
 ];
 
 
@@ -99,7 +96,9 @@ const GREETING_MESSAGES = [
   "Ask me anything! I love chatting! 😊",
   "Let's learn something fun today! 🚀",
   "What's on your mind? I'm listening! 💭",
-];
+];
+const AUTO_LISTENING_ENABLED = true;
+
 
 // ── Floating emoji burst ──────────────────────────────────────────────────────
 const EmojiBurst = ({ emotion, trigger }: { emotion: string; trigger: number }) => {
@@ -233,6 +232,7 @@ export default function Home() {
   const busyRef          = useRef(false);
   const ringtoneRef       = useRef<HTMLAudioElement | null>(null);
   const silenceTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoListenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasSpokenRef     = useRef(false);
   const recordingStateRef = useRef<RecordingState>("idle");
   const router           = useRouter();
@@ -308,14 +308,24 @@ export default function Home() {
   // pattern as the water reminder above ───────────────────────────────────
   const handleReminderDue = useCallback((reminder: Reminder) => {
     setActiveReminder(reminder);
-    new Audio("/sounds/reminder_ringtone.mp3").play().catch(() => {});
-    speak(
-      `Reminder! ${reminder.label}`,
-      "happy",
-      { language: "english", voice: "female", autoSpeak: true, darkMode: true },
-      () => {},
-      () => {}
-    );
+    const chime = new Audio("/sounds/reminder_ringtone.mp3");
+    // Speak the reminder only after the chime finishes — playing both at
+    // once made the chime and Monto's voice overlap and drown each other out.
+    let announced = false;
+    const announce = () => {
+      if (announced) return;
+      announced = true;
+      speak(
+        `Reminder! ${reminder.label}`,
+        "happy",
+        { language: "english", voice: "female", autoSpeak: true, darkMode: true },
+        () => {},
+        () => {}
+      );
+    };
+    chime.addEventListener("ended", announce, { once: true });
+    chime.addEventListener("error", announce, { once: true });
+    chime.play().catch(announce);
     setTimeout(() => setActiveReminder(null), 12000);
   }, [speak]);
 
@@ -350,9 +360,12 @@ export default function Home() {
       // either way — cap it so the tone can't loop through the whole call
       // if something ever delays the connect.
       setTimeout(() => { ringtone.pause(); if (ringtoneRef.current === ringtone) ringtoneRef.current = null; }, 6000);
+      // Duck the ringtone under Monto's announcement instead of layering both
+      // at full volume, which made the ring and the voice unintelligible.
+      ringtone.volume = 0.2;
       speak(`${callerName} is calling!`, "excited",
         { language: "english", voice: "female", autoSpeak: true, darkMode: true },
-        () => {}, () => {});
+        () => {}, () => { if (ringtoneRef.current === ringtone) ringtone.volume = 1; });
       const callerAvatar = typeof lastMessage.callerAvatar === "string" ? lastMessage.callerAvatar : undefined;
       setCalling({ callee: callerName, isIncoming: true, avatar: callerAvatar });
     }
@@ -388,7 +401,7 @@ export default function Home() {
     setEmotion("thinking");
     cancelTTS();
     try {
-      const result = await sendVoiceQuery(blob);
+      const result = await sendVoiceQuery(blob, lang === "nepali" ? "ne" : undefined);
       setTranscript(result.transcript);
       setResponse(result);
       // If the child said something unkind, Monto reacts sad/crying no matter
@@ -541,11 +554,48 @@ export default function Home() {
     // getUserMedia for WebRTC, and a second concurrent mic grab from the
     // wake-word engine destabilizes the audio pipeline (and, on Android
     // WebView, was observed dropping the call's signaling WebSocket).
-    enabled: !micMuted && recordingState === "idle" && !isSpeaking && !exploreScene && !calling,
+    enabled: !AUTO_LISTENING_ENABLED && !micMuted && recordingState === "idle" && !isSpeaking && !exploreScene && !calling,
     keywords: ["monto", "hey monto", "hi monto", "montu", "hey montu", "hi montu", "मन्टो", "हे मन्टो"],
     language: lang === "nepali" ? "ne-NP" : "en-US",
   });
 
+  useEffect(() => {
+    const blocked =
+      micMuted || online !== true || isSpeaking || !!calling || !!exploreScene ||
+      showExplorePicker || showSettings || showPairing || incomingVoiceNote ||
+      appControls?.maintenance_mode === true || appControls?.ai_enabled === false ||
+      appControls?.microphone_enabled === false;
+
+    if (autoListenTimerRef.current) {
+      clearTimeout(autoListenTimerRef.current);
+      autoListenTimerRef.current = null;
+    }
+
+    if (blocked) {
+      if (recorder.recordingState === "recording") recorder.cancelRecording();
+      return;
+    }
+
+    if (!AUTO_LISTENING_ENABLED || busyRef.current || recordingState !== "idle" || recorder.recordingState !== "idle") return;
+
+    autoListenTimerRef.current = setTimeout(() => {
+      autoListenTimerRef.current = null;
+      if (busyRef.current) return;
+      void recorder.startRecording();
+    }, 650);
+
+    return () => {
+      if (autoListenTimerRef.current) {
+        clearTimeout(autoListenTimerRef.current);
+        autoListenTimerRef.current = null;
+      }
+    };
+  }, [
+    appControls?.ai_enabled, appControls?.maintenance_mode, appControls?.microphone_enabled,
+    calling, exploreScene, incomingVoiceNote, isSpeaking, micMuted, online,
+    recorder.cancelRecording, recorder.recordingState, recorder.startRecording,
+    recordingState, showExplorePicker, showPairing, showSettings,
+  ]);
   const isRec    = recordingState === "recording";
   const isProc   = recordingState === "processing" || recordingState === "requesting";
 
@@ -585,7 +635,7 @@ export default function Home() {
   const adventureItems = [
     { label: "Music", icon: Music2, route: "/songs", tone: "coral", subtitle: "Songs & Rhymes", enabled: appControls?.songs_enabled !== false },
     { label: "Stories", icon: BookOpen, route: "/stories", tone: "violet", subtitle: "Listen & Learn", enabled: appControls?.stories_enabled !== false },
-    { label: "Exercise", icon: Dumbbell, route: "/exercise", tone: "mint", subtitle: "Move & Play", enabled: appControls?.yoga_enabled !== false },
+    { label: "Exercise", icon: Dumbbell, route: "/yoga", tone: "mint", subtitle: "Move & Play", enabled: appControls?.yoga_enabled !== false },
     { label: "Games", icon: Gamepad2, route: "/games", tone: "sun", subtitle: "Fun & Play", enabled: true },
     { label: "Moral Game", icon: HeartHandshake, route: "/moral-game", tone: "rose", subtitle: "Values & Fun", enabled: true },
     { label: "Explore", icon: Compass, action: () => setShowExplorePicker(true), tone: "sky", subtitle: "Discover More", enabled: true },
@@ -652,8 +702,13 @@ export default function Home() {
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
                 {EXPLORE_TOPICS.map((topic, i) => (
                   <motion.button
-                    key={topic.scene}
+                    key={topic.label}
                     onClick={() => {
+                      if (topic.url) {
+                        setShowExplorePicker(false);
+                        window.location.assign(topic.url);
+                        return;
+                      }
                       setExploreScene(topic.scene);
                       setExploreTranscript(topic.transcript);
                       setShowExplorePicker(false);

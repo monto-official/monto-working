@@ -1,5 +1,5 @@
 "use client";
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { motion } from "framer-motion";
 
 function RocketSVG({ size }: { size: number }) {
@@ -10,6 +10,33 @@ function RocketSVG({ size }: { size: number }) {
       <path d="M18 58c-8 2-14 10-16 20 8-2 16-6 20-12z" fill="#E11D48" />
       <path d="M42 58c8 2 14 10 16 20-8-2-16-6-20-12z" fill="#E11D48" />
       <path d="M24 78h12l-2 10a4 4 0 0 1-8 0z" fill="#FBBF24" />
+    </svg>
+  );
+}
+
+/** Layered vector flame (outer orange-red, inner yellow-orange core) so the
+ *  engine exhaust matches the rocket's clean hand-drawn art instead of
+ *  looking like a stray 🔥 emoji glued underneath it. */
+function FlameSVG({ size }: { size: number }) {
+  const uid = useId();
+  const outerId = `flame-outer-${uid}`;
+  const innerId = `flame-inner-${uid}`;
+  return (
+    <svg width={size} height={size * 1.5} viewBox="0 0 40 60" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <linearGradient id={outerId} x1="20" y1="0" x2="20" y2="60" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#FBBF24" />
+          <stop offset="55%" stopColor="#F97316" />
+          <stop offset="100%" stopColor="#DC2626" />
+        </linearGradient>
+        <linearGradient id={innerId} x1="20" y1="10" x2="20" y2="46" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#FEF9C3" />
+          <stop offset="60%" stopColor="#FDE047" />
+          <stop offset="100%" stopColor="#F97316" />
+        </linearGradient>
+      </defs>
+      <path d="M20 0c10 14 16 26 16 36 0 13-7 22.5-16 24-9-1.5-16-11-16-24 0-10 6-22 16-36z" fill={`url(#${outerId})`} />
+      <path d="M20 11c6.5 9.5 10 17.5 10 24 0 8-4 14-10 16-6-2-10-8-10-16 0-6.5 3.5-14.5 10-24z" fill={`url(#${innerId})`} />
     </svg>
   );
 }
@@ -63,12 +90,12 @@ export function RocketFlyby({ children, size = 300 }: { children: ReactNode; siz
 
           {/* Engine flame, flickering beneath the rocket */}
           <motion.div
-            className="absolute left-1/2 -translate-x-1/2 pointer-events-none select-none"
-            style={{ bottom: -rocketSize * 0.16, fontSize: rocketSize * 0.32 }}
-            animate={{ opacity: [1, 0.55, 1], scaleY: [1, 1.4, 1] }}
+            className="absolute left-1/2 -translate-x-1/2 pointer-events-none select-none origin-top"
+            style={{ bottom: -rocketSize * 0.34 }}
+            animate={{ opacity: [1, 0.6, 1], scaleY: [1, 1.35, 1] }}
             transition={{ duration: 0.2, repeat: Infinity }}
           >
-            🔥
+            <FlameSVG size={rocketSize * 0.34} />
           </motion.div>
         </motion.div>
       </motion.div>

@@ -17,7 +17,7 @@ export interface UseAudioRecorderReturn {
 const NOISE_FLOOR_KEY = "monto:noiseFloor";
 const CALIBRATION_MS = 1500;
 const MIN_THRESHOLD = 0.002;
-const MAX_THRESHOLD = 0.15;
+const MAX_THRESHOLD = 0.06;
 // Human voice fundamentals + harmonics live roughly in this band —
 // filtering outside it cuts low-pitch rumble (fans, AC hum) and
 // high-pitch hiss without touching speech intelligibility.
@@ -121,7 +121,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       });
 
       const avgRms = samples.reduce((a, b) => a + b, 0) / (samples.length || 1);
-      const threshold = Math.min(Math.max(avgRms * 2.2, MIN_THRESHOLD), MAX_THRESHOLD);
+      const threshold = Math.min(Math.max(avgRms * 1.55, MIN_THRESHOLD), MAX_THRESHOLD);
 
       noiseFloorRef.current = threshold;
       setNoiseFloor(threshold);
@@ -193,7 +193,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         lowpass.frequency.value = VOICE_LOWPASS_HZ;
 
         const gate = new AudioWorkletNode(ctx, "noise-gate-processor", {
-          parameterData: { threshold: noiseFloorRef.current ?? 0.02 },
+          parameterData: { threshold: noiseFloorRef.current ?? 0.008 },
         });
         gateNodeRef.current = gate;
 
@@ -226,6 +226,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       };
 
       recorder.onstop = () => {
+        setRecordingState("idle");
         const blob = new Blob(chunksRef.current, {
           type: recorder.mimeType || mimeType || "audio/webm",
         });

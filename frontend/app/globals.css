@@ -204,13 +204,13 @@ body {
 .monto-light-accent { color: #E11D48; }
 .monto-light-muted { color: #94A3B8; }
 
-/* Main card shells — frosted glass so the full-screen scene shows through */
+/* Main card shells — near-transparent so the full-screen scene shows through */
 .monto-light-hero {
-  background: rgba(255,255,255,.8);
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
-  border: 1px solid rgba(255,255,255,.55);
-  box-shadow: 0 24px 60px rgba(30,41,59,.18), inset 0 1px 0 rgba(255,255,255,.7);
+  background: rgba(255,255,255,.1);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border: 1px solid rgba(255,255,255,.4);
+  box-shadow: 0 24px 60px rgba(30,41,59,.12), inset 0 1px 0 rgba(255,255,255,.35);
 }
 
 .monto-light-mic { transition: transform .15s ease, box-shadow .2s ease; }
@@ -224,7 +224,7 @@ body {
 html[data-low-power="true"] .monto-light-hero {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-  background: rgba(255,255,255,.94);
+  background: rgba(255,255,255,.3);
 }
 
 /* Opaque light modal shell — used for pickers/dialogs over a dark backdrop */

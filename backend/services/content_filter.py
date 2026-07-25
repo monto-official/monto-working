@@ -26,30 +26,53 @@ class FilterResult:
 
 
 # ── BAD WORD LISTS ────────────────────────────────────────────────────────────
-# English bad words / inappropriate content patterns
+# Unambiguous words only — no common benign-context words like "die"/"hurt"/
+# "hate"/"fight"/"high", which false-positive on normal kid talk ("I died in
+# Mario", "that hurt my feelings", "I hate broccoli", "high score") and cause
+# Monto to derail into a scary/grown-up redirect instead of answering.
 _BAD_WORDS_EN = [
     # Profanity
     r"\bf+u+c+k\b", r"\bs+h+i+t\b", r"\bb+i+t+c+h\b", r"\ba+s+s+h+o+l+e\b",
     r"\bd+a+m+n\b", r"\bc+r+a+p\b", r"\bh+e+l+l\b", r"\bw+t+f\b",
     r"\bs+t+f+u\b", r"\bb+a+s+t+a+r+d\b", r"\bc+u+n+t\b", r"\bd+i+c+k\b",
     r"\bp+e+n+i+s\b", r"\bv+a+g+i+n+a\b", r"\bt+i+t+s?\b", r"\bn+u+d+e\b",
-    # Violence
+    # Romanized Hindi/Nepali profanity (common in Nepali kids' typed/spoken input)
+    r"\bc+h+u+t+i+y+a+\b", r"\bm+a+d+a+r+c+h+o+d\b", r"\bb+e+h+e+n+c+h+o+d\b",
+    r"\bb+h+o+s+d+i+\w*\b", r"\br+a+n+d+i+\b", r"\bg+a+n+d+u+\b",
+    r"\bl+a+u+d+a+\b", r"\bl+u+n+d+\b", r"\bharami\b", r"\bkamina+\b",
+    # Violence — clearly violent/dangerous words only
     r"\bkill\b", r"\bmurder\b", r"\bstab\b", r"\bshoot\b", r"\bblood\b",
-    r"\bgun\b", r"\bbomb\b", r"\bweapon\b", r"\bsuicide\b", r"\bdie\b",
-    r"\bdead\b", r"\bhate\b", r"\bfight\b", r"\bhurt\b",
+    r"\bgun\b", r"\bbomb\b", r"\bweapon\b", r"\bsuicide\b",
     # Adult content
     r"\bsex\b", r"\bporn\b", r"\bnaked\b", r"\bboobs?\b", r"\bcondom\b",
-    r"\bdrug\b", r"\bweed\b", r"\bcocaine\b", r"\bhigh\b", r"\bdrunk\b",
+    r"\bdrug\b", r"\bweed\b", r"\bcocaine\b", r"\bdrunk\b",
     r"\balcohol\b", r"\bbeer\b", r"\bcigar\b",
     # Dangerous
-    r"\bsuicide\b", r"\bself.harm\b", r"\bcut myself\b", r"\brun away\b",
-    r"\bsteal\b", r"\bcheat\b", r"\bhack\b",
+    r"\bself.harm\b", r"\bcut myself\b",
 ]
+
+# Ambiguous words that are only concerning in a threatening/self-harm phrase —
+# checked as substrings against _CONTEXT_PHRASES below, never standalone.
+_CONTEXT_PHRASES = {
+    "violence": [
+        "hate you", "want to hurt", "gonna hurt", "beat you up", "fight you",
+        "kill you", "hurt someone", "hurt myself",
+    ],
+    "danger": [
+        "want to die", "hate my life", "hurt myself", "nobody loves me",
+        "kill myself", "end my life", "run away from home", "wish i was dead",
+        "मर्न मन लाग्छ", "कसैले माया गर्दैन",
+    ],
+    "adult": [
+        "get high", "getting high", "smoke weed",
+    ],
+}
 
 # Nepali bad words (Devanagari)
 _BAD_WORDS_NE = [
-    "मर", "गाली", "भोग", "यौन", "नाङ्गो", "हत्या", "मार",
+    "गाली", "भोग", "यौन", "नाङ्गो", "हत्या",
     "रक्त", "बम", "हतियार", "मदिरा", "लागूपदार्थ",
+    "रंडी", "भोसडी", "चुत", "लौडा", "साला कुत्ता",
 ]
 
 # Compiled patterns
@@ -96,7 +119,7 @@ _REDIRECTS = {
         "That word isn't a nice one! How about we talk about something awesome instead? 🌟",
     ],
     "profanity_ne": [
-        "अरे! हामी यस्ता शब्द प्रयोग गर्दैनौं 😊 कुनै राम्रो कुरा गरौं! तिम्रो मनपर्ने खेल के हो?",
+        "अरे! हामी यस्ता शब्द प्रयोग गर्दैनौं 😊 कुनै राम्रो कुरा गरौं! तपाईंको मनपर्ने खेल कुन हो?",
         "त्यस्तो शब्द राम्रो होइन! आउ, कुनै रमाइलो कुरा गरौं! 🌟",
     ],
     "violence_en": [
@@ -117,7 +140,7 @@ _REDIRECTS = {
         "It sounds like something might be bothering you 💛 Please talk to a grown-up you trust — like your mum, dad, or a teacher. They love you and will help! I'm always here too. 🤗",
     ],
     "danger_ne": [
-        "तिमीलाई केही परेको जस्तो लाग्छ 💛 आफ्नो आमा, बुवा वा शिक्षकसँग कुरा गर! उहाँहरू तिमीलाई माया गर्नुहुन्छ। म पनि सधैं यहाँ छु 🤗",
+        "तपाईंलाई केही समस्या परेको जस्तो लाग्छ 💛 आफ्नो आमा, बुवा वा शिक्षकसँग कुरा गर्नुहोस्! उहाँहरू तपाईंलाई माया गर्नुहुन्छ। म पनि सधैं यहाँ छु 🤗",
     ],
 }
 
@@ -160,30 +183,26 @@ def _detect_category(text: str) -> Optional[str]:
 
             # Categorise
             if any(v in matched for v in ["kill", "murder", "stab", "shoot",
-                                          "blood", "gun", "bomb", "weapon",
-                                          "dead", "die", "fight", "hurt", "hate"]):
+                                          "blood", "gun", "bomb", "weapon"]):
                 return "violence"
 
             if any(v in matched for v in ["sex", "porn", "naked", "drug", "weed",
                                           "cocaine", "alcohol", "beer", "cigar",
-                                          "boob", "condom", "high", "drunk"]):
+                                          "boob", "condom", "drunk"]):
                 return "adult"
 
-            if any(v in matched for v in ["suicide", "self.harm", "cut myself",
-                                          "run away", "steal", "cheat", "hack"]):
+            if any(v in matched for v in ["suicide", "self.harm", "cut myself"]):
                 return "danger"
 
             return "profanity"
 
-    # Context-based checks (no bad words but still concerning)
-    danger_phrases = [
-        "want to die", "hate my life", "hurt myself", "nobody loves me",
-        "kill myself", "end my life", "run away from home",
-        "मर्न मन लाग्छ", "कसैले माया गर्दैन",
-    ]
-    for phrase in danger_phrases:
-        if phrase in text_lower or phrase in text:
-            return "danger"
+    # Context-based checks — ambiguous words (hurt/hate/fight/die/high, etc.)
+    # only count when they appear in an actually threatening/self-harm phrase,
+    # never standalone, so normal kid talk doesn't get derailed.
+    for category, phrases in _CONTEXT_PHRASES.items():
+        for phrase in phrases:
+            if phrase in text_lower or phrase in text:
+                return category
 
     return None
 
