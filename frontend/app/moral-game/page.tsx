@@ -97,11 +97,11 @@ export default function MoralGamePage() {
   const restart = () => { setRound(0); setScore(0); setAnswer(null); setStarted(true); };
 
   useEffect(() => {
-    if (!soundOn || done) return;
+    if (!started || !soundOn || done) return;
     const words = answer ? answer.result + " " + answer.lesson : story.title + ". " + story.question;
     void speak(words, answer?.kind === false ? "thinking" : "happy", TTS_SETTINGS, () => setSpeaking(true), () => setSpeaking(false));
     return () => { cancel(); setSpeaking(false); };
-  }, [answer, cancel, done, round, soundOn, speak, story]);
+  }, [answer, cancel, done, round, soundOn, speak, started, story]);
 
   useEffect(() => () => {
     calibrationRun.current += 1;
