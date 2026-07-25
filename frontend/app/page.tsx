@@ -83,10 +83,10 @@ function detectsInsult(text: string): boolean {
 // (frontend/public/explore/nepal); the rest use a themed icon chip since no
 // photo assets exist for them yet in the project.
 const EXPLORE_TOPICS = [
-  { scene: "solar-system" as const, label: "Solar System", subtitle: "Planets & Space", emoji: "🪐", tone: "violet", transcript: "solar system planets", url: null },
-  { scene: "animal-life" as const, label: "Animal Life", subtitle: "Life Cycles", emoji: "🦋", tone: "coral", transcript: "animal life cycle butterfly", url: null },
+  { scene: "solar-system" as const, label: "Solar System", subtitle: "Planets & Space", photo: "/explore/planet.webp", emoji: "🪐", tone: "violet", transcript: "solar system planets", url: null },
+  { scene: "animal-life" as const, label: "Animal Life", subtitle: "Life Cycles", photo: "/explore/animal.webp", emoji: "🦋", tone: "coral", transcript: "animal life cycle butterfly", url: null },
   { scene: "know-nepal" as const, label: "Know Nepal", subtitle: "Culture & History", photo: "/explore/nepal/everest.jpg", emoji: "🏔️", tone: "sky", transcript: "know nepal history culture tradition geography wildlife", url: null },
-  { scene: "solar-system" as const, label: "Size of Space", subtitle: "Explore the Universe", emoji: "🚀", tone: "violet", transcript: "size of space universe", url: "https://neal.fun/size-of-space/" },
+  { scene: "solar-system" as const, label: "Size of Space", subtitle: "Explore the Universe", photo: "/explore/space.webp", emoji: "🚀", tone: "violet", transcript: "size of space universe", url: "https://neal.fun/size-of-space/" },
   { scene: "animal-life" as const, label: "The Deep Sea", subtitle: "Dive Into the Depths", emoji: "🐋", tone: "sky", transcript: "deep sea ocean depths", url: "https://neal.fun/deep-sea/" },
 ];
 
