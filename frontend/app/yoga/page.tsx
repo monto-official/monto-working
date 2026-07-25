@@ -200,7 +200,7 @@ export default function YogaPage() {
                 {phase === "welcome" && <img src="/pt/1.gif" alt="Monto PT warm-up" className="h-full w-full object-contain" />}
                 {phase === "countdown" && <motion.div key={remaining} initial={{ scale: 1.7, opacity: .3 }} animate={{ scale: 1, opacity: 1 }} className="text-8xl font-black" style={{ color: exercise.color }}>{remaining}</motion.div>}
                 {phase === "exercise" && <img src={displayedGif} alt={`Monto ले ${exercise.nepali} देखाउँदै`} className="h-full w-full object-contain" />}
-                {phase === "rest" && <img src="/pt/4.gif" alt="Monto resting" className="h-full w-full object-contain" />}
+                {phase === "rest" && <img src="/pt/rest.gif" alt="Monto resting" className="h-full w-full object-contain" />}
                 {phase === "finished" && <motion.div animate={{ y: [0, -10, 0], rotate: [-5, 5, -5] }} transition={{ duration: 1, repeat: Infinity }}><Trophy className="h-28 w-28 text-amber-300" /></motion.div>}
               </div>
 
