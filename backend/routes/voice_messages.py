@@ -12,7 +12,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, BackgroundTasks
 from fastapi.responses import Response
 from pydantic import BaseModel
 
@@ -112,8 +112,20 @@ async def create_voice_message(
     )
 
 
+def _mark_listened(message_id: str):
+    """Runs after the audio response is already on the wire — marking a
+    message listened is bookkeeping, not something playback should ever
+    wait on."""
+    try:
+        get_supabase().table("voice_messages").update({
+            "listened_at": datetime.now(timezone.utc).isoformat()
+        }).eq("id", message_id).execute()
+    except Exception as exc:
+        logger.warning(f"[VoiceMessages] failed to mark {message_id} listened (non-fatal): {exc}")
+
+
 @router.get("/{device_id}/{message_id}/audio")
-async def get_voice_message_audio(device_id: str, message_id: str, request: Request):
+async def get_voice_message_audio(device_id: str, message_id: str, request: Request, background_tasks: BackgroundTasks):
     """Download the raw audio for one voice message. Best-effort marks it
     as listened on first fetch (a deliberate simplification over a separate
     ack endpoint)."""
@@ -131,12 +143,9 @@ async def get_voice_message_audio(device_id: str, message_id: str, request: Requ
 
     row = res.data[0]
     if not row.get("listened_at"):
-        try:
-            db.table("voice_messages").update({
-                "listened_at": datetime.now(timezone.utc).isoformat()
-            }).eq("id", message_id).execute()
-        except Exception as exc:
-            logger.warning(f"[VoiceMessages] failed to mark {message_id} listened (non-fatal): {exc}")
+        # Fire-and-forget — the child hearing the message instantly matters
+        # far more than this write landing before the response does.
+        background_tasks.add_task(_mark_listened, message_id)
 
     try:
         audio_bytes = base64.b64decode(row["audio_base64"], validate=True)

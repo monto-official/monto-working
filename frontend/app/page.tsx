@@ -96,7 +96,7 @@ const GREETING_MESSAGES = [
   "Ask me anything! I love chatting! 😊",
   "Let's learn something fun today! 🚀",
   "What's on your mind? I'm listening! 💭",
-];
+];
 const AUTO_LISTENING_ENABLED = true;
 
 
@@ -227,6 +227,7 @@ export default function Home() {
 
   // ── Incoming voice note from the parent app ─────────────────────────────
   const [incomingVoiceNote, setIncomingVoiceNote] = useState(false);
+  const [voiceNoteBlocked, setVoiceNoteBlocked]   = useState(false);
   const voiceNoteAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const busyRef          = useRef(false);
@@ -372,17 +373,20 @@ export default function Home() {
     if (lastMessage.type === "voice-message" && lastMessage.senderRole === "parent" && typeof lastMessage.id === "string") {
       const messageId = lastMessage.id;
       setIncomingVoiceNote(true);
+      setVoiceNoteBlocked(false);
       setTimeout(() => setIncomingVoiceNote(false), 8000);
-      fetch(`${getApiUrl()}/voice-messages/${deviceId}/${messageId}/audio`)
-        .then(res => (res.ok ? res.blob() : Promise.reject(new Error(`HTTP ${res.status}`))))
-        .then(blob => {
-          const url = URL.createObjectURL(blob);
-          const audio = new Audio(url);
-          voiceNoteAudioRef.current = audio;
-          audio.onended = () => URL.revokeObjectURL(url);
-          void audio.play().catch(() => {});
-        })
-        .catch(() => {});
+      // Point the <audio> straight at the endpoint instead of awaiting a full
+      // fetch().blob() first — the browser starts decoding/playing as bytes
+      // arrive, so it plays as soon as possible instead of after the whole
+      // file downloads.
+      const audio = new Audio(`${getApiUrl()}/voice-messages/${deviceId}/${messageId}/audio`);
+      voiceNoteAudioRef.current = audio;
+      audio.play().catch(() => {
+        // Autoplay blocked (e.g. no user gesture yet since boot) — let the
+        // toast's "Tap to listen" affordance retry it on a real tap instead
+        // of silently failing while claiming it's playing.
+        setVoiceNoteBlocked(true);
+      });
     }
   }, [lastMessage, router, calling, speak, deviceId]);
 
@@ -865,11 +869,16 @@ export default function Home() {
             exit={{   opacity: 0, y: -30,  scale: 0.95 }}
             transition={{ type: "spring", stiffness: 300, damping: 22 }}
           >
-            <div className="rounded-3xl px-5 py-4 flex items-center gap-4"
+            <div
+              className="rounded-3xl px-5 py-4 flex items-center gap-4"
               style={{
                 background: "linear-gradient(135deg, #7C3AED, #A855F7, #D8B4FE)",
                 boxShadow: "0 0 40px rgba(124,58,237,0.5), 0 8px 32px rgba(0,0,0,0.4)",
+                cursor: voiceNoteBlocked ? "pointer" : "default",
               }}
+              onClick={voiceNoteBlocked
+                ? () => { voiceNoteAudioRef.current?.play().then(() => setVoiceNoteBlocked(false)).catch(() => {}); }
+                : undefined}
             >
               <motion.div
                 className="text-4xl flex-shrink-0"
@@ -884,12 +893,12 @@ export default function Home() {
                   Voice message from your parent!
                 </p>
                 <p className="text-white/80 text-xs mt-0.5">
-                  Playing it now — listen up! 🎧
+                  {voiceNoteBlocked ? "Tap here to listen 🎧" : "Playing it now — listen up! 🎧"}
                 </p>
               </div>
 
               <motion.button
-                onClick={() => setIncomingVoiceNote(false)}
+                onClick={(e) => { e.stopPropagation(); setIncomingVoiceNote(false); }}
                 className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0"
                 whileTap={{ scale: 0.85 }}
               >

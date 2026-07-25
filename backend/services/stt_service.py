@@ -125,7 +125,6 @@ class STTService:
                                 file=(filename, audio_file, self._mime(suffix)),
                                 temperature=0,
                                 response_format="json",
-                                language="en",
                                 prompt=used_prompt,
                             )
                         else:
