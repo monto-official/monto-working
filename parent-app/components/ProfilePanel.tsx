@@ -23,7 +23,7 @@ import {
 } from "@/lib/profile-storage";
 import { loadPairings, removePairing, type PairingData } from "@/lib/pairing-storage";
 import { getOrCreateParentDeviceId } from "@/lib/device-id";
-import { clearAuthSession } from "@/lib/auth-storage";
+import { clearAuthSession, loadAuthSession } from "@/lib/auth-storage";
 import { ChildAvatar } from "@/components/ChildAvatar";
 import { PairingFlow } from "@/components/PairingFlow";
 import type { ChildProfile, ParentAccount } from "@/types";
@@ -49,8 +49,10 @@ export function ProfilePanel() {
   const handleUnpair = useCallback(async (pairing: PairingData) => {
     setUnpairing(null);
     try {
+      const session = loadAuthSession();
       await fetch(`${pairing.apiUrl}/pairing/${encodeURIComponent(pairing.deviceId)}/${encodeURIComponent(getOrCreateParentDeviceId())}`, {
         method: "DELETE",
+        headers: session ? { Authorization: `Bearer ${session.accessToken}` } : undefined,
       });
     } catch {
       // Best-effort on the backend — remove it locally either way.

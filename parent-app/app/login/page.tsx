@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { login } from "@/lib/auth-client";
 import { saveAuthSession } from "@/lib/auth-storage";
 import { saveParentAccount } from "@/lib/profile-storage";
+import { loadPairings, restorePairingsFromAccount } from "@/lib/pairing-storage";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -27,7 +28,15 @@ export default function LoginPage() {
       const session = await login(email.trim(), password);
       saveAuthSession(session);
       saveParentAccount({ name: session.name, email: session.email });
+
+      const before = new Set(loadPairings().map((p) => p.deviceId));
+      const restored = await restorePairingsFromAccount(session.accessToken);
+      const newlyRestored = restored.filter((p) => !before.has(p.deviceId)).length;
+
       toast.success(`Welcome back, ${session.name || "there"}! 👋`);
+      if (newlyRestored > 0) {
+        toast.success(newlyRestored === 1 ? "Reconnected to your Monto box." : `Reconnected to ${newlyRestored} Monto boxes.`);
+      }
       router.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't log in — try again.");

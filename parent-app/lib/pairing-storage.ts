@@ -1,5 +1,6 @@
 import { getOrCreateParentDeviceId } from "./device-id";
 import { sendFirebaseSignal } from "./firebase-signaling";
+import { loadAuthSession } from "./auth-storage";
 
 const STORAGE_KEY = "monto_pairings";
 const LEGACY_STORAGE_KEY = "monto_pairing";
@@ -76,6 +77,40 @@ export function removePairing(deviceId: string): void {
   writePairings(loadPairings().filter((p) => p.deviceId !== deviceId));
 }
 
+/**
+ * Restores every box tied to this parent account from the backend (see
+ * GET /pairing/mine) and merges them into local storage — so logging into
+ * an existing account on a new phone, or after a reinstall, reconnects to
+ * already-paired boxes without re-scanning a QR code. Fails soft: any
+ * error (offline, not logged in server-side, nothing to restore) just
+ * leaves the local list as it was.
+ */
+export async function restorePairingsFromAccount(accessToken: string): Promise<PairingData[]> {
+  if (!PUBLIC_API_URL) return loadPairings();
+  try {
+    const res = await fetch(`${PUBLIC_API_URL}/pairing/mine`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return loadPairings();
+    const rows = await res.json();
+    if (!Array.isArray(rows)) return loadPairings();
+
+    for (const row of rows) {
+      if (typeof row?.child_device_id !== "string" || typeof row?.api_url !== "string") continue;
+      addPairing({
+        deviceId: row.child_device_id,
+        apiUrl: reachableApiUrl(row.api_url),
+        turnUrl: row.turn_url ?? undefined,
+        turnUsername: row.turn_username ?? undefined,
+        turnPassword: row.turn_password ?? undefined,
+      });
+    }
+  } catch {
+    // Best-effort — local pairings (if any) still work regardless.
+  }
+  return loadPairings();
+}
+
 /** Parses a legacy v1 QR payload (credentials embedded directly, no backend
  * round trip). Kept only as a fallback for old child-app builds. */
 export function parsePairingPayload(raw: string): PairingData | null {
@@ -122,9 +157,13 @@ export async function redeemPairingCode(raw: string): Promise<PairingData> {
   }
 
   const redeemApiUrl = reachableApiUrl(obj.api);
+  const session = loadAuthSession();
   const res = await fetch(`${redeemApiUrl}/pairing/redeem`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(session ? { Authorization: `Bearer ${session.accessToken}` } : {}),
+    },
     body: JSON.stringify({
       code: obj.code,
       parent_device_id: getOrCreateParentDeviceId(),

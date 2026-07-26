@@ -18,7 +18,7 @@ import string
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
 from services.supabase_client import get_supabase
@@ -32,6 +32,21 @@ CODE_ALPHABET = string.ascii_uppercase + string.digits
 
 def _generate_code(length: int = 6) -> str:
     return "".join(random.choices(CODE_ALPHABET, k=length))
+
+
+async def get_optional_user_id(authorization: Optional[str] = Header(None)) -> Optional[str]:
+    """Resolves the parent's Supabase user id from an `Authorization: Bearer
+    <token>` header, if present and valid — never raises, so pairing keeps
+    working for a logged-out/expired session exactly as it did before
+    accounts were tied to pairings."""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    token = authorization.removeprefix("Bearer ")
+    try:
+        result = get_supabase().auth.get_user(token)
+        return result.user.id if result and result.user else None
+    except Exception:
+        return None
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -98,7 +113,7 @@ async def create_code(req: CreateCodeRequest):
 
 
 @router.post("/redeem", response_model=RedeemCodeResponse)
-async def redeem_code(req: RedeemCodeRequest):
+async def redeem_code(req: RedeemCodeRequest, user_id: Optional[str] = Depends(get_optional_user_id)):
     """Parent app: exchange a scanned code for connection info, and record
     the pairing permanently."""
     db = get_supabase()
@@ -127,6 +142,11 @@ async def redeem_code(req: RedeemCodeRequest):
     db.table("pairings").upsert({
         "child_device_id": row["child_device_id"],
         "parent_device_id": req.parent_device_id,
+        "parent_user_id": user_id,
+        "api_url": row["api_url"],
+        "turn_url": row["turn_url"],
+        "turn_username": row["turn_username"],
+        "turn_password": row["turn_password"],
     }, on_conflict="child_device_id,parent_device_id").execute()
 
     db.table("pairing_codes").update({
@@ -158,11 +178,34 @@ async def pairing_status(child_device_id: str):
     return [PairedDevice(**row) for row in (res.data or [])]
 
 
-@router.delete("/{child_device_id}/{parent_device_id}")
-async def unpair(child_device_id: str, parent_device_id: str):
-    """Remove a pairing (e.g. parent got a new phone)."""
+@router.get("/mine", response_model=list[RedeemCodeResponse])
+async def list_my_pairings(user_id: Optional[str] = Depends(get_optional_user_id)):
+    """Parent app: every box tied to my account, so logging in on a new
+    device/reinstall restores pairing without re-scanning a QR code."""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not logged in")
     db = get_supabase()
-    db.table("pairings").delete().eq("child_device_id", child_device_id).eq(
-        "parent_device_id", parent_device_id
-    ).execute()
+    res = (
+        db.table("pairings")
+        .select("child_device_id, api_url, turn_url, turn_username, turn_password")
+        .eq("parent_user_id", user_id)
+        .execute()
+    )
+    return [RedeemCodeResponse(**row) for row in (res.data or []) if row.get("api_url")]
+
+
+@router.delete("/{child_device_id}/{parent_device_id}")
+async def unpair(child_device_id: str, parent_device_id: str, user_id: Optional[str] = Depends(get_optional_user_id)):
+    """Remove a pairing (e.g. parent got a new phone). Matches by account
+    when logged in — a pairing restored via /mine onto a new device was
+    never recorded under that device's own parent_device_id, so matching on
+    that alone would silently fail to delete it. Falls back to the device
+    id when there's no valid session, same as before accounts existed."""
+    db = get_supabase()
+    query = db.table("pairings").delete().eq("child_device_id", child_device_id)
+    if user_id:
+        query = query.eq("parent_user_id", user_id)
+    else:
+        query = query.eq("parent_device_id", parent_device_id)
+    query.execute()
     return {"status": "unpaired"}

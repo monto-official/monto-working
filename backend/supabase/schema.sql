@@ -39,6 +39,16 @@ create table if not exists pairings (
     paired_at         timestamptz not null default now(),
     unique (child_device_id, parent_device_id)
 );
+-- Ties a pairing to the parent's Supabase account (not just the device that
+-- happened to redeem the QR), so logging into the same account elsewhere
+-- can restore it — plus the connection info needed to do that without a
+-- second round trip to the (ephemeral) pairing_codes table.
+alter table pairings add column if not exists parent_user_id text;
+alter table pairings add column if not exists api_url text;
+alter table pairings add column if not exists turn_url text;
+alter table pairings add column if not exists turn_username text;
+alter table pairings add column if not exists turn_password text;
+create index if not exists idx_pairings_parent_user on pairings(parent_user_id);
 
 -- ── Call history ─────────────────────────────────────────────────────────────
 create table if not exists call_logs (

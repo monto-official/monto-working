@@ -17,6 +17,7 @@ import {
   type PairingData,
 } from "@/lib/pairing-storage";
 import { getOrCreateParentDeviceId } from "@/lib/device-id";
+import { loadAuthSession } from "@/lib/auth-storage";
 import { getActiveCallDevice, setActiveCallDevice, clearActiveCallDevice } from "@/lib/call-state";
 import { PairingFlow } from "@/components/PairingFlow";
 import { DeviceSwitcher } from "@/components/DeviceSwitcher";
@@ -283,8 +284,10 @@ function ActiveCallScreen({
   const handleUnpair = useCallback(async () => {
     setConfirmUnpair(false);
     try {
+      const session = loadAuthSession();
       await fetch(`${pairing.apiUrl}/pairing/${encodeURIComponent(pairing.deviceId)}/${encodeURIComponent(getOrCreateParentDeviceId())}`, {
         method: "DELETE",
+        headers: session ? { Authorization: `Bearer ${session.accessToken}` } : undefined,
       });
     } catch {
       // Best-effort on the backend — remove it locally either way so the
