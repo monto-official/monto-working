@@ -252,6 +252,37 @@ def send_to_backend(audio_bytes):
         logger.error(f"Backend error: {e}")
         return None
 
+_current_proc = None
+_playback_lock = threading.Lock()
+
+def _stop_current_playback():
+    """Interrupts whatever's currently playing (Monto's own TTS) so a
+    higher-priority sound — a parent's voice message — can take over
+    immediately instead of overlapping with it."""
+    global _current_proc
+    with _playback_lock:
+        proc, _current_proc = _current_proc, None
+    if proc and proc.poll() is None:
+        try: proc.terminate()
+        except Exception: pass
+
+def _play_audio_file(path, player_cmd, timeout=30):
+    """Plays one audio file via `player_cmd + [path]`, tracking the process
+    so _stop_current_playback() can interrupt it from another thread."""
+    global _current_proc
+    proc = subprocess.Popen(player_cmd + [path],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    with _playback_lock:
+        _current_proc = proc
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+    finally:
+        with _playback_lock:
+            if _current_proc is proc:
+                _current_proc = None
+
 def play_tts(text, emotion="neutral", face=None):
     url = get_backend()
     try:
@@ -268,18 +299,46 @@ def play_tts(text, emotion="neutral", face=None):
             os.close(fd)
             if face: face.set_talking(True)
             # Use subprocess instead of os.system (safer, no shell injection)
-            if suffix == ".wav":
-                subprocess.run(["aplay", "-q", path],
-                               check=False, timeout=30)
-            else:
-                subprocess.run(["mpg123", "-q", path],
-                               check=False, timeout=30)
+            player = ["aplay", "-q"] if suffix == ".wav" else ["mpg123", "-q"]
+            _play_audio_file(path, player)
         finally:
             if face: face.set_talking(False)
             try: os.unlink(path)
             except: pass
     except Exception as e:
         logger.error(f"TTS error: {e}")
+
+def play_voice_message(message_id, face=None):
+    """Fetches and plays a parent's voice message immediately — it takes
+    priority over whatever Monto is currently saying, mirroring the web
+    child app's behavior."""
+    url = get_backend()
+    try:
+        r = requests.get(f"{url}/voice-messages/{DEVICE_ID}/{message_id}/audio", timeout=15)
+        r.raise_for_status()
+        content_type = r.headers.get("Content-Type", "")
+        suffix = (
+            ".wav"  if "wav"  in content_type else
+            ".mp4"  if "mp4"  in content_type else
+            ".ogg"  if "ogg"  in content_type else
+            ".mp3"  if "mpeg" in content_type else
+            ".webm"
+        )
+        fd, path = tempfile.mkstemp(suffix=suffix)
+        try:
+            os.write(fd, r.content)
+            os.close(fd)
+            _stop_current_playback()
+            if face: face.set_talking(True)
+            # ffplay (ffmpeg) handles whatever format the browser recorded
+            # in (webm/opus, ogg, mp4, mp3, wav) without branching on it.
+            _play_audio_file(path, ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet"])
+        finally:
+            if face: face.set_talking(False)
+            try: os.unlink(path)
+            except: pass
+    except Exception as e:
+        logger.error(f"Voice message playback error: {e}")
 
 # ── BACKEND MONITOR ───────────────────────────────────────────────────────────
 
@@ -364,6 +423,10 @@ def start_control_channel(face):
             face.set_emotion("happy", f"Paired with {child_name}'s parent! 🎉")
             play_tts(f"Hi {child_name}! I'm now paired with your parent's app.", emotion="happy", face=face)
             time.sleep(1)
+            face.set_emotion("idle")
+        elif signal_type == "voice-message" and payload.get("senderRole") == "parent" and payload.get("id"):
+            face.set_emotion("happy", "Voice message from your parent! 💌")
+            play_voice_message(payload["id"], face=face)
             face.set_emotion("idle")
 
     channel = FirebaseSignaling(
