@@ -7,12 +7,17 @@ The Pi acts as a lightweight mic + speaker — all heavy processing (STT, LLM, T
 
 ```
 raspberry_pi/
-├── monto_listener.py     ← main script, listens for "Hey Monto"
-├── requirements.txt      ← Python dependencies (lightweight)
-├── .env.example          ← copy to .env and fill in your values
-├── monto.service         ← systemd service (auto-start on boot)
-├── setup.sh              ← run once to install everything
-└── install_service.sh    ← run once to enable auto-start on boot
+├── monto_listener.py       ← main script, listens for "Hey Monto"
+├── requirements.txt        ← Python dependencies (lightweight)
+├── .env.example            ← copy to .env and fill in your values
+├── monto.service           ← systemd service (auto-start on boot)
+├── setup.sh                ← run once to install everything
+├── install_service.sh      ← run once to enable auto-start on boot
+│
+├── monto-frontend.service  ← systemd service that runs the web UI (frontend/)
+├── monto-kiosk.sh          ← waits for the web UI, opens it full-screen in Chromium
+├── monto-kiosk.desktop     ← autostart entry that runs monto-kiosk.sh on login
+└── install_kiosk.sh        ← run once to boot straight into the full web UI (kiosk mode)
 ```
 
 ## Setup (run once on Pi)
@@ -52,4 +57,34 @@ sudo systemctl status monto      # check if running
 sudo journalctl -u monto -f      # live logs
 sudo systemctl restart monto     # restart
 sudo systemctl stop monto        # stop
+```
+
+## Optional: boot straight into the full web UI (kiosk mode)
+
+By default the Pi is just a mic + speaker (`monto_listener.py`) — no screen
+UI. If your Pi has a display attached and you want it to boot directly into
+the same web app shown on `frontend/` (full-screen, no desktop visible),
+run this **in addition to** the setup above:
+
+```bash
+cd monto-working/raspberry_pi
+bash install_kiosk.sh
+```
+
+Requirements:
+- Raspberry Pi OS **with Desktop** (not Lite), with Desktop Autologin enabled
+  (`sudo raspi-config` → System Options → Boot / Auto Login → Desktop Autologin)
+- Node.js 18+ (`node -v` — install via NodeSource if missing, see script output)
+
+This builds `frontend/` for production and runs it as a systemd service
+(`monto-frontend`), then opens it in Chromium kiosk mode on login. Edit
+`frontend/.env` → `NEXT_PUBLIC_API_URL` to point at your backend machine's
+LAN IP before building — `localhost:8000` only works if the backend also
+runs on this same Pi, which it normally doesn't.
+
+```bash
+sudo systemctl status monto-frontend   # check the web server
+sudo journalctl -u monto-frontend -f   # live logs
+# after changing frontend code:
+cd frontend && npm run build && sudo systemctl restart monto-frontend
 ```

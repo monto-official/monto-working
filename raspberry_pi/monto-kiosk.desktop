@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Monto Kiosk
+Exec=/home/pi/monto-working/raspberry_pi/monto-kiosk.sh
+X-GNOME-Autostart-enabled=true
