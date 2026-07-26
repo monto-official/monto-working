@@ -77,10 +77,11 @@ Requirements:
 - Node.js 18+ (`node -v` — install via NodeSource if missing, see script output)
 
 This builds `frontend/` for production and runs it as a systemd service
-(`monto-frontend`), then opens it in Chromium kiosk mode on login. Edit
-`frontend/.env` → `NEXT_PUBLIC_API_URL` to point at your backend machine's
-LAN IP before building — `localhost:8000` only works if the backend also
-runs on this same Pi, which it normally doesn't.
+(`monto-frontend`), then opens it in Chromium kiosk mode on login.
+`NEXT_PUBLIC_API_URL` is set automatically from `raspberry_pi/.env`'s
+`BACKEND_URL` — no need to type your backend's LAN IP in twice. If
+`raspberry_pi/.env` isn't set up yet, run `setup.sh` (or set `BACKEND_URL`
+by hand) first, then re-run `install_kiosk.sh`.
 
 ```bash
 sudo systemctl status monto-frontend   # check the web server

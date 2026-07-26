@@ -21,9 +21,26 @@ fi
 echo "Setting up frontend/.env (if missing)..."
 if [ ! -f "$FRONTEND_DIR/.env" ] && [ -f "$FRONTEND_DIR/.env.example" ]; then
   cp "$FRONTEND_DIR/.env.example" "$FRONTEND_DIR/.env"
-  echo "⚠️  Created frontend/.env from .env.example — edit NEXT_PUBLIC_API_URL to point"
-  echo "   at your backend machine's LAN IP (same host as raspberry_pi/.env's BACKEND_URL)."
-  echo "   The default (localhost:8000) only works if the backend also runs on this Pi."
+fi
+
+# Reuse BACKEND_URL from raspberry_pi/.env (already set up for the wake-word
+# listener) so the web UI's backend URL doesn't have to be typed in twice.
+PI_ENV="$REPO_ROOT/raspberry_pi/.env"
+BACKEND_URL_VALUE=""
+if [ -f "$PI_ENV" ]; then
+  BACKEND_URL_VALUE=$(grep -m1 '^BACKEND_URL=' "$PI_ENV" | cut -d= -f2-)
+fi
+
+if [ -n "$BACKEND_URL_VALUE" ]; then
+  if grep -q '^NEXT_PUBLIC_API_URL=' "$FRONTEND_DIR/.env"; then
+    sed -i "s|^NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=$BACKEND_URL_VALUE|" "$FRONTEND_DIR/.env"
+  else
+    echo "NEXT_PUBLIC_API_URL=$BACKEND_URL_VALUE" >> "$FRONTEND_DIR/.env"
+  fi
+  echo "✅ frontend/.env NEXT_PUBLIC_API_URL set to $BACKEND_URL_VALUE (from raspberry_pi/.env)"
+else
+  echo "⚠️  Couldn't find BACKEND_URL in raspberry_pi/.env — set it there first (see"
+  echo "   raspberry_pi/.env.example), then re-run this script so the web UI picks it up."
 fi
 
 echo "Installing frontend dependencies and building for production..."
