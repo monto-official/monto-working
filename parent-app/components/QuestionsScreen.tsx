@@ -6,19 +6,15 @@ import { PhoneShell } from "@/components/PhoneShell";
 import { PageHeader } from "@/components/AppHeader";
 import { BottomNav } from "@/components/BottomNav";
 import { Input } from "@/components/ui/input";
-import { loadPairing, type PairingData } from "@/lib/pairing-storage";
+import { DeviceSwitcher } from "@/components/DeviceSwitcher";
+import { useSelectedPairing } from "@/hooks/useSelectedPairing";
 import { getQuestions, type Question } from "@/lib/api-client";
 import { formatQuestionStamp } from "@/lib/utils";
 
 export function QuestionsScreen() {
-  // undefined = pairing not checked yet, null = checked and none saved
-  const [pairing, setPairing] = useState<PairingData | null | undefined>(undefined);
+  const { pairings, selected: pairing, selectedDeviceId, setSelectedDeviceId } = useSelectedPairing();
   const [questions, setQuestions] = useState<Question[]>([]);
   const [search, setSearch] = useState("");
-
-  useEffect(() => {
-    setPairing(loadPairing());
-  }, []);
 
   useEffect(() => {
     if (!pairing) return;
@@ -43,6 +39,10 @@ export function QuestionsScreen() {
       <PageHeader title="Questions Asked" />
 
       <div className="flex-1 overflow-y-auto px-5 py-5 space-y-3">
+        {pairings && pairings.length > 1 && (
+          <DeviceSwitcher pairings={pairings} selectedDeviceId={selectedDeviceId} onChange={setSelectedDeviceId} />
+        )}
+
         <div className="relative">
           <Search className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
           <Input
@@ -53,7 +53,7 @@ export function QuestionsScreen() {
           />
         </div>
 
-        {pairing === null ? (
+        {pairings && pairings.length === 0 ? (
           <div className="py-10 text-center">
             <p className="text-sm text-muted-foreground">Pair with your child's Monto box to see questions.</p>
             <Link href="/call" className="text-xs text-primary font-semibold mt-2 inline-block">Pair now</Link>
@@ -62,7 +62,7 @@ export function QuestionsScreen() {
           <ul className="space-y-2">
             {filteredQuestions.length === 0 && (
               <li className="text-sm text-muted-foreground py-6 text-center">
-                {pairing === undefined ? "Loading…" : search ? "No matching questions." : "No questions yet."}
+                {pairings === undefined ? "Loading…" : search ? "No matching questions." : "No questions yet."}
               </li>
             )}
             {filteredQuestions.map((q) => {

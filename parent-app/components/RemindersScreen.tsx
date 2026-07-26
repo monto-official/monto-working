@@ -10,7 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Modal } from "@/components/ui/modal";
-import { loadPairing, type PairingData } from "@/lib/pairing-storage";
+import { DeviceSwitcher } from "@/components/DeviceSwitcher";
+import { useSelectedPairing } from "@/hooks/useSelectedPairing";
 import {
   listReminders,
   createReminder,
@@ -51,20 +52,15 @@ function daysSummary(daysOfWeek: number[]): string {
 }
 
 export function RemindersScreen() {
-  // undefined = pairing not checked yet, null = checked and none saved
-  const [pairing, setPairing] = useState<PairingData | null | undefined>(undefined);
+  const { pairings, selected: pairing, selectedDeviceId, setSelectedDeviceId } = useSelectedPairing();
   const [list, setList] = useState<ApiReminder[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [selected, setSelected] = useState<(typeof presets)[number]["label"]>("Wake Up");
+  const [selectedPreset, setSelectedPreset] = useState<(typeof presets)[number]["label"]>("Wake Up");
   const [name, setName] = useState("");
   const [time, setTime] = useState("07:00");
   const [picked, setPicked] = useState<number[]>([1, 2, 3, 4, 5]);
-
-  useEffect(() => {
-    setPairing(loadPairing());
-  }, []);
 
   useEffect(() => {
     if (!pairing) return;
@@ -95,7 +91,7 @@ export function RemindersScreen() {
     setSaving(true);
     try {
       const created = await createReminder(pairing, {
-        label: name || selected,
+        label: name || selectedPreset,
         time,
         days_of_week: [...picked].sort((a, b) => a - b),
         active: true,
@@ -161,14 +157,14 @@ export function RemindersScreen() {
                 <button
                   key={label}
                   onClick={() => {
-                    setSelected(label);
+                    setSelectedPreset(label);
                     setName(label);
                   }}
                   className={`p-2 rounded-2xl border flex flex-col items-center gap-1 ${
-                    selected === label ? "border-primary bg-primary/10" : "border-border"
+                    selectedPreset === label ? "border-primary bg-primary/10" : "border-border"
                   }`}
                 >
-                  <Icon className={`size-4 ${selected === label ? "text-primary" : "text-muted-foreground"}`} />
+                  <Icon className={`size-4 ${selectedPreset === label ? "text-primary" : "text-muted-foreground"}`} />
                   <span className="text-[10px] font-medium">{label}</span>
                 </button>
               ))}
@@ -215,13 +211,17 @@ export function RemindersScreen() {
       </Modal>
 
       <div className="flex-1 overflow-y-auto px-5 py-5 space-y-3">
+        {pairings && pairings.length > 1 && (
+          <DeviceSwitcher pairings={pairings} selectedDeviceId={selectedDeviceId} onChange={setSelectedDeviceId} />
+        )}
+
         <div className="rounded-3xl soft-gradient p-5 border">
           <p className="text-xs font-semibold text-primary uppercase">Today</p>
           <h2 className="text-xl font-bold mt-1">{list.filter((r) => r.active).length} active reminders</h2>
           <p className="text-xs text-muted-foreground mt-1">Keeping your child on track all day.</p>
         </div>
 
-        {pairing === null && (
+        {pairings && pairings.length === 0 && (
           <p className="text-sm text-muted-foreground text-center py-6">
             Pair with your child's Monto box to manage reminders.
           </p>

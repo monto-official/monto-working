@@ -13,7 +13,7 @@ import { ChildAvatar } from "@/components/ChildAvatar";
 import { Input } from "@/components/ui/input";
 import { loadChildProfile, DEFAULT_CHILD } from "@/lib/profile-storage";
 import { useRemoteControls } from "@/hooks/useRemoteControls";
-import { loadPairing, type PairingData } from "@/lib/pairing-storage";
+import { loadPairings, type PairingData } from "@/lib/pairing-storage";
 import { getQuestions, getWeeklyUsage, type Question, type WeeklyUsageDay } from "@/lib/api-client";
 import { formatQuestionStamp } from "@/lib/utils";
 import type { ChildProfile } from "@/types";
@@ -33,47 +33,13 @@ export default function Dashboard() {
   const [child, setChild] = useState<ChildProfile>(DEFAULT_CHILD);
   const controls = useRemoteControls();
 
-  // undefined = pairing not checked yet, null = checked and none saved
-  const [pairing, setPairing] = useState<PairingData | null | undefined>(undefined);
-  const [usage, setUsage] = useState<WeeklyUsageDay[]>([]);
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [search, setSearch] = useState("");
+  // undefined = pairings not checked yet
+  const [pairings, setPairings] = useState<PairingData[] | undefined>(undefined);
 
   useEffect(() => {
     setChild(loadChildProfile());
-    setPairing(loadPairing());
+    setPairings(loadPairings());
   }, []);
-
-  useEffect(() => {
-    if (!pairing) return;
-    let active = true;
-
-    getWeeklyUsage(pairing)
-      .then((data) => {
-        if (active) setUsage(data);
-      })
-      .catch(() => {});
-
-    getQuestions(pairing)
-      .then((data) => {
-        if (active) setQuestions(data.questions);
-      })
-      .catch(() => {});
-
-    return () => {
-      active = false;
-    };
-  }, [pairing]);
-
-  const total = usage.reduce((s, d) => s + d.hours, 0);
-  const avg = usage.length ? total / usage.length : 0;
-  const childLabel = [child.age && `Age ${child.age}`, child.grade].filter(Boolean).join(" • ");
-
-  const filteredQuestions = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const matched = q ? questions.filter((item) => item.question.toLowerCase().includes(q)) : questions;
-    return matched.slice(0, 5);
-  }, [questions, search]);
 
   return (
     <PhoneShell>
@@ -88,9 +54,6 @@ export default function Dashboard() {
       </header>
 
       <div className="flex-1 overflow-y-auto px-5 pb-6 space-y-5">
-        {/* Child status card */}
-        <div className="rounded-3xl brand-gradient text-white p-5 shadow-elevated relative overflow-hidden">
-          <div className="absolute -right-8 -top-8 size-32 rounded-full bg-white/10 blur-2xl" />
         {(controls?.admin_notice || controls?.maintenance_mode) && (
           <div className="rounded-2xl border border-amber-300 bg-amber-50 p-3 text-center text-xs font-semibold text-amber-800">
             {controls.admin_notice || "Monto is currently under maintenance."}
@@ -98,111 +61,20 @@ export default function Dashboard() {
           </div>
         )}
 
-          <div className="flex items-center gap-3 relative">
-            <div className="size-14 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center text-2xl overflow-hidden">
-              <ChildAvatar child={child} />
-            </div>
-            <div className="flex-1">
-              <p className="text-xs opacity-80">Active now</p>
-              <h2 className="text-lg font-bold leading-tight">{child.name || "Add your child's name"}</h2>
-              <p className="text-xs opacity-90">{childLabel || "Set up in Profile"}</p>
-            </div>
-          </div>
-          <div className="mt-4 grid grid-cols-3 gap-2 relative">
-            <Stat icon={Battery} label="Battery" value="82%" />
-            <Stat icon={Clock} label="Time" value="4:42 PM" />
-            <Stat icon={MapPin} label="Home" value="Living Rm" />
-          </div>
-        </div>
-
-        {/* Usage analytics */}
-        <Card>
-          <div className="flex items-center justify-between mb-1">
-            <div>
-              <h3 className="font-bold">AI Box Usage</h3>
-              <p className="text-xs text-muted-foreground">This week</p>
-            </div>
-            {usage.length > 0 && (
-              <span className="text-xs font-semibold text-success flex items-center gap-1">
-                <TrendingUp className="size-3" /> +12%
-              </span>
-            )}
-          </div>
-
-          {pairing === null ? (
+        {pairings === undefined ? null : pairings.length === 0 ? (
+          <Card>
             <NotPaired />
-          ) : usage.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-6 text-center">
-              {pairing === undefined ? "Loading…" : "No usage data yet."}
-            </p>
-          ) : (
-            <>
-              <div className="h-40 -mx-2 mt-3">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={usage} barCategoryGap={10}>
-                    <defs>
-                      <linearGradient id="barFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="oklch(0.55 0.24 295)" />
-                        <stop offset="100%" stopColor="oklch(0.55 0.21 263)" />
-                      </linearGradient>
-                    </defs>
-                    <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "oklch(0.5 0.03 260)" }} />
-                    <Tooltip cursor={{ fill: "oklch(0.55 0.21 263 / 0.08)" }} contentStyle={{ borderRadius: 12, border: "none", boxShadow: "0 4px 24px rgba(0,0,0,0.1)", fontSize: 12 }} />
-                    <Bar dataKey="hours" fill="url(#barFill)" radius={[8, 8, 4, 4]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="grid grid-cols-2 gap-3 mt-2">
-                <Mini label="Weekly total" value={`${total.toFixed(1)} h`} />
-                <Mini label="Daily avg" value={`${avg.toFixed(1)} h`} />
-              </div>
-            </>
-          )}
-        </Card>
-
-        {/* Questions */}
-        <Card>
-          <div className="flex items-center justify-between">
-            <h3 className="font-bold">Questions Asked</h3>
-            <Link href="/questions" className="text-xs text-primary font-semibold">View all</Link>
-          </div>
-          <div className="relative mt-3">
-            <Search className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
-            <Input
-              placeholder="Search questions…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 h-10 rounded-xl bg-muted border-0"
+          </Card>
+        ) : (
+          pairings.map((pairing, i) => (
+            <DeviceSection
+              key={pairing.deviceId}
+              pairing={pairing}
+              child={child}
+              label={pairings.length > 1 ? `Monto Box ${i + 1}` : undefined}
             />
-          </div>
-
-          {pairing === null ? (
-            <NotPaired />
-          ) : (
-            <ul className="mt-3 space-y-2">
-              {filteredQuestions.length === 0 && (
-                <li className="text-sm text-muted-foreground py-4 text-center">
-                  {pairing === undefined ? "Loading…" : search ? "No matching questions." : "No questions yet."}
-                </li>
-              )}
-              {filteredQuestions.map((q) => {
-                const { date, time } = formatQuestionStamp(q.timestamp);
-                return (
-                  <li key={q.id} className="flex items-start gap-3 p-3 rounded-2xl bg-muted/50 hover:bg-muted transition">
-                    <div className="size-9 rounded-xl bg-card flex items-center justify-center shrink-0 shadow-card">
-                      <MessageCircleQuestion className="size-4 text-secondary" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium leading-snug">{q.question}</p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">{date} • {time}</p>
-                    </div>
-                    <ChevronRight className="size-4 text-muted-foreground mt-2" />
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </Card>
+          ))
+        )}
 
         {/* Quick actions */}
         <div>
@@ -226,6 +98,158 @@ export default function Dashboard() {
       <BottomNav />
     </PhoneShell>
   );
+}
+
+/** One paired box's status + usage + questions — the dashboard renders one
+ * of these per entry in `pairings`, stacked in a list. */
+function DeviceSection({ pairing, child, label }: { pairing: PairingData; child: ChildProfile; label?: string }) {
+  const [usage, setUsage] = useState<WeeklyUsageDay[]>([]);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [search, setSearch] = useState("");
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    getWeeklyUsage(pairing)
+      .then((data) => {
+        if (active) setUsage(data);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setLoaded(true);
+      });
+
+    getQuestions(pairing)
+      .then((data) => {
+        if (active) setQuestions(data.questions);
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+    };
+  }, [pairing]);
+
+  const total = usage.reduce((s, d) => s + d.hours, 0);
+  const avg = usage.length ? total / usage.length : 0;
+
+  const filteredQuestions = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const matched = q ? questions.filter((item) => item.question.toLowerCase().includes(q)) : questions;
+    return matched.slice(0, 5);
+  }, [questions, search]);
+
+  return (
+    <div className="space-y-5">
+      {/* Child status card */}
+      <div className="rounded-3xl brand-gradient text-white p-5 shadow-elevated relative overflow-hidden">
+        <div className="absolute -right-8 -top-8 size-32 rounded-full bg-white/10 blur-2xl" />
+        <div className="flex items-center gap-3 relative">
+          <div className="size-14 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center text-2xl overflow-hidden">
+            <ChildAvatar child={child} />
+          </div>
+          <div className="flex-1">
+            <p className="text-xs opacity-80">{label ?? "Active now"}</p>
+            <h2 className="text-lg font-bold leading-tight">{child.name || "Add your child's name"}</h2>
+            <p className="text-xs opacity-90">{childLabelFor(child) || "Set up in Profile"}</p>
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-3 gap-2 relative">
+          <Stat icon={Battery} label="Battery" value="82%" />
+          <Stat icon={Clock} label="Time" value="4:42 PM" />
+          <Stat icon={MapPin} label="Home" value="Living Rm" />
+        </div>
+      </div>
+
+      {/* Usage analytics */}
+      <Card>
+        <div className="flex items-center justify-between mb-1">
+          <div>
+            <h3 className="font-bold">AI Box Usage</h3>
+            <p className="text-xs text-muted-foreground">This week</p>
+          </div>
+          {usage.length > 0 && (
+            <span className="text-xs font-semibold text-success flex items-center gap-1">
+              <TrendingUp className="size-3" /> +12%
+            </span>
+          )}
+        </div>
+
+        {usage.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-6 text-center">
+            {loaded ? "No usage data yet." : "Loading…"}
+          </p>
+        ) : (
+          <>
+            <div className="h-40 -mx-2 mt-3">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={usage} barCategoryGap={10}>
+                  <defs>
+                    <linearGradient id="barFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="oklch(0.55 0.24 295)" />
+                      <stop offset="100%" stopColor="oklch(0.55 0.21 263)" />
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "oklch(0.5 0.03 260)" }} />
+                  <Tooltip cursor={{ fill: "oklch(0.55 0.21 263 / 0.08)" }} contentStyle={{ borderRadius: 12, border: "none", boxShadow: "0 4px 24px rgba(0,0,0,0.1)", fontSize: 12 }} />
+                  <Bar dataKey="hours" fill="url(#barFill)" radius={[8, 8, 4, 4]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="grid grid-cols-2 gap-3 mt-2">
+              <Mini label="Weekly total" value={`${total.toFixed(1)} h`} />
+              <Mini label="Daily avg" value={`${avg.toFixed(1)} h`} />
+            </div>
+          </>
+        )}
+      </Card>
+
+      {/* Questions */}
+      <Card>
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold">Questions Asked</h3>
+          <Link href="/questions" className="text-xs text-primary font-semibold">View all</Link>
+        </div>
+        <div className="relative mt-3">
+          <Search className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+          <Input
+            placeholder="Search questions…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9 h-10 rounded-xl bg-muted border-0"
+          />
+        </div>
+
+        <ul className="mt-3 space-y-2">
+          {filteredQuestions.length === 0 && (
+            <li className="text-sm text-muted-foreground py-4 text-center">
+              {!loaded ? "Loading…" : search ? "No matching questions." : "No questions yet."}
+            </li>
+          )}
+          {filteredQuestions.map((q) => {
+            const { date, time } = formatQuestionStamp(q.timestamp);
+            return (
+              <li key={q.id} className="flex items-start gap-3 p-3 rounded-2xl bg-muted/50 hover:bg-muted transition">
+                <div className="size-9 rounded-xl bg-card flex items-center justify-center shrink-0 shadow-card">
+                  <MessageCircleQuestion className="size-4 text-secondary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium leading-snug">{q.question}</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">{date} • {time}</p>
+                </div>
+                <ChevronRight className="size-4 text-muted-foreground mt-2" />
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
+    </div>
+  );
+}
+
+function childLabelFor(child: ChildProfile): string {
+  return [child.age && `Age ${child.age}`, child.grade].filter(Boolean).join(" • ");
 }
 
 function Card({ children }: { children: React.ReactNode }) {

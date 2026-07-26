@@ -1,7 +1,8 @@
 import { getOrCreateParentDeviceId } from "./device-id";
 import { sendFirebaseSignal } from "./firebase-signaling";
 
-const STORAGE_KEY = "monto_pairing";
+const STORAGE_KEY = "monto_pairings";
+const LEGACY_STORAGE_KEY = "monto_pairing";
 const PUBLIC_API_URL = process.env.NEXT_PUBLIC_MONTO_API_URL?.replace(/\/$/, "");
 
 function reachableApiUrl(savedUrl: string): string {
@@ -25,27 +26,54 @@ export interface PairingData {
   turnPassword?: string;
 }
 
-export function loadPairing(): PairingData | null {
-  if (typeof window === "undefined") return null;
+function isValidPairing(data: any): data is PairingData {
+  return typeof data?.deviceId === "string" && typeof data?.apiUrl === "string";
+}
+
+function writePairings(pairings: PairingData[]): void {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(pairings));
+}
+
+/** Every Monto box currently paired with this parent account. A parent can
+ * pair with any number of boxes — each entry is independent. Migrates the
+ * old single-pairing storage (one box only) into this list, once, the first
+ * time it's read after upgrading. */
+export function loadPairings(): PairingData[] {
+  if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (typeof data?.deviceId !== "string" || typeof data?.apiUrl !== "string") return null;
-    return { ...data, apiUrl: reachableApiUrl(data.apiUrl) };
+    if (raw) {
+      const data = JSON.parse(raw);
+      if (!Array.isArray(data)) return [];
+      return data.filter(isValidPairing).map((p) => ({ ...p, apiUrl: reachableApiUrl(p.apiUrl) }));
+    }
+
+    const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacyRaw) {
+      const legacy = JSON.parse(legacyRaw);
+      if (isValidPairing(legacy)) {
+        writePairings([legacy]);
+        return [{ ...legacy, apiUrl: reachableApiUrl(legacy.apiUrl) }];
+      }
+    }
+    return [];
   } catch {
-    return null;
+    return [];
   }
 }
 
-export function savePairing(data: PairingData): void {
+/** Adds a newly-paired box, or replaces the existing entry if this box was
+ * already paired (re-scanning the same code). */
+export function addPairing(data: PairingData): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  const existing = loadPairings().filter((p) => p.deviceId !== data.deviceId);
+  writePairings([...existing, data]);
 }
 
-export function clearPairing(): void {
+/** Unpairs one box, leaving any others untouched. */
+export function removePairing(deviceId: string): void {
   if (typeof window === "undefined") return;
-  localStorage.removeItem(STORAGE_KEY);
+  writePairings(loadPairings().filter((p) => p.deviceId !== deviceId));
 }
 
 /** Parses a legacy v1 QR payload (credentials embedded directly, no backend

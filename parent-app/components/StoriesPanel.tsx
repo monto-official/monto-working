@@ -12,21 +12,22 @@ import { Play, Pause, Square, BookOpen } from "lucide-react";
 import { PhoneShell } from "@/components/PhoneShell";
 import { PageHeader } from "@/components/AppHeader";
 import { BottomNav } from "@/components/BottomNav";
-import { loadPairing, type PairingData } from "@/lib/pairing-storage";
-import { useDeviceChannel } from "@/hooks/useDeviceChannel";
+import { loadPairings, type PairingData } from "@/lib/pairing-storage";
+import { useDeviceChannels } from "@/hooks/useDeviceChannels";
 import { STORIES } from "@/lib/stories";
 
 const LANG_LABEL: Record<string, string> = { ne: "Nepali", hi: "Hindi", en: "English" };
 
 export function StoriesPanel() {
-  // undefined = pairing not checked yet, null = checked and none saved
-  const [pairing, setPairing] = useState<PairingData | null | undefined>(undefined);
+  // undefined = pairings not checked yet
+  const [pairings, setPairings] = useState<PairingData[] | undefined>(undefined);
 
   useEffect(() => {
-    setPairing(loadPairing());
+    setPairings(loadPairings());
   }, []);
 
-  const { send, lastMessage, online } = useDeviceChannel(pairing);
+  const { sendAll: send, lastMessage, anyOnline: online } = useDeviceChannels(pairings ?? []);
+  const paired = Boolean(pairings && pairings.length > 0);
 
   const [activeStoryId, setActiveStoryId] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -64,15 +65,15 @@ export function StoriesPanel() {
       <div className="flex-1 overflow-y-auto px-5 py-4 pb-44">
         <p className="text-sm text-muted-foreground -mt-1 mb-3">Choose a story to play on the AI Box.</p>
 
-        {pairing === null && (
+        {pairings !== undefined && !paired && (
           <div className="rounded-2xl bg-muted/50 p-4 text-sm text-muted-foreground mb-3">
             Pair with your child's Monto box from the{" "}
             <Link href="/call" className="text-primary font-semibold">Call screen</Link> to control stories.
           </div>
         )}
-        {pairing && !online && (
+        {paired && !online && (
           <div className="rounded-2xl bg-warning/15 text-warning-foreground p-3 text-xs font-semibold mb-3 text-center">
-            Box is offline — commands won't reach the AI Box right now.
+            No paired box is online — commands won't reach the AI Box right now.
           </div>
         )}
 

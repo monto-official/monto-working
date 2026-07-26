@@ -6,7 +6,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LogOut, Trash2, Shield } from "lucide-react";
+import { LogOut, Trash2, Shield, Plus, Unlink } from "lucide-react";
 import { toast } from "sonner";
 import { PhoneShell } from "@/components/PhoneShell";
 import { PageHeader } from "@/components/AppHeader";
@@ -21,8 +21,11 @@ import {
   loadChildProfile, saveChildProfile,
   loadParentAccount, saveParentAccount,
 } from "@/lib/profile-storage";
+import { loadPairings, removePairing, type PairingData } from "@/lib/pairing-storage";
+import { getOrCreateParentDeviceId } from "@/lib/device-id";
 import { clearAuthSession } from "@/lib/auth-storage";
 import { ChildAvatar } from "@/components/ChildAvatar";
+import { PairingFlow } from "@/components/PairingFlow";
 import type { ChildProfile, ParentAccount } from "@/types";
 
 const AVATAR_OPTIONS = ["🧒", "👦", "👧", "👶", "🦊", "🐻", "🐰", "🌟"];
@@ -33,10 +36,28 @@ export function ProfilePanel() {
   const [child, setChild] = useState<ChildProfile>(DEFAULT_CHILD);
   const [parent, setParent] = useState<ParentAccount>(DEFAULT_PARENT);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [pairings, setPairings] = useState<PairingData[]>([]);
+  const [addingDevice, setAddingDevice] = useState(false);
+  const [unpairing, setUnpairing] = useState<PairingData | null>(null);
 
   useEffect(() => {
     setChild(loadChildProfile());
     setParent(loadParentAccount());
+    setPairings(loadPairings());
+  }, []);
+
+  const handleUnpair = useCallback(async (pairing: PairingData) => {
+    setUnpairing(null);
+    try {
+      await fetch(`${pairing.apiUrl}/pairing/${encodeURIComponent(pairing.deviceId)}/${encodeURIComponent(getOrCreateParentDeviceId())}`, {
+        method: "DELETE",
+      });
+    } catch {
+      // Best-effort on the backend — remove it locally either way.
+    }
+    removePairing(pairing.deviceId);
+    setPairings((prev) => prev.filter((p) => p.deviceId !== pairing.deviceId));
+    toast.success("Unpaired from that Monto box.");
   }, []);
 
   const handleSaveChild = useCallback(() => {
@@ -72,6 +93,32 @@ export function ProfilePanel() {
             {[child.age && `Age ${child.age}`, child.grade].filter(Boolean).join(" • ") || "Fill in the details below"}
           </p>
         </div>
+
+        <Section title="Paired Monto Boxes">
+          {pairings.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No boxes paired yet.</p>
+          ) : (
+            <ul className="space-y-2">
+              {pairings.map((pairing, i) => (
+                <li key={pairing.deviceId} className="flex items-center gap-3 p-3 rounded-2xl bg-muted/50">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold">Monto Box {i + 1}</p>
+                  </div>
+                  <button
+                    onClick={() => setUnpairing(pairing)}
+                    aria-label="Unpair this Monto box"
+                    className="size-9 rounded-full hover:bg-muted flex items-center justify-center"
+                  >
+                    <Unlink className="size-4 text-muted-foreground" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <Button variant="outline" onClick={() => setAddingDevice(true)} className="w-full h-11 rounded-2xl">
+            <Plus className="size-4" /> Add another Monto box
+          </Button>
+        </Section>
 
         <Section title="Child Information">
           <div className="flex flex-wrap gap-2">
@@ -190,6 +237,34 @@ export function ProfilePanel() {
           </Button>
           <Button variant="destructive" onClick={handleDelete} className="flex-1 h-11 rounded-2xl">
             Clear Data
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal open={addingDevice} onClose={() => setAddingDevice(false)}>
+        <h2 className="text-lg font-bold mb-1">Pair another Monto box</h2>
+        <p className="text-sm text-muted-foreground mb-4">
+          Scan the QR code shown on the new box, or enter its code below.
+        </p>
+        <PairingFlow
+          onPaired={(data) => {
+            setPairings((prev) => [...prev.filter((p) => p.deviceId !== data.deviceId), data]);
+            setAddingDevice(false);
+          }}
+        />
+      </Modal>
+
+      <Modal open={unpairing !== null} onClose={() => setUnpairing(null)}>
+        <h2 className="text-lg font-bold">Unpair this Monto box?</h2>
+        <p className="text-sm text-muted-foreground mt-2">
+          You&apos;ll stop receiving calls and messages from it. You can pair with it again later.
+        </p>
+        <div className="flex gap-3 mt-6">
+          <Button variant="outline" onClick={() => setUnpairing(null)} className="flex-1 h-11 rounded-2xl">
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={() => unpairing && handleUnpair(unpairing)} className="flex-1 h-11 rounded-2xl">
+            Unpair
           </Button>
         </div>
       </Modal>

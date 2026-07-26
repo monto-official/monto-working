@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { loadPairing } from "@/lib/pairing-storage";
+import { loadPairings } from "@/lib/pairing-storage";
 
 export type RemoteControls = {
   maintenance_mode: boolean; calls_enabled: boolean; admin_notice: string;
@@ -15,7 +15,7 @@ export function useRemoteControls() {
   useEffect(() => {
     let active = true;
     const sync = async () => {
-      const api = loadPairing()?.apiUrl || process.env.NEXT_PUBLIC_MONTO_API_URL || "http://localhost:8000";
+      const api = loadPairings()[0]?.apiUrl || process.env.NEXT_PUBLIC_MONTO_API_URL || "http://localhost:8000";
       try {
         const response = await fetch(`${api}/controls`, { cache: "no-store" });
         const next: Document = await response.json();

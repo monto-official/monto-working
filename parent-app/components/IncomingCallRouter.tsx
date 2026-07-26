@@ -2,10 +2,15 @@
 
 import { useEffect, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { createFirebaseSignaling, isFirebaseSignalingConfigured } from "@/lib/firebase-signaling";
-import { loadPairing } from "@/lib/pairing-storage";
+import { loadPairings } from "@/lib/pairing-storage";
+import { getActiveCallDevice, setActiveCallDevice } from "@/lib/call-state";
 
-/** Opens the call screen when the child calls while the parent uses any page. */
+/** Opens the call screen when a paired child device calls while the parent
+ * uses any page. Listens across every paired box at once — if one is
+ * already mid-call when another rings, the first keeps priority and the
+ * second just gets a toast (busy), rather than yanking the parent away. */
 export function IncomingCallRouter() {
   const pathname = usePathname();
   const router = useRouter();
@@ -17,32 +22,42 @@ export function IncomingCallRouter() {
       return;
     }
 
-    const pairing = loadPairing();
-    if (!pairing) return;
+    const pairings = loadPairings();
+    if (pairings.length === 0) return;
 
     let stopped = false;
-    let closeChannel: (() => void) | undefined;
+    const closers: Array<() => void> = [];
 
-    void createFirebaseSignaling({
-      room: pairing.deviceId,
-      role: "parent",
-      onSignal: (type) => {
-        if (type !== "ring" || stopped || navigatingRef.current) return;
-        navigatingRef.current = true;
-        router.push("/call");
-      },
-      onPeerOnline: () => {},
-    }).then((channel) => {
-      if (stopped) channel.close();
-      else closeChannel = channel.close;
-    }).catch(() => {
-      // The /call page retains the HTTP fallback; this convenience listener
-      // requires Firebase and must never make the rest of the app fail.
-    });
+    for (const pairing of pairings) {
+      void createFirebaseSignaling({
+        room: pairing.deviceId,
+        role: "parent",
+        onSignal: (type) => {
+          if (type !== "ring" || stopped || navigatingRef.current) return;
+
+          const busyWith = getActiveCallDevice();
+          if (busyWith && busyWith !== pairing.deviceId) {
+            toast.error("Another Monto box is calling too — finish this call first.");
+            return;
+          }
+
+          navigatingRef.current = true;
+          setActiveCallDevice(pairing.deviceId);
+          router.push("/call");
+        },
+        onPeerOnline: () => {},
+      }).then((channel) => {
+        if (stopped) channel.close();
+        else closers.push(channel.close);
+      }).catch(() => {
+        // The /call page retains the HTTP fallback; this convenience listener
+        // requires Firebase and must never make the rest of the app fail.
+      });
+    }
 
     return () => {
       stopped = true;
-      closeChannel?.();
+      for (const close of closers) close();
     };
   }, [pathname, router]);
 

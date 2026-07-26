@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/AppHeader";
 import { BottomNav } from "@/components/BottomNav";
 import { Button } from "@/components/ui/button";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
-import { loadPairing, type PairingData } from "@/lib/pairing-storage";
+import { loadPairings, type PairingData } from "@/lib/pairing-storage";
 import { sendFirebaseSignal } from "@/lib/firebase-signaling";
 import {
   listVoiceMessages,
@@ -22,9 +22,21 @@ function formatTime(iso: string): string {
   });
 }
 
+/** A voice message tagged with which paired box it came from/went to —
+ * needed once there's more than one box, since each has its own message
+ * history and its own audio URL. */
+interface Entry {
+  pairing: PairingData;
+  message: VoiceMessage;
+}
+
+function mergeSorted(entries: Entry[]): Entry[] {
+  return [...entries].sort((a, b) => b.message.created_at.localeCompare(a.message.created_at));
+}
+
 export function VoiceMessagesScreen() {
-  const [pairing, setPairing] = useState<PairingData | null | undefined>(undefined);
-  const [list, setList] = useState<VoiceMessage[]>([]);
+  const [pairings, setPairings] = useState<PairingData[] | undefined>(undefined);
+  const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
@@ -35,45 +47,49 @@ export function VoiceMessagesScreen() {
   const busyRef = useRef(false);
 
   useEffect(() => {
-    setPairing(loadPairing());
+    setPairings(loadPairings());
   }, []);
 
+  const refresh = async (list: PairingData[]) => {
+    const results = await Promise.all(
+      list.map((pairing) =>
+        listVoiceMessages(pairing)
+          .then((messages) => messages.map((message): Entry => ({ pairing, message })))
+          .catch(() => [] as Entry[])
+      )
+    );
+    setEntries(mergeSorted(results.flat()));
+  };
+
   useEffect(() => {
-    if (!pairing) return;
+    if (!pairings || pairings.length === 0) return;
     let active = true;
     setLoading(true);
-    listVoiceMessages(pairing)
-      .then((data) => {
-        if (active) setList(data);
-      })
-      .catch((err) => {
-        if (active) toast.error(err instanceof Error ? err.message : "Couldn't load voice messages");
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    refresh(pairings).finally(() => {
+      if (active) setLoading(false);
+    });
     return () => {
       active = false;
     };
-  }, [pairing]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pairings]);
 
   useEffect(() => {
     if (recorder.error) toast.error(recorder.error);
   }, [recorder.error]);
 
   useEffect(() => {
-    if (!pairing) return;
-    const refresh = () => {
-      void listVoiceMessages(pairing).then(setList).catch(() => {});
-    };
-    const timer = window.setInterval(refresh, 10000);
-    const onVisibility = () => { if (document.visibilityState === "visible") refresh(); };
+    if (!pairings || pairings.length === 0) return;
+    const tick = () => { void refresh(pairings); };
+    const timer = window.setInterval(tick, 10000);
+    const onVisibility = () => { if (document.visibilityState === "visible") tick(); };
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [pairing]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pairings]);
 
   useEffect(() => () => {
     audioRef.current?.pause();
@@ -82,7 +98,7 @@ export function VoiceMessagesScreen() {
 
   const handleRecordTap = async () => {
     if (busyRef.current) return;
-    if (!pairing) {
+    if (!pairings || pairings.length === 0) {
       toast.error("Pair with your child's Monto box first.");
       return;
     }
@@ -93,14 +109,27 @@ export function VoiceMessagesScreen() {
       if (!blob || blob.size < 800) return;
       setSending(true);
       try {
-        const created = await sendVoiceMessage(pairing, blob, Math.min(30000, performance.now() - startedAtRef.current));
-        setList((l) => [created, ...l]);
-        void sendFirebaseSignal(`${pairing.deviceId}:control`, "parent", "voice-message", {
-          id: created.id, senderRole: "parent",
-        }).catch(() => {});
-        toast.success("Voice message sent!");
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Couldn't send voice message");
+        const durationMs = Math.min(30000, performance.now() - startedAtRef.current);
+        // One recording, sent to every paired box.
+        const results = await Promise.allSettled(
+          pairings.map(async (pairing) => {
+            const created = await sendVoiceMessage(pairing, blob, durationMs);
+            void sendFirebaseSignal(`${pairing.deviceId}:control`, "parent", "voice-message", {
+              id: created.id, senderRole: "parent",
+            }).catch(() => {});
+            return { pairing, message: created };
+          })
+        );
+        const sent = results.filter((r): r is PromiseFulfilledResult<Entry> => r.status === "fulfilled").map((r) => r.value);
+        if (sent.length > 0) {
+          setEntries((prev) => mergeSorted([...sent, ...prev]));
+          toast.success(
+            pairings.length > 1 ? `Voice message sent to ${sent.length} of ${pairings.length} boxes!` : "Voice message sent!"
+          );
+        }
+        if (sent.length < pairings.length) {
+          toast.error(`Couldn't reach ${pairings.length - sent.length} box(es) — they'll miss this message.`);
+        }
       } finally {
         setSending(false);
       }
@@ -113,23 +142,23 @@ export function VoiceMessagesScreen() {
     }
   };
 
-  const play = (messageId: string) => {
-    if (!pairing) return;
-    if (playingId === messageId) {
+  const play = (entry: Entry) => {
+    if (playingId === entry.message.id) {
       audioRef.current?.pause();
       setPlayingId(null);
       return;
     }
     audioRef.current?.pause();
-    const audio = new Audio(voiceMessageAudioUrl(pairing, messageId));
+    const audio = new Audio(voiceMessageAudioUrl(entry.pairing, entry.message.id));
     audioRef.current = audio;
     audio.onended = () => setPlayingId(null);
     audio.onerror = () => { setPlayingId(null); toast.error("Couldn't play voice message"); };
-    setPlayingId(messageId);
+    setPlayingId(entry.message.id);
     void audio.play().catch(() => setPlayingId(null));
   };
 
   const isRec = recorder.recordingState === "recording";
+  const paired = Boolean(pairings && pairings.length > 0);
 
   return (
     <PhoneShell>
@@ -147,35 +176,36 @@ export function VoiceMessagesScreen() {
           </Button>
           <p className="text-xs text-muted-foreground">
             {sending ? "Sending..." : isRec ? "Tap to send" : "Tap to record"}
+            {paired && pairings!.length > 1 && !isRec && !sending && " — goes to every paired box"}
           </p>
         </div>
 
-        {pairing === null && (
+        {!paired && (
           <p className="text-sm text-muted-foreground text-center py-6">
             Pair with your child's Monto box to send and receive voice messages.
           </p>
         )}
-        {pairing && loading && (
+        {paired && loading && (
           <p className="text-sm text-muted-foreground text-center py-6">Loading...</p>
         )}
-        {pairing && !loading && list.length === 0 && (
+        {paired && !loading && entries.length === 0 && (
           <p className="text-sm text-muted-foreground text-center py-6">No voice messages yet.</p>
         )}
 
-        {list.map((m) => (
-          <div key={m.id} className="rounded-3xl bg-card border p-4 shadow-card flex items-center gap-3">
-            <div className={`size-12 rounded-2xl flex items-center justify-center ${m.sender_role === "child" ? "brand-gradient text-white" : "bg-muted text-muted-foreground"}`}>
+        {entries.map((entry) => (
+          <div key={entry.message.id} className="rounded-3xl bg-card border p-4 shadow-card flex items-center gap-3">
+            <div className={`size-12 rounded-2xl flex items-center justify-center ${entry.message.sender_role === "child" ? "brand-gradient text-white" : "bg-muted text-muted-foreground"}`}>
               <Voicemail className="size-5" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="font-semibold text-sm">{m.sender_role === "child" ? "From your child" : "You sent"}</p>
-              <p className="text-xs text-muted-foreground">{formatTime(m.created_at)}</p>
+              <p className="font-semibold text-sm">{entry.message.sender_role === "child" ? "From your child" : "You sent"}</p>
+              <p className="text-xs text-muted-foreground">{formatTime(entry.message.created_at)}</p>
             </div>
             <button
-              onClick={() => play(m.id)}
+              onClick={() => play(entry)}
               className="size-10 rounded-full brand-gradient text-white flex items-center justify-center"
             >
-              {playingId === m.id ? <Pause className="size-4" /> : <Play className="size-4" />}
+              {playingId === entry.message.id ? <Pause className="size-4" /> : <Play className="size-4" />}
             </button>
           </div>
         ))}

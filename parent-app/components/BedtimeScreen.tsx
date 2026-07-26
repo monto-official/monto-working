@@ -9,21 +9,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { loadPairing, type PairingData } from "@/lib/pairing-storage";
+import { DeviceSwitcher } from "@/components/DeviceSwitcher";
+import { useSelectedPairing } from "@/hooks/useSelectedPairing";
 import { getBedtime, saveBedtime } from "@/lib/api-client";
 
 export function BedtimeScreen() {
-  // undefined = pairing not checked yet, null = checked and none saved
-  const [pairing, setPairing] = useState<PairingData | null | undefined>(undefined);
+  const { pairings, selected: pairing, selectedDeviceId, setSelectedDeviceId } = useSelectedPairing();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [startTime, setStartTime] = useState("21:00");
   const [endTime, setEndTime] = useState("07:00");
   const [enabled, setEnabled] = useState(true);
-
-  useEffect(() => {
-    setPairing(loadPairing());
-  }, []);
 
   useEffect(() => {
     if (!pairing) return;
@@ -68,6 +64,10 @@ export function BedtimeScreen() {
       <PageHeader title="Bedtime" />
 
       <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4">
+        {pairings && pairings.length > 1 && (
+          <DeviceSwitcher pairings={pairings} selectedDeviceId={selectedDeviceId} onChange={setSelectedDeviceId} />
+        )}
+
         <div className="rounded-3xl soft-gradient p-5 border">
           <p className="text-xs font-semibold text-primary uppercase">Schedule</p>
           <h2 className="text-xl font-bold mt-1">{enabled ? "Bedtime is on" : "Bedtime is off"}</h2>
@@ -76,7 +76,7 @@ export function BedtimeScreen() {
           </p>
         </div>
 
-        {pairing === null ? (
+        {pairings && pairings.length === 0 ? (
           <div className="py-10 text-center">
             <p className="text-sm text-muted-foreground">Pair with your child's Monto box to set a bedtime.</p>
             <Link href="/call" className="text-xs text-primary font-semibold mt-2 inline-block">Pair now</Link>

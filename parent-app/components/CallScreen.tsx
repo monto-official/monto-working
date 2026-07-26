@@ -1,28 +1,25 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PhoneOff, PhoneIncoming, PhoneCall, Mic, MicOff, Phone, Clock, QrCode, RefreshCw, CheckCircle2, ArrowUpRight, ArrowDownLeft } from "lucide-react";
+import { PhoneOff, PhoneIncoming, PhoneCall, Mic, MicOff, Clock, QrCode, Unlink, CheckCircle2, ArrowUpRight, ArrowDownLeft } from "lucide-react";
 import { toast } from "sonner";
 import { PhoneShell } from "@/components/PhoneShell";
 import { PageHeader } from "@/components/AppHeader";
 import { BottomNav } from "@/components/BottomNav";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useWebRTCCall } from "@/hooks/useWebRTCCall";
 import { useDeviceChannel } from "@/hooks/useDeviceChannel";
-import { loadChildProfile, saveChildProfile, DEFAULT_CHILD, loadParentAccount } from "@/lib/profile-storage";
+import { loadChildProfile, loadParentAccount, DEFAULT_CHILD } from "@/lib/profile-storage";
 import {
-  loadPairing,
-  savePairing,
-  clearPairing,
-  redeemPairingCode,
-  redeemManualPairingCode,
-  notifyChildPaired,
+  loadPairings,
+  removePairing,
   notifyChildIncomingCall,
   type PairingData,
 } from "@/lib/pairing-storage";
-import { PairingScanner } from "@/components/PairingScanner";
+import { getOrCreateParentDeviceId } from "@/lib/device-id";
+import { getActiveCallDevice, setActiveCallDevice, clearActiveCallDevice } from "@/lib/call-state";
+import { PairingFlow } from "@/components/PairingFlow";
+import { DeviceSwitcher } from "@/components/DeviceSwitcher";
 import { ChildAvatar } from "@/components/ChildAvatar";
 import type { ChildProfile } from "@/types";
 import { expandTurnUrls } from "@/lib/turn";
@@ -49,14 +46,21 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export function CallScreen() {
-  // undefined = pairing not checked yet, null = checked and none saved
-  const [pairing, setPairing] = useState<PairingData | null | undefined>(undefined);
+  // undefined = pairings not checked yet
+  const [pairings, setPairings] = useState<PairingData[] | undefined>(undefined);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
 
   useEffect(() => {
-    setPairing(loadPairing());
+    const loaded = loadPairings();
+    setPairings(loaded);
+    // If a call is already in flight (e.g. IncomingCallRouter sent us here
+    // for a ring), land on that device instead of always the first one.
+    const active = getActiveCallDevice();
+    const preselect = active && loaded.some((p) => p.deviceId === active) ? active : loaded[0]?.deviceId ?? null;
+    setSelectedDeviceId(preselect);
   }, []);
 
-  if (pairing === undefined) {
+  if (pairings === undefined) {
     return (
       <PhoneShell>
         <PageHeader title="Call Monto Box" />
@@ -68,16 +72,28 @@ export function CallScreen() {
     );
   }
 
-  if (pairing === null) {
-    return <PairingPrompt onPaired={setPairing} />;
+  if (pairings.length === 0) {
+    return (
+      <PairingPrompt
+        onPaired={(data) => {
+          setPairings([data]);
+          setSelectedDeviceId(data.deviceId);
+        }}
+      />
+    );
   }
+
+  const selected = pairings.find((p) => p.deviceId === selectedDeviceId) ?? pairings[0];
 
   return (
     <ActiveCallScreen
-      pairing={pairing}
-      onRepair={() => {
-        clearPairing();
-        setPairing(null);
+      pairing={selected}
+      pairings={pairings}
+      onSelectDevice={setSelectedDeviceId}
+      onUnpaired={() => {
+        const remaining = pairings.filter((p) => p.deviceId !== selected.deviceId);
+        setPairings(remaining);
+        setSelectedDeviceId(remaining[0]?.deviceId ?? null);
       }}
     />
   );
@@ -86,77 +102,6 @@ export function CallScreen() {
 // ── Not paired yet — scan the child device's QR code ─────────────────────────
 
 function PairingPrompt({ onPaired }: { onPaired: (data: PairingData) => void }) {
-  const [scanning, setScanning] = useState(false);
-  const [scanError, setScanError] = useState<string | null>(null);
-  const [redeeming, setRedeeming] = useState(false);
-  const [manualCode, setManualCode] = useState("");
-  // Set once a QR scan redeems successfully but the child's name hasn't been
-  // entered yet — holds the pairing data until the name modal is confirmed.
-  const [pendingPairing, setPendingPairing] = useState<PairingData | null>(null);
-  const [childName, setChildName] = useState("");
-
-  const finishPairing = useCallback(
-    (data: PairingData, name: string) => {
-      toast.success(`Pairing successful! You're connected to ${name}'s Monto box 🎉`);
-      notifyChildPaired(data, name);
-      onPaired(data);
-    },
-    [onPaired]
-  );
-
-  const handleDetected = useCallback(
-    async (raw: string) => {
-      setRedeeming(true);
-      setScanError(null);
-      try {
-        const data = await redeemPairingCode(raw);
-        savePairing(data);
-        setScanning(false);
-
-        const existing = loadChildProfile();
-        if (existing.name.trim()) {
-          finishPairing(data, existing.name.trim());
-        } else {
-          // Child's name is required before we show the paired dashboard.
-          setPendingPairing(data);
-        }
-      } catch (err) {
-        setScanError(err instanceof Error ? err.message : "Pairing failed — try again.");
-        setScanning(false);
-      } finally {
-        setRedeeming(false);
-      }
-    },
-    [finishPairing]
-  );
-
-  const handleManualCode = useCallback(async () => {
-    setRedeeming(true);
-    setScanError(null);
-    try {
-      const data = await redeemManualPairingCode(manualCode);
-      savePairing(data);
-      const existing = loadChildProfile();
-      if (existing.name.trim()) {
-        finishPairing(data, existing.name.trim());
-      } else {
-        setPendingPairing(data);
-      }
-    } catch (err) {
-      setScanError(err instanceof Error ? err.message : "Pairing failed — try again.");
-    } finally {
-      setRedeeming(false);
-    }
-  }, [manualCode, finishPairing]);
-  const handleConfirmChildName = useCallback(() => {
-    const name = childName.trim();
-    if (!name || !pendingPairing) return;
-    saveChildProfile({ ...DEFAULT_CHILD, name });
-    finishPairing(pendingPairing, name);
-    setPendingPairing(null);
-    setChildName("");
-  }, [childName, pendingPairing, finishPairing]);
-
   return (
     <PhoneShell>
       <PageHeader title="Call Monto Box" />
@@ -174,81 +119,10 @@ function PairingPrompt({ onPaired }: { onPaired: (data: PairingData) => void }) 
           </p>
         </div>
 
-        {scanError && <p className="text-sm text-red-500">{scanError}</p>}
-
-        <button
-          onClick={() => {
-            setScanError(null);
-            setScanning(true);
-          }}
-          disabled={redeeming}
-          className="h-12 px-6 rounded-2xl brand-gradient text-white font-semibold flex items-center gap-2 disabled:opacity-60"
-        >
-          <QrCode className="size-5" /> {redeeming ? "Pairing..." : "Scan QR Code"}
-        </button>
-
-        {/* Fallback when the camera can't scan the QR (bad lighting, a
-            screen that won't focus, no camera at all) — the child screen
-            shows this same 6-character code as plain text below its QR. */}
-        <div className="w-full max-w-xs flex items-center gap-3 text-xs text-muted-foreground">
-          <div className="flex-1 h-px bg-border" />
-          or enter the code
-          <div className="flex-1 h-px bg-border" />
-        </div>
-        <div className="w-full max-w-xs flex gap-2">
-          <Input
-            value={manualCode}
-            onChange={(e) => setManualCode(e.target.value.toUpperCase())}
-            onKeyDown={(e) => e.key === "Enter" && handleManualCode()}
-            placeholder="ABC123"
-            maxLength={6}
-            className="h-11 rounded-xl text-center tracking-[0.3em] font-bold uppercase"
-          />
-          <Button
-            onClick={handleManualCode}
-            disabled={redeeming || manualCode.trim().length !== 6}
-            className="h-11 rounded-xl px-5 disabled:opacity-60"
-          >
-            Pair
-          </Button>
-        </div>
+        <PairingFlow onPaired={onPaired} />
       </div>
 
       <BottomNav />
-
-      {scanning && (
-        <PairingScanner onDetected={handleDetected} onClose={() => setScanning(false)} />
-      )}
-
-      <Modal open={pendingPairing !== null} onClose={() => {}}>
-        <div className="flex flex-col items-center text-center gap-2 mb-4">
-          <CheckCircle2 className="size-10 text-green-500" />
-          <h2 className="text-lg font-bold">Pairing successful!</h2>
-          <p className="text-sm text-muted-foreground">
-            One last step — what's your child's name? It'll be shown across the app.
-          </p>
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-            Child's Name
-          </Label>
-          <Input
-            autoFocus
-            value={childName}
-            onChange={(e) => setChildName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleConfirmChildName()}
-            placeholder="e.g. Aarav Sharma"
-            className="h-11 rounded-xl"
-          />
-        </div>
-        <Button
-          onClick={handleConfirmChildName}
-          disabled={!childName.trim()}
-          className="w-full h-11 rounded-2xl mt-5 disabled:opacity-60"
-        >
-          Continue
-        </Button>
-      </Modal>
     </PhoneShell>
   );
 }
@@ -257,15 +131,20 @@ function PairingPrompt({ onPaired }: { onPaired: (data: PairingData) => void }) 
 
 function ActiveCallScreen({
   pairing,
-  onRepair,
+  pairings,
+  onSelectDevice,
+  onUnpaired,
 }: {
   pairing: PairingData;
-  onRepair: () => void;
+  pairings: PairingData[];
+  onSelectDevice: (deviceId: string) => void;
+  onUnpaired: () => void;
 }) {
   const { online: deviceOnline } = useDeviceChannel(pairing);
   const [child, setChild] = useState<ChildProfile>(DEFAULT_CHILD);
   const [callHistory, setCallHistory] = useState<CallHistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
+  const [confirmUnpair, setConfirmUnpair] = useState(false);
 
   const refreshHistory = useCallback(async () => {
     try {
@@ -373,6 +252,16 @@ function ActiveCallScreen({
     if (pendingRingTimeoutRef.current) clearTimeout(pendingRingTimeoutRef.current);
   }, []);
 
+  // Tracks which device's call is "busy" for IncomingCallRouter: any device
+  // whose call is ringing/connecting/active/being called out to holds the
+  // flag; releasing it as soon as the call is no longer in flight lets a
+  // ring from a *different* box through instead of being treated as busy.
+  useEffect(() => {
+    const inFlight = isIncoming || isConnecting || isActive || pendingRing;
+    if (inFlight) setActiveCallDevice(pairing.deviceId);
+    else clearActiveCallDevice(pairing.deviceId);
+  }, [isIncoming, isConnecting, isActive, pendingRing, pairing.deviceId]);
+
   const handleCallChild = useCallback(() => {
     if (!isReady || pendingRing) return;
     wakeChild();
@@ -389,18 +278,41 @@ function ActiveCallScreen({
     setPendingRing(false);
   }, []);
 
+  const canSwitchOrUnpair = !isIncoming && !isConnecting && !isActive && !pendingRing;
+
+  const handleUnpair = useCallback(async () => {
+    setConfirmUnpair(false);
+    try {
+      await fetch(`${pairing.apiUrl}/pairing/${encodeURIComponent(pairing.deviceId)}/${encodeURIComponent(getOrCreateParentDeviceId())}`, {
+        method: "DELETE",
+      });
+    } catch {
+      // Best-effort on the backend — remove it locally either way so the
+      // parent isn't stuck with a stale box they no longer have.
+    }
+    removePairing(pairing.deviceId);
+    toast.success("Unpaired from that Monto box.");
+    onUnpaired();
+  }, [pairing.apiUrl, pairing.deviceId, onUnpaired]);
+
   return (
     <PhoneShell>
       <PageHeader
         title="Call Monto Box"
         right={
-          <button onClick={onRepair} aria-label="Pair with a different Monto box">
-            <RefreshCw className="size-4 text-muted-foreground" />
-          </button>
+          canSwitchOrUnpair && (
+            <button onClick={() => setConfirmUnpair(true)} aria-label="Unpair this Monto box">
+              <Unlink className="size-4 text-muted-foreground" />
+            </button>
+          )
         }
       />
 
       <div className="flex-1 overflow-y-auto px-5 py-6 flex flex-col gap-6">
+
+        {canSwitchOrUnpair && (
+          <DeviceSwitcher pairings={pairings} selectedDeviceId={pairing.deviceId} onChange={onSelectDevice} />
+        )}
 
         {/* Status card */}
         <div className="rounded-3xl soft-gradient p-8 flex flex-col items-center text-center relative overflow-hidden">
@@ -511,7 +423,7 @@ function ActiveCallScreen({
               <p className="text-xs text-muted-foreground">Incoming, outgoing and missed calls</p>
             </div>
             <button onClick={() => void refreshHistory()} className="size-9 rounded-full bg-muted flex items-center justify-center" aria-label="Refresh call history">
-              <RefreshCw className="size-4" />
+              <Clock className="size-4" />
             </button>
           </div>
           <div className="divide-y max-h-72 overflow-y-auto">
@@ -552,9 +464,25 @@ function ActiveCallScreen({
         </div>
       </div>
 
+      <Modal open={confirmUnpair} onClose={() => setConfirmUnpair(false)}>
+        <div className="flex flex-col items-center text-center gap-2 mb-4">
+          <CheckCircle2 className="size-10 text-muted-foreground" />
+          <h2 className="text-lg font-bold">Unpair this Monto box?</h2>
+          <p className="text-sm text-muted-foreground">
+            You'll stop receiving calls and messages from it. You can pair with it again later.
+          </p>
+        </div>
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={() => setConfirmUnpair(false)} className="flex-1 h-11 rounded-2xl">
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={handleUnpair} className="flex-1 h-11 rounded-2xl">
+            Unpair
+          </Button>
+        </div>
+      </Modal>
+
       <BottomNav />
     </PhoneShell>
   );
 }
-
-
