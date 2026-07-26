@@ -1,9 +1,8 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { ArrowLeft, Calculator, ChevronRight, Hash, PawPrint, PenTool, Sparkles, X } from "lucide-react";
+import { ArrowLeft, Calculator, ChevronRight, Hash, PawPrint, PenTool, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { Monto3DAvatar } from "@/components/Monto3DAvatar";
 
 function playRoute(src: string, title: string) {
   return `/play?src=${encodeURIComponent(src)}&title=${encodeURIComponent(title)}`;
@@ -73,22 +72,8 @@ export default function GamesPage() {
           <button onClick={() => router.push("/")} className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/10 backdrop-blur transition hover:bg-white/20" aria-label="Close"><X /></button>
         </motion.header>
 
-        <section className="pt-4 pb-10 text-center sm:pb-14">
-          <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", bounce: .4 }} className="mx-auto -mb-2 h-40 w-40 sm:h-48 sm:w-48">
-            <Monto3DAvatar emotion="excited" size={192} />
-          </motion.div>
-          <motion.span
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: .1, duration: .4 }}
-            className="mx-auto flex w-fit items-center gap-1.5 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[.25em] text-white/55"
-          >
-            <Sparkles className="h-3 w-3 text-amber-300" /> Monto Games
-          </motion.span>
-          <h2 className="mt-2 text-3xl font-black sm:text-5xl">What should we play?</h2>
-          <p className="mx-auto mt-2 max-w-md text-base text-white/55">Pick a game and Monto will play along.</p>
-
-          <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <section className="pt-6 pb-10 sm:pb-14">
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {GAMES.map((game, index) => (
               <motion.button
                 key={game.route}
