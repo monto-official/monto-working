@@ -97,6 +97,15 @@ export function PairingQRModal({ onClose }: PairingQRModalProps) {
           <div className="w-[220px] h-[220px] mx-auto rounded-xl bg-black/5 animate-pulse" />
         )}
 
+        {pairingCode && (
+          <div className="mt-4">
+            <p className="text-black/40 text-[10px] uppercase tracking-widest font-bold">
+              Can't scan? Enter this code instead
+            </p>
+            <p className="mt-1 text-2xl font-black tracking-[0.3em] text-black">{pairingCode}</p>
+          </div>
+        )}
+
         <button
           onClick={onClose}
           className="mt-5 w-full h-11 rounded-2xl bg-black text-white font-semibold"

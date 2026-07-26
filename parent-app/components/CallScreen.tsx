@@ -186,6 +186,32 @@ function PairingPrompt({ onPaired }: { onPaired: (data: PairingData) => void }) 
         >
           <QrCode className="size-5" /> {redeeming ? "Pairing..." : "Scan QR Code"}
         </button>
+
+        {/* Fallback when the camera can't scan the QR (bad lighting, a
+            screen that won't focus, no camera at all) — the child screen
+            shows this same 6-character code as plain text below its QR. */}
+        <div className="w-full max-w-xs flex items-center gap-3 text-xs text-muted-foreground">
+          <div className="flex-1 h-px bg-border" />
+          or enter the code
+          <div className="flex-1 h-px bg-border" />
+        </div>
+        <div className="w-full max-w-xs flex gap-2">
+          <Input
+            value={manualCode}
+            onChange={(e) => setManualCode(e.target.value.toUpperCase())}
+            onKeyDown={(e) => e.key === "Enter" && handleManualCode()}
+            placeholder="ABC123"
+            maxLength={6}
+            className="h-11 rounded-xl text-center tracking-[0.3em] font-bold uppercase"
+          />
+          <Button
+            onClick={handleManualCode}
+            disabled={redeeming || manualCode.trim().length !== 6}
+            className="h-11 rounded-xl px-5 disabled:opacity-60"
+          >
+            Pair
+          </Button>
+        </div>
       </div>
 
       <BottomNav />
